@@ -158,7 +158,8 @@ const UserDashboard = () => {
 
   // Connect to Socket.IO for real-time market data (shared across components)
   useEffect(() => {
-    const socket = io('http://localhost:5001');
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5001';
+    const socket = io(socketUrl);
     
     socket.on('connect', () => {
       console.log('Socket.IO connected for real-time ticks');

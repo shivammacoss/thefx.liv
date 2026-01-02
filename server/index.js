@@ -21,11 +21,16 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO with production CORS
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? ['https://thefx.live', 'https://www.thefx.live']
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
@@ -45,8 +50,11 @@ io.on('connection', (socket) => {
 // Connect to MongoDB
 connectDB();
 
-// Middleware
-app.use(cors());
+// Middleware - CORS for production
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
