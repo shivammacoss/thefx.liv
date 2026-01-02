@@ -24,12 +24,18 @@ const chargesSchema = new mongoose.Schema({
   // For SEGMENT and INSTRUMENT scopes
   segment: {
     type: String,
-    enum: ['EQUITY', 'FNO', null],
+    enum: ['EQUITY', 'FNO', 'MCX', 'CRYPTO', 'CURRENCY', null],
     default: null
   },
   instrumentType: {
     type: String,
-    enum: ['STOCK', 'FUTURES', 'OPTIONS', null],
+    enum: ['STOCK', 'FUTURES', 'OPTIONS', 'CRYPTO', 'CURRENCY', 'INDEX', null],
+    default: null
+  },
+  
+  // Specific symbol/instrument (for fine-grained control)
+  symbol: {
+    type: String,
     default: null
   },
   
@@ -87,62 +93,77 @@ const chargesSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Static method: Get charges for a trade (hierarchical resolution)
+// Priority: USER > SYMBOL > INSTRUMENT > SEGMENT > ADMIN > GLOBAL
 chargesSchema.statics.getChargesForTrade = async function(trade, adminCode, userId) {
-  // Priority order: USER > INSTRUMENT > SEGMENT > ADMIN > GLOBAL
-  
-  // 1. Check user-specific charges
+  // 1. Check user-specific charges (highest priority)
   let charges = await this.findOne({ 
     scope: 'USER', 
     userId: userId,
     isActive: true 
-  });
+  }).lean();
   if (charges) return charges;
   
-  // 2. Check instrument-specific charges
+  // 2. Check symbol-specific charges (for specific instruments like NIFTY, BTC, etc.)
+  if (trade.symbol) {
+    charges = await this.findOne({ 
+      scope: 'INSTRUMENT',
+      adminCode: adminCode,
+      symbol: trade.symbol,
+      isActive: true 
+    }).lean();
+    if (charges) return charges;
+  }
+  
+  // 3. Check instrument type charges (FUTURES, OPTIONS, CRYPTO, etc.)
   charges = await this.findOne({ 
     scope: 'INSTRUMENT',
     adminCode: adminCode,
     segment: trade.segment,
     instrumentType: trade.instrumentType,
+    symbol: null,
     isActive: true 
-  });
+  }).lean();
   if (charges) return charges;
   
-  // 3. Check segment-specific charges
+  // 4. Check segment-specific charges (EQUITY, FNO, MCX, CRYPTO)
   charges = await this.findOne({ 
     scope: 'SEGMENT',
     adminCode: adminCode,
     segment: trade.segment,
     isActive: true 
-  });
+  }).lean();
   if (charges) return charges;
   
-  // 4. Check admin default charges
+  // 5. Check admin default charges
   charges = await this.findOne({ 
     scope: 'ADMIN',
     adminCode: adminCode,
     isActive: true 
-  });
+  }).lean();
   if (charges) return charges;
   
-  // 5. Fall back to global charges
+  // 6. Fall back to global charges
   charges = await this.findOne({ 
     scope: 'GLOBAL',
     isActive: true 
-  });
+  }).lean();
   
-  // If no charges found, return default
+  // If no charges found, return defaults based on segment
   if (!charges) {
+    const isCrypto = trade.segment === 'CRYPTO' || trade.isCrypto;
+    const isMCX = trade.segment === 'MCX';
+    
     charges = {
-      brokerage: { type: 'PER_LOT', value: 20 },
-      exchangeCharges: 0.00325,
-      gst: 18,
-      sebiCharges: 10,
-      stampDuty: 0.015,
+      brokerage: { type: 'PER_LOT', value: isCrypto ? 0 : (isMCX ? 20 : 20) },
+      exchangeCharges: isCrypto ? 0.1 : 0.00325, // Crypto: 0.1%, Others: 0.00325%
+      gst: isCrypto ? 0 : 18, // No GST on crypto
+      sebiCharges: isCrypto ? 0 : 10,
+      stampDuty: isCrypto ? 0 : 0.015,
       stt: {
         equity: { delivery: 0.1, intraday: 0.025 },
         futures: 0.0125,
-        options: 0.0625
+        options: 0.0625,
+        crypto: 0 // No STT on crypto
       }
     };
   }
@@ -154,47 +175,73 @@ chargesSchema.statics.getChargesForTrade = async function(trade, adminCode, user
 chargesSchema.statics.calculateCharges = async function(trade, adminCode, userId) {
   const chargesConfig = await this.getChargesForTrade(trade, adminCode, userId);
   
-  const turnover = trade.entryPrice * trade.quantity * trade.lotSize;
-  const exitTurnover = (trade.exitPrice || trade.entryPrice) * trade.quantity * trade.lotSize;
+  // Check if crypto trade - crypto has different charge structure
+  const isCrypto = trade.segment === 'CRYPTO' || trade.isCrypto;
+  const isMCX = trade.segment === 'MCX';
+  
+  // For crypto, prices are in USD - convert to INR for charge calculation
+  const USD_TO_INR = 83;
+  const priceMultiplier = isCrypto ? USD_TO_INR : 1;
+  
+  const turnover = trade.entryPrice * trade.quantity * (trade.lotSize || 1) * priceMultiplier;
+  const exitTurnover = (trade.exitPrice || trade.entryPrice) * trade.quantity * (trade.lotSize || 1) * priceMultiplier;
   const totalTurnover = turnover + exitTurnover;
   
   // Calculate brokerage
   let brokerage = 0;
-  if (chargesConfig.brokerage.type === 'PER_LOT') {
-    brokerage = chargesConfig.brokerage.value * trade.lots * 2; // Entry + Exit
-  } else if (chargesConfig.brokerage.type === 'PERCENTAGE') {
-    brokerage = (totalTurnover * chargesConfig.brokerage.value) / 100;
-  } else {
-    brokerage = chargesConfig.brokerage.value * 2; // Flat per trade
+  if (chargesConfig.brokerage?.type === 'PER_LOT') {
+    brokerage = (chargesConfig.brokerage.value || 0) * (trade.lots || 1) * 2; // Entry + Exit
+  } else if (chargesConfig.brokerage?.type === 'PERCENTAGE') {
+    brokerage = (totalTurnover * (chargesConfig.brokerage.value || 0)) / 100;
+  } else if (chargesConfig.brokerage?.type === 'FLAT') {
+    brokerage = (chargesConfig.brokerage.value || 0) * 2; // Flat per trade
+  }
+  
+  // For crypto - simplified charges (only exchange fee, no Indian taxes)
+  if (isCrypto) {
+    const exchangeFee = (totalTurnover * (chargesConfig.exchangeCharges || 0.1)) / 100;
+    const total = brokerage + exchangeFee;
+    
+    return {
+      brokerage: Math.round(brokerage * 100) / 100,
+      exchange: Math.round(exchangeFee * 100) / 100,
+      gst: 0,
+      sebi: 0,
+      stamp: 0,
+      stt: 0,
+      total: Math.round(total * 100) / 100
+    };
   }
   
   // Exchange charges
-  const exchangeCharges = (totalTurnover * chargesConfig.exchangeCharges) / 100;
+  const exchangeCharges = (totalTurnover * (chargesConfig.exchangeCharges || 0.00325)) / 100;
   
   // GST on brokerage + exchange charges
-  const gst = ((brokerage + exchangeCharges) * chargesConfig.gst) / 100;
+  const gst = ((brokerage + exchangeCharges) * (chargesConfig.gst || 18)) / 100;
   
   // SEBI charges
-  const sebiCharges = (totalTurnover / 10000000) * chargesConfig.sebiCharges;
+  const sebiCharges = (totalTurnover / 10000000) * (chargesConfig.sebiCharges || 10);
   
   // Stamp duty (on buy side only)
-  const stampDuty = (turnover * chargesConfig.stampDuty) / 100;
+  const stampDuty = (turnover * (chargesConfig.stampDuty || 0.015)) / 100;
   
   // STT calculation based on instrument type
   let stt = 0;
+  const sttConfig = chargesConfig.stt || { equity: { delivery: 0.1, intraday: 0.025 }, futures: 0.0125, options: 0.0625 };
+  
   if (trade.segment === 'EQUITY') {
     if (trade.productType === 'CNC') {
-      stt = (totalTurnover * chargesConfig.stt.equity.delivery) / 100;
+      stt = (totalTurnover * (sttConfig.equity?.delivery || 0.1)) / 100;
     } else {
-      stt = (exitTurnover * chargesConfig.stt.equity.intraday) / 100;
+      stt = (exitTurnover * (sttConfig.equity?.intraday || 0.025)) / 100;
     }
   } else if (trade.instrumentType === 'FUTURES') {
-    stt = (exitTurnover * chargesConfig.stt.futures) / 100;
+    stt = (exitTurnover * (sttConfig.futures || 0.0125)) / 100;
   } else if (trade.instrumentType === 'OPTIONS') {
-    // STT on premium for options
-    const premium = trade.entryPrice * trade.quantity * trade.lotSize;
-    stt = (premium * chargesConfig.stt.options) / 100;
+    const premium = trade.entryPrice * trade.quantity * (trade.lotSize || 1);
+    stt = (premium * (sttConfig.options || 0.0625)) / 100;
   }
+  // MCX has no STT
   
   const total = brokerage + exchangeCharges + gst + sebiCharges + stampDuty + stt;
   
@@ -209,8 +256,10 @@ chargesSchema.statics.calculateCharges = async function(trade, adminCode, userId
   };
 };
 
-// Index for faster lookups
-chargesSchema.index({ scope: 1, adminCode: 1, segment: 1, instrumentType: 1 });
+// Indexes for faster lookups
+chargesSchema.index({ scope: 1, adminCode: 1, segment: 1, instrumentType: 1, symbol: 1 });
 chargesSchema.index({ scope: 1, userId: 1 });
+chargesSchema.index({ scope: 1, adminCode: 1, isActive: 1 });
+chargesSchema.index({ symbol: 1, adminCode: 1 });
 
 export default mongoose.model('Charges', chargesSchema);

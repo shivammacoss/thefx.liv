@@ -1802,28 +1802,41 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Determine if crypto
+  const isCrypto = instrument?.isCrypto || instrument?.segment === 'CRYPTO' || instrument?.exchange === 'BINANCE';
+  
   // Get live price data from marketData
   const liveData = marketData[instrument?.token] || {};
-  const livePrice = liveData.ltp || instrument?.ltp || 0;
-  const liveBid = liveData.bid || livePrice;
-  const liveAsk = liveData.ask || livePrice;
+  const livePrice = isCrypto ? (instrument?.ltp || 0) : (liveData.ltp || instrument?.ltp || 0);
+  const liveBid = isCrypto ? livePrice : (liveData.bid || livePrice);
+  const liveAsk = isCrypto ? livePrice : (liveData.ask || livePrice);
+  
+  // Price symbol for display
+  const priceSymbol = isCrypto ? '$' : '₹';
 
   // Fetch available leverages and market status
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const [leverageRes, marketRes] = await Promise.all([
-          axios.get('/api/trading/leverages', { headers: { Authorization: `Bearer ${user?.token}` } }),
-          axios.get('/api/trading/market-status', { params: { exchange: instrument?.exchange || 'NSE' } })
-        ]);
-        setAvailableLeverages(leverageRes.data.leverages || [1, 2, 5, 10]);
-        setMarketStatus(marketRes.data);
+        // Crypto markets are always open
+        if (isCrypto) {
+          setMarketStatus({ open: true, reason: 'Crypto markets are 24/7' });
+          const leverageRes = await axios.get('/api/trading/leverages', { headers: { Authorization: `Bearer ${user?.token}` } });
+          setAvailableLeverages(leverageRes.data.leverages || [1, 2, 5, 10]);
+        } else {
+          const [leverageRes, marketRes] = await Promise.all([
+            axios.get('/api/trading/leverages', { headers: { Authorization: `Bearer ${user?.token}` } }),
+            axios.get('/api/trading/market-status', { params: { exchange: instrument?.exchange || 'NSE' } })
+          ]);
+          setAvailableLeverages(leverageRes.data.leverages || [1, 2, 5, 10]);
+          setMarketStatus(marketRes.data);
+        }
       } catch (err) {
         console.error('Error fetching settings:', err);
       }
     };
     if (user?.token) fetchSettings();
-  }, [user?.token, instrument?.exchange]);
+  }, [user?.token, instrument?.exchange, isCrypto]);
 
   // Set price from live data when instrument changes
   useEffect(() => {
@@ -1914,9 +1927,11 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
       const orderData = {
         symbol: instrument.symbol,
         token: instrument.token,
-        exchange: instrument.exchange,
-        segment: instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO'),
-        instrumentType: instrument.instrumentType || 'FUTURES',
+        pair: instrument.pair, // For crypto
+        isCrypto: isCrypto,
+        exchange: instrument.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
+        segment: isCrypto ? 'CRYPTO' : (instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO')),
+        instrumentType: isCrypto ? 'CRYPTO' : (instrument.instrumentType || 'FUTURES'),
         optionType: instrument.optionType || null,
         strike: instrument.strike || null,
         expiry: instrument.expiry || null,
@@ -1951,7 +1966,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
       });
 
       const statusMsg = data.trade?.status === 'PENDING' 
-        ? `Order placed! Waiting for price to reach ₹${limitPrice}` 
+        ? `Order placed! Waiting for price to reach ${priceSymbol}${limitPrice}` 
         : `Order executed! Margin: ₹${data.marginBlocked?.toLocaleString()}`;
       
       setSuccess(statusMsg);
@@ -1971,6 +1986,9 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
 
   // Product types based on segment
   const getProductTypes = () => {
+    if (isCrypto) return [
+      { value: 'MIS', label: 'Spot', desc: 'Crypto spot trading' }
+    ];
     if (isEquity) return [
       { value: 'CNC', label: 'CNC (Delivery)', desc: 'Hold for days/months' },
       { value: 'MIS', label: 'MIS (Intraday)', desc: 'Square off same day' }
@@ -1992,6 +2010,9 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
 
   // Get trading hint
   const getTradingHint = () => {
+    if (isCrypto) {
+      return orderType === 'buy' ? '🚀 Buy crypto - Profit if price goes UP' : '📉 Sell crypto - Profit if price goes DOWN';
+    }
     if (isEquity) {
       if (orderType === 'buy') return productType === 'CNC' ? 'Buy & hold shares in DEMAT' : 'Buy intraday, auto square-off at 3:15 PM';
       return productType === 'MIS' ? 'Short sell intraday only' : 'Sell from holdings';
@@ -2011,10 +2032,10 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-dark-600">
         <div>
-          <div className={`font-bold ${isCall ? 'text-green-400' : isPut ? 'text-red-400' : isFutures ? 'text-yellow-400' : ''}`}>
+          <div className={`font-bold ${isCrypto ? 'text-orange-400' : isCall ? 'text-green-400' : isPut ? 'text-red-400' : isFutures ? 'text-yellow-400' : ''}`}>
             {instrument?.symbol}
           </div>
-          <div className="text-xs text-gray-400">{instrument?.exchange} • {getSegmentLabel()}</div>
+          <div className="text-xs text-gray-400">{instrument?.exchange} • {isCrypto ? 'CRYPTO' : getSegmentLabel()}</div>
         </div>
         <button onClick={onClose} className="text-gray-400 hover:text-white">
           <X size={20} />
@@ -2029,18 +2050,18 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
             orderType === 'sell' ? 'bg-red-600 text-white' : 'bg-dark-700 text-gray-400'
           }`}
         >
-          <div className="text-xs opacity-70">Bid</div>
-          <div className="text-lg">₹{liveBid?.toLocaleString() || '--'}</div>
+          <div className="text-xs opacity-70">{isCrypto ? 'Price' : 'Bid'}</div>
+          <div className="text-lg">{priceSymbol}{liveBid?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '--'}</div>
           <div className="text-xs">SELL</div>
         </button>
         <button
           onClick={() => setOrderType('buy')}
           className={`flex-1 py-2 font-semibold transition ${
-            orderType === 'buy' ? 'bg-blue-600 text-white' : 'bg-dark-700 text-gray-400'
+            orderType === 'buy' ? 'bg-green-600 text-white' : 'bg-dark-700 text-gray-400'
           }`}
         >
-          <div className="text-xs opacity-70">Ask</div>
-          <div className="text-lg">₹{liveAsk?.toLocaleString() || '--'}</div>
+          <div className="text-xs opacity-70">{isCrypto ? 'Price' : 'Ask'}</div>
+          <div className="text-lg">{priceSymbol}{liveAsk?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '--'}</div>
           <div className="text-xs">BUY</div>
         </button>
       </div>
@@ -2298,7 +2319,17 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   const [dbInstruments, setDbInstruments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchResults, setSearchResults] = useState([]);
+  const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs like desktop
+  const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
+  
+  // Segment tabs configuration (same as desktop)
+  const segmentTabs = [
+    { id: 'NSE', label: 'NSE' },
+    { id: 'NSE_FO', label: 'F&O' },
+    { id: 'MCX', label: 'MCX' },
+    { id: 'Crypto', label: 'Crypto' }
+  ];
 
   // Debounce search for performance
   useEffect(() => {
@@ -2346,6 +2377,21 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
       setLoading(false);
     }
   };
+  
+  // Fetch crypto data from Binance
+  useEffect(() => {
+    const fetchCryptoData = async () => {
+      try {
+        const { data } = await axios.get('/api/binance/prices');
+        setCryptoData(data || {});
+      } catch (error) {
+        // Silent fail
+      }
+    };
+    fetchCryptoData();
+    const interval = setInterval(fetchCryptoData, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleSegment = (segment) => {
     setExpandedSegments(prev => 
@@ -2353,8 +2399,68 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     );
   };
 
+  // Filter instruments by active segment (same logic as desktop)
+  const getFilteredInstruments = () => {
+    const term = searchTerm.toLowerCase();
+    let filtered = dbInstruments;
+    
+    if (term) {
+      filtered = dbInstruments.filter(inst => 
+        inst.symbol?.toLowerCase().includes(term) ||
+        inst.name?.toLowerCase().includes(term)
+      );
+    }
+    
+    switch (activeSegment) {
+      case 'NSE':
+        return filtered.filter(inst => 
+          (inst.exchange === 'NSE' && (inst.instrumentType === 'INDEX' || inst.instrumentType === 'STOCK' || inst.segment === 'EQUITY')) ||
+          inst.category === 'INDICES' || inst.category === 'STOCKS'
+        );
+      case 'NSE_FO':
+        return filtered.filter(inst => 
+          (inst.exchange === 'NFO' || inst.segment === 'FNO' || inst.segment === 'NFO') &&
+          (inst.instrumentType === 'FUTURES' || inst.instrumentType === 'OPTIONS')
+        );
+      case 'MCX':
+        return filtered.filter(inst => 
+          inst.exchange === 'MCX' || inst.segment === 'MCX' || inst.category === 'MCX'
+        );
+      case 'Crypto':
+        const cryptoInsts = filtered.filter(inst => 
+          inst.isCrypto || inst.segment === 'CRYPTO' || inst.category === 'CRYPTO'
+        );
+        // Add Binance crypto if available
+        if (Object.keys(cryptoData).length > 0) {
+          const binanceCryptos = Object.values(cryptoData).map(c => ({
+            _id: c.pair,
+            symbol: c.symbol,
+            name: c.pair,
+            exchange: 'BINANCE',
+            token: c.pair,
+            pair: c.pair,
+            segment: 'CRYPTO',
+            category: 'CRYPTO',
+            instrumentType: 'CRYPTO',
+            isCrypto: true,
+            ltp: c.ltp,
+            change: c.change,
+            changePercent: c.changePercent
+          }));
+          return [...cryptoInsts, ...binanceCryptos.filter(bc => 
+            !term || bc.symbol.toLowerCase().includes(term) || bc.name.toLowerCase().includes(term)
+          )];
+        }
+        return cryptoInsts;
+      default:
+        return filtered;
+    }
+  };
+  
+  const filteredInstruments = getFilteredInstruments();
+
   // Group instruments by category
-  const instrumentsByCategory = dbInstruments.reduce((acc, inst) => {
+  const instrumentsByCategory = filteredInstruments.reduce((acc, inst) => {
     const cat = inst.category || 'OTHER';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(inst);
@@ -2371,6 +2477,23 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Segment Tabs - Like desktop */}
+      <div className="flex gap-1 p-2 bg-dark-800 border-b border-dark-600 overflow-x-auto">
+        {segmentTabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveSegment(tab.id)}
+            className={`px-3 py-1.5 text-xs font-medium rounded whitespace-nowrap transition ${
+              activeSegment === tab.id 
+                ? 'bg-green-600 text-white' 
+                : 'bg-dark-700 text-gray-400 hover:bg-dark-600 hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      
       {/* Search */}
       <div className="p-3 bg-dark-800 border-b border-dark-600">
         <div className="relative">
@@ -2415,6 +2538,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
                     isCall={inst.optionType === 'CE'}
                     isPut={inst.optionType === 'PE'}
                     isFuture={inst.instrumentType === 'FUTURES'}
+                    isCrypto={inst.isCrypto || inst.segment === 'CRYPTO' || inst.exchange === 'BINANCE'}
                     onSelect={() => { onSelectInstrument({...inst, ...priceData}); setSearchTerm(''); }}
                     onBuy={() => onBuySell('buy', {...inst, ...priceData})}
                     onSell={() => onBuySell('sell', {...inst, ...priceData})}
@@ -2426,7 +2550,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
         </div>
       )}
 
-      {/* Instruments List - Only show when not searching */}
+      {/* Instruments List - Flat list like web view */}
       {!searchTerm && (
       <div className="flex-1 overflow-y-auto">
         {loading ? (
@@ -2434,130 +2558,33 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
             <RefreshCw className="animate-spin inline mr-2" size={16} />
             Loading...
           </div>
-        ) : categories.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 text-sm">No instruments available</div>
+        ) : filteredInstruments.length === 0 ? (
+          <div className="p-4 text-center text-gray-500 text-sm">
+            <p>No instruments found</p>
+            <p className="mt-2 text-xs">
+              {activeSegment === 'Crypto' ? 'Loading crypto from Binance...' : 'Try a different segment or search'}
+            </p>
+          </div>
         ) : (
-          categories.map(category => {
-            const instruments = instrumentsByCategory[category] || [];
-            const futures = instruments.filter(i => i.instrumentType === 'FUTURES');
-            const calls = instruments.filter(i => i.optionType === 'CE');
-            const puts = instruments.filter(i => i.optionType === 'PE');
-            const others = instruments.filter(i => !i.optionType && i.instrumentType !== 'FUTURES');
-
+          filteredInstruments.map(inst => {
+            const priceData = inst.isCrypto ? inst : getPrice(inst.token);
             return (
-              <div key={category} className="border-b border-dark-600">
-                <button
-                  onClick={() => toggleSegment(category)}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-dark-800 text-sm font-medium"
-                >
-                  <span>{category} ({instruments.length})</span>
-                  {expandedSegments.includes(category) ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                </button>
-
-                {expandedSegments.includes(category) && (
-                  <div className="bg-dark-900">
-                    {/* Indices/Stocks */}
-                    {others.map(inst => {
-                      const priceData = getPrice(inst.token);
-                      return (
-                        <MobileInstrumentRow
-                          key={inst._id}
-                          instrument={{...inst, ...priceData}}
-                          onSelect={() => onSelectInstrument({...inst, ...priceData})}
-                          onBuy={() => onBuySell('buy', {...inst, ...priceData})}
-                          onSell={() => onBuySell('sell', {...inst, ...priceData})}
-                        />
-                      );
-                    })}
-
-                    {/* Futures */}
-                    {futures.length > 0 && (
-                      <>
-                        <button
-                          onClick={() => toggleSegment(`${category}-FUT`)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-blue-400 bg-dark-800"
-                        >
-                          {expandedSegments.includes(`${category}-FUT`) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          Futures ({futures.length})
-                        </button>
-                        {expandedSegments.includes(`${category}-FUT`) && futures
-                          .filter(i => i.symbol?.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .map(inst => {
-                            const priceData = getPrice(inst.token);
-                            return (
-                              <MobileInstrumentRow
-                                key={inst._id}
-                                instrument={{...inst, ...priceData}}
-                                isFuture
-                                onSelect={() => onSelectInstrument({...inst, ...priceData})}
-                                onBuy={() => onBuySell('buy', {...inst, ...priceData})}
-                                onSell={() => onBuySell('sell', {...inst, ...priceData})}
-                              />
-                            );
-                          })}
-                      </>
-                    )}
-
-                    {/* Calls */}
-                    {calls.length > 0 && (
-                      <>
-                        <button
-                          onClick={() => toggleSegment(`${category}-CE`)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-green-400 bg-dark-800"
-                        >
-                          {expandedSegments.includes(`${category}-CE`) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          Calls CE ({calls.length})
-                        </button>
-                        {expandedSegments.includes(`${category}-CE`) && calls
-                          .filter(i => i.symbol?.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .sort((a, b) => (a.strike || 0) - (b.strike || 0))
-                          .map(inst => {
-                            const priceData = getPrice(inst.token);
-                            return (
-                              <MobileInstrumentRow
-                                key={inst._id}
-                                instrument={{...inst, ...priceData}}
-                                isCall
-                                onSelect={() => onSelectInstrument({...inst, ...priceData})}
-                                onBuy={() => onBuySell('buy', {...inst, ...priceData})}
-                                onSell={() => onBuySell('sell', {...inst, ...priceData})}
-                              />
-                            );
-                          })}
-                      </>
-                    )}
-
-                    {/* Puts */}
-                    {puts.length > 0 && (
-                      <>
-                        <button
-                          onClick={() => toggleSegment(`${category}-PE`)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-red-400 bg-dark-800"
-                        >
-                          {expandedSegments.includes(`${category}-PE`) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          Puts PE ({puts.length})
-                        </button>
-                        {expandedSegments.includes(`${category}-PE`) && puts
-                          .filter(i => i.symbol?.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .sort((a, b) => (a.strike || 0) - (b.strike || 0))
-                          .map(inst => {
-                            const priceData = getPrice(inst.token);
-                            return (
-                              <MobileInstrumentRow
-                                key={inst._id}
-                                instrument={{...inst, ...priceData}}
-                                isPut
-                                onSelect={() => onSelectInstrument({...inst, ...priceData})}
-                                onBuy={() => onBuySell('buy', {...inst, ...priceData})}
-                                onSell={() => onBuySell('sell', {...inst, ...priceData})}
-                              />
-                            );
-                          })}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+              <MobileInstrumentRow
+                key={inst._id || inst.pair || `${inst.exchange}-${inst.symbol}`}
+                instrument={{
+                  ...inst, 
+                  ltp: priceData.ltp || inst.ltp || 0, 
+                  change: priceData.change || inst.change || 0, 
+                  changePercent: priceData.changePercent || inst.changePercent || 0
+                }}
+                isCall={inst.optionType === 'CE'}
+                isPut={inst.optionType === 'PE'}
+                isFuture={inst.instrumentType === 'FUTURES'}
+                isCrypto={inst.isCrypto || inst.segment === 'CRYPTO' || inst.exchange === 'BINANCE'}
+                onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
+                onBuy={() => onBuySell('buy', {...inst, ltp: priceData.ltp || inst.ltp || 0})}
+                onSell={() => onBuySell('sell', {...inst, ltp: priceData.ltp || inst.ltp || 0})}
+              />
             );
           })
         )}
@@ -2567,15 +2594,34 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   );
 };
 
-const MobileInstrumentRow = ({ instrument, isCall, isPut, isFuture, onSelect, onBuy, onSell }) => {
+const MobileInstrumentRow = ({ instrument, isCall, isPut, isFuture, isCrypto, onSelect, onBuy, onSell }) => {
   const ltp = instrument.ltp || 0;
   const change = instrument.change || 0;
   const changePercent = instrument.changePercent || 0;
+  
+  // Check if crypto from instrument properties
+  const isCryptoInstrument = isCrypto || instrument.isCrypto || instrument.segment === 'CRYPTO' || instrument.exchange === 'BINANCE';
+  
+  // Determine symbol color based on type (matching desktop InstrumentRow)
+  const getSymbolColor = () => {
+    if (isCryptoInstrument) return 'text-orange-400';
+    if (isCall || instrument.optionType === 'CE') return 'text-green-400';
+    if (isPut || instrument.optionType === 'PE') return 'text-red-400';
+    if (isFuture || instrument.instrumentType === 'FUTURES') return 'text-yellow-400';
+    return 'text-white';
+  };
+  
+  // Format price - use $ for crypto, ₹ for others (matching desktop)
+  const formatPrice = (price) => {
+    if (!price || price <= 0) return '--';
+    if (isCryptoInstrument) return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-dark-700">
       <div className="flex-1" onClick={onSelect}>
-        <div className={`font-medium text-sm ${isCall ? 'text-green-400' : isPut ? 'text-red-400' : isFuture ? 'text-blue-400' : ''}`}>
+        <div className={`font-medium text-sm ${getSymbolColor()}`}>
           {instrument.symbol}
         </div>
         <div className="text-xs text-gray-500">
@@ -2584,24 +2630,25 @@ const MobileInstrumentRow = ({ instrument, isCall, isPut, isFuture, onSelect, on
       </div>
       <div className="text-right mr-3" onClick={onSelect}>
         <div className={`font-mono text-sm ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-          {ltp > 0 ? `₹${ltp.toLocaleString()}` : '--'}
+          {formatPrice(ltp)}
         </div>
         <div className={`text-xs ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
           {changePercent ? `${change >= 0 ? '+' : ''}${parseFloat(changePercent).toFixed(2)}%` : '--'}
         </div>
       </div>
+      {/* Buy/Sell Buttons - Indian Standard: S left, B right (matching desktop) */}
       <div className="flex gap-1">
-        <button 
-          onClick={onBuy}
-          className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 rounded font-medium"
-        >
-          B
-        </button>
         <button 
           onClick={onSell}
           className="px-3 py-1.5 text-xs bg-red-600 hover:bg-red-700 rounded font-medium"
         >
           S
+        </button>
+        <button 
+          onClick={onBuy}
+          className="px-3 py-1.5 text-xs bg-green-600 hover:bg-green-700 rounded font-medium"
+        >
+          B
         </button>
       </div>
     </div>

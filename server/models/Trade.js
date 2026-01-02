@@ -303,10 +303,15 @@ tradeSchema.methods.closeTrade = function(exitPrice, reason = 'MANUAL') {
   return this;
 };
 
-// Indexes
+// Indexes for faster queries
 tradeSchema.index({ user: 1, status: 1 });
+tradeSchema.index({ user: 1, status: 1, closedAt: -1 }); // For trade history
 tradeSchema.index({ adminCode: 1, status: 1 });
+tradeSchema.index({ adminCode: 1, status: 1, closedAt: -1 }); // For admin P&L
 tradeSchema.index({ symbol: 1, status: 1 });
+tradeSchema.index({ token: 1, status: 1 }); // For price updates by token
 tradeSchema.index({ openedAt: -1 });
+tradeSchema.index({ closedAt: -1 });
+tradeSchema.index({ isCrypto: 1, status: 1 }); // For crypto trades
 
 export default mongoose.model('Trade', tradeSchema);

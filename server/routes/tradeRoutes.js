@@ -353,53 +353,120 @@ router.get('/admin/pnl-summary', protectAdmin, async (req, res) => {
 
 // ==================== CHARGES ROUTES ====================
 
-// Get charges configuration
+// Get charges configuration with filtering
 router.get('/admin/charges', protectAdmin, async (req, res) => {
   try {
-    let query = {};
+    const { scope, segment, instrumentType, symbol } = req.query;
+    let query = { isActive: true };
+    
+    // Filter by scope if provided
+    if (scope) query.scope = scope;
+    if (segment) query.segment = segment;
+    if (instrumentType) query.instrumentType = instrumentType;
+    if (symbol) query.symbol = symbol;
+    
+    // Non-super admins can only see global and their own charges
     if (req.admin.role !== 'SUPER_ADMIN') {
       query.$or = [
         { scope: 'GLOBAL' },
-        { scope: 'ADMIN', adminCode: req.admin.adminCode }
+        { adminCode: req.admin.adminCode }
       ];
     }
     
-    const charges = await Charges.find(query);
+    const charges = await Charges.find(query).lean();
     res.json(charges);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Create/Update charges
+// Create/Update charges - supports segment, user, instrument, symbol level
 router.post('/admin/charges', protectAdmin, async (req, res) => {
   try {
-    const { scope, segment, instrumentType, userId, brokerage, ...otherCharges } = req.body;
+    const { scope, segment, instrumentType, symbol, userId, brokerage, ...otherCharges } = req.body;
     
     // Only Super Admin can set GLOBAL charges
     if (scope === 'GLOBAL' && req.admin.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Only Super Admin can set global charges' });
     }
     
+    const adminCode = req.admin.role === 'SUPER_ADMIN' ? (req.body.adminCode || req.admin.adminCode) : req.admin.adminCode;
+    
     const chargeData = {
       scope,
-      adminCode: req.admin.role === 'SUPER_ADMIN' ? req.body.adminCode : req.admin.adminCode,
-      segment,
-      instrumentType,
-      userId,
+      adminCode,
+      segment: segment || null,
+      instrumentType: instrumentType || null,
+      symbol: symbol || null,
+      userId: userId || null,
       brokerage,
+      isActive: true,
       ...otherCharges
     };
     
-    // Upsert based on scope and identifiers
+    // Build filter for upsert based on scope
     const filter = { scope };
-    if (scope === 'ADMIN') filter.adminCode = chargeData.adminCode;
-    if (scope === 'SEGMENT') { filter.adminCode = chargeData.adminCode; filter.segment = segment; }
-    if (scope === 'INSTRUMENT') { filter.adminCode = chargeData.adminCode; filter.segment = segment; filter.instrumentType = instrumentType; }
-    if (scope === 'USER') filter.userId = userId;
+    switch (scope) {
+      case 'GLOBAL':
+        // Only one global config
+        break;
+      case 'ADMIN':
+        filter.adminCode = adminCode;
+        break;
+      case 'SEGMENT':
+        filter.adminCode = adminCode;
+        filter.segment = segment;
+        break;
+      case 'INSTRUMENT':
+        filter.adminCode = adminCode;
+        filter.segment = segment;
+        filter.instrumentType = instrumentType;
+        if (symbol) filter.symbol = symbol; // Symbol-specific
+        break;
+      case 'USER':
+        filter.userId = userId;
+        break;
+    }
     
     const charges = await Charges.findOneAndUpdate(filter, chargeData, { upsert: true, new: true });
-    res.json(charges);
+    res.json({ message: 'Charges saved successfully', charges });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Bulk update charges for multiple segments/instruments
+router.post('/admin/charges/bulk', protectAdmin, async (req, res) => {
+  try {
+    const { charges } = req.body; // Array of charge configs
+    
+    if (!Array.isArray(charges)) {
+      return res.status(400).json({ message: 'charges must be an array' });
+    }
+    
+    const adminCode = req.admin.adminCode;
+    const results = [];
+    
+    for (const chargeConfig of charges) {
+      const { scope, segment, instrumentType, symbol, brokerage, ...otherCharges } = chargeConfig;
+      
+      // Skip global for non-super admins
+      if (scope === 'GLOBAL' && req.admin.role !== 'SUPER_ADMIN') continue;
+      
+      const filter = { scope, adminCode };
+      if (segment) filter.segment = segment;
+      if (instrumentType) filter.instrumentType = instrumentType;
+      if (symbol) filter.symbol = symbol;
+      
+      const result = await Charges.findOneAndUpdate(
+        filter,
+        { ...chargeConfig, adminCode, isActive: true },
+        { upsert: true, new: true }
+      );
+      results.push(result);
+    }
+    
+    res.json({ message: `${results.length} charge configs saved`, charges: results });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

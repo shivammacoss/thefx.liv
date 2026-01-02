@@ -482,39 +482,63 @@ class TradingService {
     return results;
   }
 
-  // Get positions
+  // Get positions - optimized with lean() for faster response
   static async getPositions(userId, status = 'OPEN') {
-    return Trade.find({ user: userId, status }).sort({ openedAt: -1 });
+    return Trade.find({ user: userId, status })
+      .select('symbol token pair isCrypto exchange segment instrumentType optionType strike expiry side productType quantity lotSize lots entryPrice currentPrice marketPrice unrealizedPnL marginUsed leverage spread commission status openedAt')
+      .sort({ openedAt: -1 })
+      .lean();
   }
 
-  // Get pending orders
+  // Get pending orders - optimized
   static async getPendingOrders(userId) {
-    return Trade.find({ user: userId, status: 'PENDING' }).sort({ createdAt: -1 });
+    return Trade.find({ user: userId, status: 'PENDING' })
+      .select('symbol exchange segment side productType quantity lots entryPrice limitPrice triggerPrice marginUsed status createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
   }
 
-  // Get trade history
+  // Get trade history - optimized
   static async getTradeHistory(userId, limit = 50) {
-    return Trade.find({ user: userId, status: 'CLOSED' }).sort({ closedAt: -1 }).limit(limit);
+    return Trade.find({ user: userId, status: 'CLOSED' })
+      .select('symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason')
+      .sort({ closedAt: -1 })
+      .limit(limit)
+      .lean();
   }
 
-  // Get wallet summary
+  // Get wallet summary - optimized with aggregation for faster P&L
   static async getWalletSummary(userId) {
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('wallet').lean();
     if (!user) throw new Error('User not found');
 
-    const openTrades = await Trade.find({ user: userId, status: 'OPEN' });
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const todayClosedTrades = await Trade.find({
-      user: userId,
-      status: 'CLOSED',
-      closedAt: { $gte: todayStart }
-    });
+    // Use aggregation for faster P&L calculation
+    const [openStats, closedStats] = await Promise.all([
+      Trade.aggregate([
+        { $match: { user: userId, status: 'OPEN' } },
+        { $group: {
+          _id: null,
+          unrealizedPnL: { $sum: { $ifNull: ['$unrealizedPnL', 0] } },
+          marginUsed: { $sum: { $ifNull: ['$marginUsed', 0] } },
+          count: { $sum: 1 }
+        }}
+      ]),
+      Trade.aggregate([
+        { $match: { user: userId, status: 'CLOSED', closedAt: { $gte: todayStart } } },
+        { $group: {
+          _id: null,
+          realizedPnL: { $sum: { $ifNull: ['$realizedPnL', 0] } }
+        }}
+      ])
+    ]);
 
-    const unrealizedPnL = openTrades.reduce((sum, t) => sum + (t.unrealizedPnL || 0), 0);
-    const realizedPnL = todayClosedTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0);
-    const marginUsed = openTrades.reduce((sum, t) => sum + (t.marginUsed || 0), 0);
+    const unrealizedPnL = openStats[0]?.unrealizedPnL || 0;
+    const marginUsed = openStats[0]?.marginUsed || 0;
+    const openPositions = openStats[0]?.count || 0;
+    const realizedPnL = closedStats[0]?.realizedPnL || 0;
 
     // Use cashBalance (primary) or balance (legacy)
     const walletBalance = user.wallet?.cashBalance || user.wallet?.balance || 0;
@@ -531,7 +555,7 @@ class TradingService {
       realizedPnL,
       totalPnL: unrealizedPnL + realizedPnL,
       marginUsed,
-      openPositions: openTrades.length
+      openPositions
     };
   }
 
