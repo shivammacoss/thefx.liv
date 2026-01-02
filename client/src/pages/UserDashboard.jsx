@@ -557,14 +557,12 @@ const UserDashboard = () => {
 };
 
 const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, quickMode, user, marketData = {} }) => {
-  const [expandedSegments, setExpandedSegments] = useState(['INDICES', 'STOCKS']);
-  const [expandedTypes, setExpandedTypes] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('watchlist'); // 'watchlist' or 'all'
+  const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs
   const [watchlist, setWatchlist] = useState(() => {
     const saved = localStorage.getItem('ntrader_watchlist');
-    return saved ? JSON.parse(saved) : ['NIFTY', 'BANKNIFTY', 'SBIN', 'RELIANCE'];
+    return saved ? JSON.parse(saved) : ['NIFTY 50', 'NIFTY BANK', 'SBIN', 'RELIANCE'];
   });
   const [cryptoData, setCryptoData] = useState({});
   const [dbInstruments, setDbInstruments] = useState([]);
@@ -572,6 +570,16 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchInputRef = useRef(null);
+  
+  // Segment tabs configuration
+  const segmentTabs = [
+    { id: 'NSE', label: 'NSE', color: 'bg-green-600' },
+    { id: 'NSE_FO', label: 'NSE F&O', color: 'bg-dark-600' },
+    { id: 'MCX', label: 'MCX', color: 'bg-dark-600' },
+    { id: 'BSE_FO', label: 'BSE F&O', color: 'bg-dark-600' },
+    { id: 'Currency', label: 'Currency', color: 'bg-dark-600' },
+    { id: 'Crypto', label: 'Crypto', color: 'bg-dark-600' }
+  ];
   
   // Market status derived from marketData
   const marketStatus = {
@@ -675,22 +683,6 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
     return { ltp: 0, change: 0, changePercent: 0 };
   };
 
-  const toggleSegment = (segment) => {
-    setExpandedSegments(prev => 
-      prev.includes(segment) 
-        ? prev.filter(s => s !== segment)
-        : [...prev, segment]
-    );
-  };
-
-  const toggleType = (segment, type) => {
-    const key = `${segment}-${type}`;
-    setExpandedTypes(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-  };
-
   const addToWatchlist = (symbol) => {
     if (!watchlist.includes(symbol)) {
       setWatchlist([...watchlist, symbol]);
@@ -703,9 +695,8 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
 
   const isInWatchlist = (symbol) => watchlist.includes(symbol);
 
-  // Get all instruments - combine database instruments with hardcoded fallback
+  // Get all instruments from database
   const getAllInstruments = () => {
-    // If we have database instruments, use them
     if (dbInstruments.length > 0) {
       return dbInstruments.map(inst => ({
         ...inst,
@@ -719,32 +710,79 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
         lotSize: inst.lotSize || 1
       }));
     }
-    // Fallback to hardcoded data
-    const all = [];
-    Object.values(instrumentsData).forEach(segment => {
-      if (segment.stocks) all.push(...segment.stocks.map(s => ({...s, segment: 'EQUITY', instrumentType: 'STOCK'})));
-      if (segment.futures) all.push(...segment.futures.map(s => ({...s, segment: 'FNO', instrumentType: 'FUTURES'})));
-      if (segment.calls) all.push(...segment.calls.map(s => ({...s, segment: 'FNO', instrumentType: 'OPTIONS', optionType: 'CE'})));
-      if (segment.puts) all.push(...segment.puts.map(s => ({...s, segment: 'FNO', instrumentType: 'OPTIONS', optionType: 'PE'})));
-    });
-    return all;
+    return [];
   };
 
-  // Group instruments by category for display
-  const getInstrumentsByCategory = () => {
-    const instruments = getAllInstruments();
-    const grouped = {};
-    instruments.forEach(inst => {
-      const category = inst.category || inst.segment || 'OTHER';
-      if (!grouped[category]) grouped[category] = [];
-      grouped[category].push(inst);
-    });
-    return grouped;
+  // Filter instruments by active segment
+  const getFilteredInstruments = () => {
+    const allInstruments = getAllInstruments();
+    const term = searchTerm.toLowerCase();
+    
+    // First filter by search term if present
+    let filtered = allInstruments;
+    if (term) {
+      filtered = allInstruments.filter(inst => 
+        inst.symbol?.toLowerCase().includes(term) ||
+        inst.name?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Then filter by segment
+    switch (activeSegment) {
+      case 'NSE':
+        return filtered.filter(inst => 
+          (inst.exchange === 'NSE' && (inst.instrumentType === 'INDEX' || inst.instrumentType === 'STOCK' || inst.segment === 'EQUITY')) ||
+          inst.category === 'INDICES' || inst.category === 'STOCKS'
+        );
+      case 'NSE_FO':
+        return filtered.filter(inst => 
+          (inst.exchange === 'NFO' || inst.segment === 'FNO' || inst.segment === 'NFO') &&
+          (inst.instrumentType === 'FUTURES' || inst.instrumentType === 'OPTIONS')
+        );
+      case 'MCX':
+        return filtered.filter(inst => 
+          inst.exchange === 'MCX' || inst.segment === 'MCX' || inst.category === 'MCX'
+        );
+      case 'BSE_FO':
+        return filtered.filter(inst => 
+          inst.exchange === 'BFO' || inst.segment === 'BFO' || inst.exchange === 'BSE'
+        );
+      case 'Currency':
+        return filtered.filter(inst => 
+          inst.exchange === 'CDS' || inst.segment === 'CURRENCY' || inst.category === 'CURRENCY'
+        );
+      case 'Crypto':
+        // Return crypto instruments from database + live Binance data
+        const cryptoInsts = filtered.filter(inst => 
+          inst.isCrypto || inst.segment === 'CRYPTO' || inst.category === 'CRYPTO'
+        );
+        // Add Binance crypto if available
+        if (Object.keys(cryptoData).length > 0) {
+          const binanceCryptos = Object.values(cryptoData).map(c => ({
+            symbol: c.symbol,
+            name: c.pair,
+            exchange: 'BINANCE',
+            token: c.pair,
+            pair: c.pair,
+            segment: 'CRYPTO',
+            category: 'CRYPTO',
+            instrumentType: 'CRYPTO',
+            isCrypto: true,
+            ltp: c.ltp,
+            change: c.change,
+            changePercent: c.changePercent
+          }));
+          return [...cryptoInsts, ...binanceCryptos.filter(bc => 
+            !term || bc.symbol.toLowerCase().includes(term) || bc.name.toLowerCase().includes(term)
+          )];
+        }
+        return cryptoInsts;
+      default:
+        return filtered;
+    }
   };
 
-  const watchlistInstruments = getAllInstruments().filter(inst => watchlist.includes(inst.symbol));
-  const instrumentsByCategory = getInstrumentsByCategory();
-  const categories = Object.keys(instrumentsByCategory);
+  const filteredInstruments = getFilteredInstruments();
 
   return (
     <aside className="w-72 bg-dark-800 border-r border-dark-600 flex flex-col">
@@ -763,33 +801,34 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-dark-600">
-        <button 
-          onClick={() => setActiveTab('watchlist')}
-          className={`flex-1 px-4 py-2 text-sm ${activeTab === 'watchlist' ? 'bg-dark-700 text-green-400 border-b-2 border-green-500' : 'text-gray-400 hover:text-white'}`}
-        >
-          Watchlist ({watchlist.length})
-        </button>
-        <button 
-          onClick={() => setActiveTab('all')}
-          className={`flex-1 px-4 py-2 text-sm ${activeTab === 'all' ? 'bg-dark-700 text-green-400 border-b-2 border-green-500' : 'text-gray-400 hover:text-white'}`}
-        >
-          All Instruments
-        </button>
+      {/* Segment Tabs - Like screenshot */}
+      <div className="flex flex-wrap gap-1 p-2 border-b border-dark-600">
+        {segmentTabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveSegment(tab.id)}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition ${
+              activeSegment === tab.id 
+                ? 'bg-green-600 text-white' 
+                : 'bg-dark-700 text-gray-400 hover:bg-dark-600 hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Search */}
-      <div className="p-2">
+      <div className="p-2 border-b border-dark-600">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Search NIFTY, BANKNIFTY, SBIN..."
+            placeholder="Search symbols..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-dark-700 border border-dark-600 rounded pl-9 pr-8 py-1.5 text-sm focus:outline-none focus:border-green-500"
+            className="w-full bg-dark-700 border border-dark-600 rounded pl-9 pr-8 py-2 text-sm focus:outline-none focus:border-green-500"
           />
           {searchTerm && (
             <button 
@@ -800,139 +839,48 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
             </button>
           )}
         </div>
-        {isSearching && (
-          <div className="text-xs text-gray-500 mt-1 text-center">Searching...</div>
-        )}
       </div>
 
-      {/* Search Results - Show when searching */}
-      {searchTerm.length >= 1 && (
-        <div className="flex-1 overflow-y-auto">
-          {searchResults.length === 0 ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              No instruments found for "{searchTerm}"
-            </div>
-          ) : (
-            <>
-              <div className="px-3 py-1 text-xs text-gray-500 bg-dark-700 sticky top-0">
-                {searchResults.length} results for "{searchTerm}"
-              </div>
-              {searchResults.map(inst => {
-                const priceData = getPrice(inst.token, inst.pair, inst);
-                return (
-                  <InstrumentRow
-                    key={inst._id || inst.symbol}
-                    instrument={{...inst, ltp: priceData.ltp, change: priceData.change, changePercent: priceData.changePercent}}
-                    isSelected={selectedInstrument?.symbol === inst.symbol}
-                    onSelect={() => { onSelectInstrument({...inst, ltp: priceData.ltp}); setSearchTerm(''); }}
-                    quickMode={quickMode}
-                    onBuySell={onBuySell}
-                    inWatchlist={isInWatchlist(inst.symbol)}
-                    onAddToWatchlist={() => addToWatchlist(inst.symbol)}
-                    onRemoveFromWatchlist={() => removeFromWatchlist(inst.symbol)}
-                  />
-                );
-              })}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Watchlist View - Only show when not searching */}
-      {!searchTerm && activeTab === 'watchlist' && (
-        <div className="flex-1 overflow-y-auto">
-          {watchlistInstruments.length === 0 ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              <p>No instruments in watchlist</p>
-              <p className="mt-2">Go to "All Instruments" to add</p>
-            </div>
-          ) : (
-            watchlistInstruments.map(inst => {
-                const priceData = getPrice(inst.token, inst.pair, inst);
-                return (
-                  <InstrumentRow
-                    key={inst.symbol}
-                    instrument={{...inst, ltp: priceData.ltp, change: priceData.change, changePercent: priceData.changePercent}}
-                    isSelected={selectedInstrument?.symbol === inst.symbol}
-                    onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp})}
-                    quickMode={quickMode}
-                    onBuySell={onBuySell}
-                    inWatchlist={true}
-                    onRemoveFromWatchlist={() => removeFromWatchlist(inst.symbol)}
-                    isCrypto={inst.isCrypto}
-                    isDemo={inst.isDemo}
-                  />
-                );
-              })
-          )}
-        </div>
-      )}
-
-      {/* All Instruments List - Only show when 'all' tab is active and not searching */}
-      {!searchTerm && activeTab === 'all' && (
+      {/* Instruments List */}
       <div className="flex-1 overflow-y-auto">
         {loadingInstruments ? (
           <div className="p-4 text-center text-gray-400">
             <RefreshCw className="animate-spin inline mr-2" size={16} />
             Loading instruments...
           </div>
-        ) : categories.length === 0 ? (
+        ) : filteredInstruments.length === 0 ? (
           <div className="p-4 text-center text-gray-500 text-sm">
-            <p>No instruments available</p>
-            <p className="mt-2 text-xs">Contact admin to add instruments</p>
+            <p>No instruments found</p>
+            <p className="mt-2 text-xs">
+              {activeSegment === 'Crypto' ? 'Loading crypto from Binance...' : 'Try a different segment or search'}
+            </p>
           </div>
         ) : (
-          categories.map(category => (
-            <div key={category} className="border-b border-dark-600">
-              <button
-                onClick={() => toggleSegment(category)}
-                className="w-full flex items-center justify-between px-3 py-2 hover:bg-dark-700 text-sm font-medium"
-              >
-                <span>{category} ({instrumentsByCategory[category]?.length || 0})</span>
-                {expandedSegments.includes(category) ? (
-                  <ChevronDown size={16} />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
-              </button>
-
-              {expandedSegments.includes(category) && (
-                <div className="bg-dark-900">
-                  {instrumentsByCategory[category]
-                    ?.filter(inst => 
-                      inst.symbol?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      inst.name?.toLowerCase().includes(searchTerm.toLowerCase())
-                    )
-                    .map(inst => {
-                      const priceData = getPrice(inst.token, inst.pair, inst);
-                      return (
-                        <InstrumentRow
-                          key={inst._id || `${inst.exchange}-${inst.symbol}`}
-                          instrument={{
-                            ...inst, 
-                            ltp: priceData.ltp || inst.ltp || 0, 
-                            change: priceData.change || inst.change || 0, 
-                            changePercent: priceData.changePercent || inst.changePercent || 0
-                          }}
-                          isSelected={selectedInstrument?.symbol === inst.symbol}
-                          onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                          quickMode={quickMode}
-                          onBuySell={onBuySell}
-                          inWatchlist={isInWatchlist(inst.symbol)}
-                          onAddToWatchlist={() => addToWatchlist(inst.symbol)}
-                          onRemoveFromWatchlist={() => removeFromWatchlist(inst.symbol)}
-                          isCrypto={inst.isCrypto}
-                          isDemo={inst.isDemo}
-                        />
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-          ))
+          filteredInstruments.map(inst => {
+            const priceData = inst.isCrypto ? inst : getPrice(inst.token, inst.pair, inst);
+            return (
+              <InstrumentRow
+                key={inst._id || inst.pair || `${inst.exchange}-${inst.symbol}`}
+                instrument={{
+                  ...inst, 
+                  ltp: priceData.ltp || inst.ltp || 0, 
+                  change: priceData.change || inst.change || 0, 
+                  changePercent: priceData.changePercent || inst.changePercent || 0
+                }}
+                isSelected={selectedInstrument?.symbol === inst.symbol}
+                onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
+                quickMode={quickMode}
+                onBuySell={onBuySell}
+                inWatchlist={isInWatchlist(inst.symbol)}
+                onAddToWatchlist={() => addToWatchlist(inst.symbol)}
+                onRemoveFromWatchlist={() => removeFromWatchlist(inst.symbol)}
+                isCrypto={inst.isCrypto}
+                isDemo={inst.isDemo}
+              />
+            );
+          })
         )}
       </div>
-      )}
     </aside>
   );
 };
@@ -944,65 +892,56 @@ const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFutu
   const getSymbolColor = () => {
     if (isDemo) return 'text-purple-400';
     if (isCrypto) return 'text-orange-400';
-    if (isCall) return 'text-green-400';
-    if (isPut) return 'text-red-400';
-    if (isFuture) return 'text-yellow-400';
-    return '';
+    if (isCall || instrument.optionType === 'CE') return 'text-green-400';
+    if (isPut || instrument.optionType === 'PE') return 'text-red-400';
+    if (isFuture || instrument.instrumentType === 'FUTURES') return 'text-yellow-400';
+    return 'text-white';
   };
 
   // Format price - use $ for crypto, ₹ for others
   const formatPrice = (price) => {
-    if (!price || price <= 0) return '--';
-    if (isCrypto) return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    return `₹${price.toLocaleString()}`;
+    if (!price || price <= 0) return '-';
+    if (isCrypto || instrument.isCrypto) return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+
+  const changePercent = parseFloat(instrument.changePercent) || 0;
+  const isPositive = changePercent >= 0;
 
   return (
     <div
+      onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`relative flex items-center justify-between px-4 py-2 cursor-pointer text-sm border-l-2 ${
+      className={`flex items-center justify-between px-4 py-3 cursor-pointer border-b border-dark-700 ${
         isSelected 
-          ? 'bg-dark-700 border-green-500' 
-          : 'border-transparent hover:bg-dark-700'
+          ? 'bg-dark-700' 
+          : 'hover:bg-dark-750'
       }`}
     >
-      <div onClick={onSelect} className="flex-1 min-w-0">
-        <div className={`font-medium truncate ${getSymbolColor()}`}>
+      {/* Left: Symbol and Name */}
+      <div className="flex-1 min-w-0">
+        <div className={`font-bold text-sm uppercase ${getSymbolColor()}`}>
           {instrument.symbol}
         </div>
-        <div className="text-xs text-gray-500">{instrument.exchange}</div>
-      </div>
-      <div className="text-right mr-2" onClick={onSelect}>
-        <div className={`font-mono ${instrument.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-          {formatPrice(instrument.ltp)}
+        <div className="text-xs text-gray-500 truncate">
+          {instrument.name || instrument.symbol}
         </div>
-        <div className={`text-xs ${instrument.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-          {instrument.changePercent ? `${instrument.change >= 0 ? '+' : ''}${instrument.changePercent}%` : '--'}
+      </div>
+      
+      {/* Right: Price and Change */}
+      <div className="text-right flex-shrink-0">
+        <div className="text-sm font-medium text-gray-300">
+          {formatPrice(instrument.ltp) || '-'}
+        </div>
+        <div className={`text-xs font-medium ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+          {changePercent !== 0 ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '+0.00%'}
         </div>
       </div>
 
       {/* Action Buttons - Show on hover */}
       {isHovered && (
-        <div className="flex items-center gap-1">
-          {/* Watchlist Add/Remove Button */}
-          {inWatchlist ? (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onRemoveFromWatchlist && onRemoveFromWatchlist(); }}
-              className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 rounded font-medium"
-              title="Remove from Watchlist"
-            >
-              <X size={12} />
-            </button>
-          ) : onAddToWatchlist && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onAddToWatchlist(); }}
-              className="px-2 py-1 text-xs bg-yellow-600 hover:bg-yellow-700 rounded font-medium"
-              title="Add to Watchlist"
-            >
-              <Plus size={12} />
-            </button>
-          )}
+        <div className="flex items-center gap-1 ml-2">
           {/* Buy/Sell Buttons - Indian Standard: S left, B right */}
           <button 
             onClick={(e) => { e.stopPropagation(); onBuySell('sell', instrument); }}

@@ -24,22 +24,34 @@ const instrumentSchema = new mongoose.Schema({
   // Exchange
   exchange: {
     type: String,
-    enum: ['NSE', 'BSE', 'NFO', 'MCX', 'CDS', 'BFO'],
+    enum: ['NSE', 'BSE', 'NFO', 'MCX', 'CDS', 'BFO', 'BINANCE', 'CRYPTO'],
     required: true
   },
   
   // Segment
   segment: {
     type: String,
-    enum: ['EQUITY', 'FNO', 'COMMODITY', 'CURRENCY', 'MCX'],
+    enum: ['EQUITY', 'FNO', 'COMMODITY', 'CURRENCY', 'MCX', 'CRYPTO'],
     required: true
   },
   
   // Instrument type
   instrumentType: {
     type: String,
-    enum: ['STOCK', 'INDEX', 'FUTURES', 'OPTIONS', 'COMMODITY'],
+    enum: ['STOCK', 'INDEX', 'FUTURES', 'OPTIONS', 'COMMODITY', 'CRYPTO'],
     required: true
+  },
+  
+  // For Crypto - trading pair (e.g., BTCUSDT)
+  pair: {
+    type: String,
+    default: null
+  },
+  
+  // Is this a crypto instrument
+  isCrypto: {
+    type: Boolean,
+    default: false
   },
   
   // For F&O
@@ -129,7 +141,7 @@ const instrumentSchema = new mongoose.Schema({
   // Category for grouping
   category: {
     type: String,
-    enum: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'CURRENCY', 'OTHER'],
+    enum: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'CURRENCY', 'CRYPTO', 'OTHER'],
     default: 'OTHER'
   },
   

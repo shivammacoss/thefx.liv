@@ -771,6 +771,86 @@ router.post('/admin/sync-fno-tokens', protectAdmin, superAdminOnly, async (req, 
   }
 });
 
+// ==================== SEED CRYPTO INSTRUMENTS ====================
+
+router.post('/admin/seed-crypto', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    // Popular crypto instruments
+    const cryptoInstruments = [
+      { symbol: 'BTC', name: 'Bitcoin', pair: 'BTCUSDT', lotSize: 0.001 },
+      { symbol: 'ETH', name: 'Ethereum', pair: 'ETHUSDT', lotSize: 0.01 },
+      { symbol: 'BNB', name: 'Binance Coin', pair: 'BNBUSDT', lotSize: 0.1 },
+      { symbol: 'XRP', name: 'Ripple', pair: 'XRPUSDT', lotSize: 10 },
+      { symbol: 'ADA', name: 'Cardano', pair: 'ADAUSDT', lotSize: 10 },
+      { symbol: 'DOGE', name: 'Dogecoin', pair: 'DOGEUSDT', lotSize: 100 },
+      { symbol: 'SOL', name: 'Solana', pair: 'SOLUSDT', lotSize: 0.1 },
+      { symbol: 'DOT', name: 'Polkadot', pair: 'DOTUSDT', lotSize: 1 },
+      { symbol: 'MATIC', name: 'Polygon', pair: 'MATICUSDT', lotSize: 10 },
+      { symbol: 'LTC', name: 'Litecoin', pair: 'LTCUSDT', lotSize: 0.1 },
+      { symbol: 'AVAX', name: 'Avalanche', pair: 'AVAXUSDT', lotSize: 0.1 },
+      { symbol: 'LINK', name: 'Chainlink', pair: 'LINKUSDT', lotSize: 1 },
+      { symbol: 'ATOM', name: 'Cosmos', pair: 'ATOMUSDT', lotSize: 1 },
+      { symbol: 'UNI', name: 'Uniswap', pair: 'UNIUSDT', lotSize: 1 },
+      { symbol: 'XLM', name: 'Stellar', pair: 'XLMUSDT', lotSize: 100 },
+      { symbol: 'SHIB', name: 'Shiba Inu', pair: 'SHIBUSDT', lotSize: 1000000 },
+      { symbol: 'TRX', name: 'TRON', pair: 'TRXUSDT', lotSize: 100 },
+      { symbol: 'ETC', name: 'Ethereum Classic', pair: 'ETCUSDT', lotSize: 1 },
+      { symbol: 'NEAR', name: 'NEAR Protocol', pair: 'NEARUSDT', lotSize: 1 },
+      { symbol: 'APT', name: 'Aptos', pair: 'APTUSDT', lotSize: 1 }
+    ];
+
+    let added = 0;
+    let updated = 0;
+
+    for (const crypto of cryptoInstruments) {
+      const existing = await Instrument.findOne({ symbol: crypto.symbol, exchange: 'BINANCE' });
+      
+      if (existing) {
+        await Instrument.updateOne(
+          { _id: existing._id },
+          { 
+            $set: { 
+              name: crypto.name,
+              pair: crypto.pair,
+              lotSize: crypto.lotSize,
+              isEnabled: true,
+              isCrypto: true
+            }
+          }
+        );
+        updated++;
+      } else {
+        await Instrument.create({
+          symbol: crypto.symbol,
+          name: crypto.name,
+          exchange: 'BINANCE',
+          token: crypto.pair,
+          pair: crypto.pair,
+          segment: 'CRYPTO',
+          category: 'CRYPTO',
+          instrumentType: 'CRYPTO',
+          lotSize: crypto.lotSize,
+          tickSize: 0.01,
+          isEnabled: true,
+          isFeatured: false,
+          isCrypto: true
+        });
+        added++;
+      }
+    }
+
+    res.json({
+      message: 'Crypto instruments seeded successfully',
+      added,
+      updated,
+      total: cryptoInstruments.length
+    });
+  } catch (error) {
+    console.error('Seed crypto error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==================== WEBSOCKET STATUS ====================
 
 router.get('/websocket/status', protectAdmin, (req, res) => {
