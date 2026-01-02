@@ -213,7 +213,15 @@ router.put('/admins/:id/lot-settings', protectAdmin, superAdminOnly, async (req,
 // Create user (Super Admin only) - can assign to any admin
 router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
   try {
-    const { username, email, password, fullName, phone, adminCode, initialBalance } = req.body;
+    const { 
+      username, email, password, fullName, phone, adminCode, initialBalance,
+      // New settings
+      marginType, ledgerBalanceClosePercent, profitTradeHoldSeconds, lossTradeHoldSeconds,
+      // Toggle settings
+      isActivated, isReadOnly, isDemo, intradaySquare, blockLimitAboveBelowHighLow, blockLimitBetweenHighLow,
+      // Segment permissions
+      allowedSegments, segmentPermissions
+    } = req.body;
     
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'Username, email and password are required' });
@@ -236,7 +244,7 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
       }
     }
     
-    // Create user
+    // Create user with all settings
     const user = await User.create({
       username,
       email,
@@ -247,9 +255,32 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
       admin: targetAdmin?._id || null,
       wallet: {
         balance: initialBalance || 0,
+        cashBalance: initialBalance || 0,
         blocked: 0
       },
-      isActive: true
+      isActive: isActivated !== false,
+      // New settings
+      settings: {
+        marginType: marginType || 'exposure',
+        ledgerBalanceClosePercent: ledgerBalanceClosePercent || 90,
+        profitTradeHoldSeconds: profitTradeHoldSeconds || 0,
+        lossTradeHoldSeconds: lossTradeHoldSeconds || 0,
+        isActivated: isActivated !== false,
+        isReadOnly: isReadOnly || false,
+        isDemo: isDemo || false,
+        intradaySquare: intradaySquare || false,
+        blockLimitAboveBelowHighLow: blockLimitAboveBelowHighLow || false,
+        blockLimitBetweenHighLow: blockLimitBetweenHighLow || false
+      },
+      // Segment permissions
+      segmentPermissions: segmentPermissions || {
+        showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
+        showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
+        showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
+        showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
+        showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
+      },
+      allowedSegments: allowedSegments || ['NSE', 'MCX', 'EQ']
     });
     
     // Update admin stats if assigned to an admin
@@ -266,7 +297,10 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
         userId: user.userId,
         username: user.username,
         email: user.email,
-        adminCode: user.adminCode
+        adminCode: user.adminCode,
+        settings: user.settings,
+        segmentPermissions: user.segmentPermissions,
+        allowedSegments: user.allowedSegments
       }
     });
   } catch (error) {

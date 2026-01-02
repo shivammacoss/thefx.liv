@@ -1168,8 +1168,32 @@ const SuperAdminCreateUser = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [formData, setFormData] = useState({
-    username: '', email: '', password: '', fullName: '', phone: '', initialBalance: 0
+    username: '', email: '', password: '', fullName: '', phone: '', initialBalance: 0,
+    // Settings
+    marginType: 'exposure',
+    ledgerBalanceClosePercent: 90,
+    profitTradeHoldSeconds: 0,
+    lossTradeHoldSeconds: 0,
+    // Toggles
+    isActivated: true,
+    isReadOnly: false,
+    isDemo: false,
+    intradaySquare: false,
+    blockLimitAboveBelowHighLow: false,
+    blockLimitBetweenHighLow: false,
+    // Allowed Segments
+    allowedSegments: ['NSE', 'MCX', 'EQ'],
+    // Segment Permissions
+    segmentPermissions: {
+      showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
+      showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
+      showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
+      showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
+      showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
+    }
   });
+
+  const segmentOptions = ['NSE', 'MCX', 'BFO', 'EQ', 'CRYPTO', 'COMEX', 'FOREX', 'GLOBALINDEX'];
 
   useEffect(() => {
     fetchAdmins();
@@ -1180,7 +1204,6 @@ const SuperAdminCreateUser = () => {
       const { data } = await axios.get('/api/admin/manage/admins', {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
-      // Include Super Admin option
       const allAdmins = [
         { _id: 'SUPER', username: 'Super Admin (Direct)', adminCode: 'SUPER' },
         ...data
@@ -1192,13 +1215,31 @@ const SuperAdminCreateUser = () => {
     }
   };
 
+  const handleSegmentToggle = (segment) => {
+    setFormData(prev => ({
+      ...prev,
+      allowedSegments: prev.allowedSegments.includes(segment)
+        ? prev.allowedSegments.filter(s => s !== segment)
+        : [...prev.allowedSegments, segment]
+    }));
+  };
+
+  const handlePermissionToggle = (key) => {
+    setFormData(prev => ({
+      ...prev,
+      segmentPermissions: {
+        ...prev.segmentPermissions,
+        [key]: !prev.segmentPermissions[key]
+      }
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setMessage({ type: '', text: '' });
 
     try {
-      // Get the selected admin's adminCode
       const targetAdmin = admins.find(a => a._id === selectedAdmin);
       const adminCode = targetAdmin?.adminCode || 'SUPER';
 
@@ -1210,7 +1251,21 @@ const SuperAdminCreateUser = () => {
       });
 
       setMessage({ type: 'success', text: `User created successfully! User ID: ${data.user?.userId || data.userId}` });
-      setFormData({ username: '', email: '', password: '', fullName: '', phone: '', initialBalance: 0 });
+      // Reset form
+      setFormData({
+        username: '', email: '', password: '', fullName: '', phone: '', initialBalance: 0,
+        marginType: 'exposure', ledgerBalanceClosePercent: 90, profitTradeHoldSeconds: 0, lossTradeHoldSeconds: 0,
+        isActivated: true, isReadOnly: false, isDemo: false, intradaySquare: false,
+        blockLimitAboveBelowHighLow: false, blockLimitBetweenHighLow: false,
+        allowedSegments: ['NSE', 'MCX', 'EQ'],
+        segmentPermissions: {
+          showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
+          showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
+          showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
+          showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
+          showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
+        }
+      });
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.message || 'Failed to create user' });
     } finally {
@@ -1218,11 +1273,25 @@ const SuperAdminCreateUser = () => {
     }
   };
 
+  // Toggle Switch Component
+  const ToggleSwitch = ({ label, checked, onChange }) => (
+    <div className="flex items-center justify-between py-2">
+      <span className="text-sm text-gray-300">{label}</span>
+      <button
+        type="button"
+        onClick={onChange}
+        className={`relative w-12 h-6 rounded-full transition-colors ${checked ? 'bg-green-600' : 'bg-dark-600'}`}
+      >
+        <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? 'left-7' : 'left-1'}`} />
+      </button>
+    </div>
+  );
+
   return (
     <div className="p-4 md:p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Create User</h1>
-        <p className="text-gray-400 text-sm mt-1">Create a new user and assign to any admin</p>
+        <p className="text-gray-400 text-sm mt-1">Create a new user with comprehensive settings</p>
       </div>
 
       {message.text && (
@@ -1231,8 +1300,11 @@ const SuperAdminCreateUser = () => {
         </div>
       )}
 
-      <div className="bg-dark-800 rounded-lg p-6 max-w-2xl">
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column - Basic Info */}
+        <div className="bg-dark-800 rounded-lg p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Basic Information</h2>
+          
           {/* Assign to Admin */}
           <div>
             <label className="block text-sm text-gray-400 mb-2">Assign to Admin</label>
@@ -1242,9 +1314,7 @@ const SuperAdminCreateUser = () => {
               className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
             >
               {admins.map(a => (
-                <option key={a._id} value={a._id}>
-                  {a.username} ({a.adminCode})
-                </option>
+                <option key={a._id} value={a._id}>{a.username} ({a.adminCode})</option>
               ))}
             </select>
           </div>
@@ -1320,15 +1390,187 @@ const SuperAdminCreateUser = () => {
             />
           </div>
 
+          {/* Margin Type */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Margin Type</label>
+            <select
+              value={formData.marginType}
+              onChange={(e) => setFormData({ ...formData, marginType: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+            >
+              <option value="exposure">Exposure</option>
+              <option value="margin">Margin</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Right Column - Settings */}
+        <div className="space-y-6">
+          {/* Trading Settings */}
+          <div className="bg-dark-800 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-yellow-500 mb-4">Trading Settings</h2>
+            
+            {/* Ledger Balance Close % */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Ledger Balance Close (%)</label>
+              <input
+                type="number"
+                value={formData.ledgerBalanceClosePercent}
+                onChange={(e) => setFormData({ ...formData, ledgerBalanceClosePercent: parseInt(e.target.value) || 90 })}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                min="0"
+                max="100"
+              />
+              <p className="text-xs text-gray-500 mt-1">Close positions when loss reaches this % of ledger balance</p>
+            </div>
+
+            {/* Profit Trade Hold Seconds */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Profit Trade Hold (seconds)</label>
+              <input
+                type="number"
+                value={formData.profitTradeHoldSeconds}
+                onChange={(e) => setFormData({ ...formData, profitTradeHoldSeconds: parseInt(e.target.value) || 0 })}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                min="0"
+              />
+            </div>
+
+            {/* Loss Trade Hold Seconds */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Loss Trade Hold (seconds)</label>
+              <input
+                type="number"
+                value={formData.lossTradeHoldSeconds}
+                onChange={(e) => setFormData({ ...formData, lossTradeHoldSeconds: parseInt(e.target.value) || 0 })}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                min="0"
+              />
+            </div>
+          </div>
+
+          {/* Toggle Settings */}
+          <div className="bg-dark-800 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-yellow-500 mb-4">Account Controls</h2>
+            <ToggleSwitch 
+              label="Activation" 
+              checked={formData.isActivated} 
+              onChange={() => setFormData({ ...formData, isActivated: !formData.isActivated })} 
+            />
+            <ToggleSwitch 
+              label="Read Only" 
+              checked={formData.isReadOnly} 
+              onChange={() => setFormData({ ...formData, isReadOnly: !formData.isReadOnly })} 
+            />
+            <ToggleSwitch 
+              label="Demo Account" 
+              checked={formData.isDemo} 
+              onChange={() => setFormData({ ...formData, isDemo: !formData.isDemo })} 
+            />
+            <ToggleSwitch 
+              label="Intraday Square (3:29 PM)" 
+              checked={formData.intradaySquare} 
+              onChange={() => setFormData({ ...formData, intradaySquare: !formData.intradaySquare })} 
+            />
+            <ToggleSwitch 
+              label="Block Limit Above/Below High Low" 
+              checked={formData.blockLimitAboveBelowHighLow} 
+              onChange={() => setFormData({ ...formData, blockLimitAboveBelowHighLow: !formData.blockLimitAboveBelowHighLow })} 
+            />
+            <ToggleSwitch 
+              label="Block Limit Between High Low" 
+              checked={formData.blockLimitBetweenHighLow} 
+              onChange={() => setFormData({ ...formData, blockLimitBetweenHighLow: !formData.blockLimitBetweenHighLow })} 
+            />
+          </div>
+        </div>
+
+        {/* Segment Allow - Full Width */}
+        <div className="lg:col-span-2 bg-dark-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Allow</h2>
+          <p className="text-sm text-gray-400 mb-4">Select the segments you want to allow for this user</p>
+          <div className="flex flex-wrap gap-2">
+            {segmentOptions.map(segment => (
+              <button
+                key={segment}
+                type="button"
+                onClick={() => handleSegmentToggle(segment)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  formData.allowedSegments.includes(segment)
+                    ? 'bg-green-600 text-white'
+                    : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                }`}
+              >
+                {segment}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Segment Permissions - Full Width */}
+        <div className="lg:col-span-2 bg-dark-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Permissions</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {/* MCX */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">MCX</h3>
+              <ToggleSwitch label="Show MCX" checked={formData.segmentPermissions.showMCX} onChange={() => handlePermissionToggle('showMCX')} />
+              <ToggleSwitch label="MCX Opt Buy" checked={formData.segmentPermissions.showMCXOptBuy} onChange={() => handlePermissionToggle('showMCXOptBuy')} />
+              <ToggleSwitch label="MCX Opt Sell" checked={formData.segmentPermissions.showMCXOptSell} onChange={() => handlePermissionToggle('showMCXOptSell')} />
+              <ToggleSwitch label="MCX Opt" checked={formData.segmentPermissions.showMCXOpt} onChange={() => handlePermissionToggle('showMCXOpt')} />
+            </div>
+            
+            {/* NSE Index */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">NSE Index</h3>
+              <ToggleSwitch label="Show NSE" checked={formData.segmentPermissions.showNSE} onChange={() => handlePermissionToggle('showNSE')} />
+              <ToggleSwitch label="IDX NSE" checked={formData.segmentPermissions.showIDXNSE} onChange={() => handlePermissionToggle('showIDXNSE')} />
+              <ToggleSwitch label="IDX Opt Buy" checked={formData.segmentPermissions.showIDXOptBuy} onChange={() => handlePermissionToggle('showIDXOptBuy')} />
+              <ToggleSwitch label="IDX Opt Sell" checked={formData.segmentPermissions.showIDXOptSell} onChange={() => handlePermissionToggle('showIDXOptSell')} />
+              <ToggleSwitch label="IDX Opt" checked={formData.segmentPermissions.showIDXOpt} onChange={() => handlePermissionToggle('showIDXOpt')} />
+            </div>
+            
+            {/* Stock Options */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">Stock Options</h3>
+              <ToggleSwitch label="STK Opt Buy" checked={formData.segmentPermissions.showSTKOptBuy} onChange={() => handlePermissionToggle('showSTKOptBuy')} />
+              <ToggleSwitch label="STK Opt Sell" checked={formData.segmentPermissions.showSTKOptSell} onChange={() => handlePermissionToggle('showSTKOptSell')} />
+              <ToggleSwitch label="STK Opt" checked={formData.segmentPermissions.showSTKOpt} onChange={() => handlePermissionToggle('showSTKOpt')} />
+              <ToggleSwitch label="STK NSE" checked={formData.segmentPermissions.showSTKNSE} onChange={() => handlePermissionToggle('showSTKNSE')} />
+              <ToggleSwitch label="STK EQ" checked={formData.segmentPermissions.showSTKEQ} onChange={() => handlePermissionToggle('showSTKEQ')} />
+            </div>
+            
+            {/* BSE */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">BSE</h3>
+              <ToggleSwitch label="BSE Opt Buy" checked={formData.segmentPermissions.showBSEOptBuy} onChange={() => handlePermissionToggle('showBSEOptBuy')} />
+              <ToggleSwitch label="BSE Opt Sell" checked={formData.segmentPermissions.showBSEOptSell} onChange={() => handlePermissionToggle('showBSEOptSell')} />
+              <ToggleSwitch label="BSE Opt" checked={formData.segmentPermissions.showBSEOpt} onChange={() => handlePermissionToggle('showBSEOpt')} />
+              <ToggleSwitch label="IDX BSE" checked={formData.segmentPermissions.showIDXBSE} onChange={() => handlePermissionToggle('showIDXBSE')} />
+            </div>
+            
+            {/* Others */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">Others</h3>
+              <ToggleSwitch label="CRYPTO" checked={formData.segmentPermissions.showCRYPTO} onChange={() => handlePermissionToggle('showCRYPTO')} />
+              <ToggleSwitch label="FOREX" checked={formData.segmentPermissions.showFOREX} onChange={() => handlePermissionToggle('showFOREX')} />
+              <ToggleSwitch label="COMEX" checked={formData.segmentPermissions.showCOMEX} onChange={() => handlePermissionToggle('showCOMEX')} />
+              <ToggleSwitch label="GLOBAL INDEX" checked={formData.segmentPermissions.showGLOBALINDEX} onChange={() => handlePermissionToggle('showGLOBALINDEX')} />
+            </div>
+          </div>
+        </div>
+
+        {/* Submit Button - Full Width */}
+        <div className="lg:col-span-2">
           <button
             type="submit"
             disabled={loading}
             className="w-full py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? 'Creating...' : 'Create User'}
+            {loading ? 'Creating User...' : 'Create User'}
           </button>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   );
 };

@@ -187,6 +187,104 @@ const userSchema = new mongoose.Schema({
       default: null
     }
   },
+  
+  // ========== NEW USER SETTINGS ==========
+  
+  // Account Settings
+  settings: {
+    // Margin Type: 'exposure' or 'margin'
+    marginType: {
+      type: String,
+      enum: ['exposure', 'margin'],
+      default: 'exposure'
+    },
+    
+    // Ledger Balance Close % - Close positions when loss reaches X% of ledger
+    ledgerBalanceClosePercent: {
+      type: Number,
+      default: 90
+    },
+    
+    // Profit Trade Hold Min Seconds
+    profitTradeHoldSeconds: {
+      type: Number,
+      default: 0
+    },
+    
+    // Loss Trade Hold Min Seconds
+    lossTradeHoldSeconds: {
+      type: Number,
+      default: 0
+    },
+    
+    // Toggle Settings
+    isActivated: {
+      type: Boolean,
+      default: true
+    },
+    isReadOnly: {
+      type: Boolean,
+      default: false
+    },
+    isDemo: {
+      type: Boolean,
+      default: false
+    },
+    intradaySquare: {
+      type: Boolean,
+      default: false
+    },
+    blockLimitAboveBelowHighLow: {
+      type: Boolean,
+      default: false
+    },
+    blockLimitBetweenHighLow: {
+      type: Boolean,
+      default: false
+    }
+  },
+  
+  // Segment Permissions - Which segments user can trade
+  segmentPermissions: {
+    // MCX
+    showMCX: { type: Boolean, default: true },
+    showMCXOptBuy: { type: Boolean, default: true },
+    showMCXOptSell: { type: Boolean, default: true },
+    showMCXOpt: { type: Boolean, default: true },
+    
+    // NSE
+    showNSE: { type: Boolean, default: true },
+    showIDXNSE: { type: Boolean, default: true },
+    showIDXOptBuy: { type: Boolean, default: true },
+    showIDXOptSell: { type: Boolean, default: true },
+    showIDXOpt: { type: Boolean, default: true },
+    
+    // Stock Options
+    showSTKOptBuy: { type: Boolean, default: true },
+    showSTKOptSell: { type: Boolean, default: true },
+    showSTKOpt: { type: Boolean, default: true },
+    showSTKNSE: { type: Boolean, default: true },
+    showSTKEQ: { type: Boolean, default: true },
+    
+    // BSE
+    showBSEOptBuy: { type: Boolean, default: true },
+    showBSEOptSell: { type: Boolean, default: true },
+    showBSEOpt: { type: Boolean, default: true },
+    showIDXBSE: { type: Boolean, default: true },
+    
+    // Others
+    showCRYPTO: { type: Boolean, default: false },
+    showFOREX: { type: Boolean, default: false },
+    showCOMEX: { type: Boolean, default: false },
+    showGLOBALINDEX: { type: Boolean, default: false }
+  },
+  
+  // Allowed Segments (simplified list)
+  allowedSegments: [{
+    type: String,
+    enum: ['NSE', 'MCX', 'BFO', 'EQ', 'CRYPTO', 'COMEX', 'FOREX', 'GLOBALINDEX']
+  }],
+  
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Admin'
