@@ -370,8 +370,25 @@ router.get('/historical/:instrumentToken', async (req, res) => {
       return res.json([]); // Return empty array instead of error
     }
     
-    const { instrumentToken } = req.params;
-    const { interval } = req.query;
+    let { instrumentToken } = req.params;
+    const { interval, symbol, exchange } = req.query;
+    
+    // If token is not numeric, try to find it from database
+    if (isNaN(parseInt(instrumentToken))) {
+      const Instrument = (await import('../models/Instrument.js')).default;
+      const inst = await Instrument.findOne({ 
+        $or: [
+          { symbol: instrumentToken },
+          { symbol: symbol },
+          { tradingSymbol: instrumentToken }
+        ]
+      });
+      if (inst) {
+        instrumentToken = inst.token;
+      } else {
+        return res.json([]);
+      }
+    }
     
     // Map frontend interval to Zerodha interval
     const intervalMap = {
@@ -380,23 +397,41 @@ router.get('/historical/:instrumentToken', async (req, res) => {
       'FIFTEEN_MINUTE': '15minute',
       'THIRTY_MINUTE': '30minute',
       'ONE_HOUR': '60minute',
-      'ONE_DAY': 'day'
+      'ONE_DAY': 'day',
+      '1': 'minute',
+      '5': '5minute',
+      '15': '15minute',
+      '30': '30minute',
+      '60': '60minute',
+      'D': 'day',
+      '1D': 'day'
     };
     
     const zerodhaInterval = intervalMap[interval] || '15minute';
     
-    // Calculate date range (last 30 days for intraday, 1 year for daily)
+    // Calculate date range based on interval
     const now = new Date();
     const to = now.toISOString().split('T')[0];
     const fromDate = new Date();
+    
     if (zerodhaInterval === 'day') {
       fromDate.setFullYear(fromDate.getFullYear() - 1);
+    } else if (zerodhaInterval === 'minute') {
+      fromDate.setDate(fromDate.getDate() - 5); // 5 days for 1-min
+    } else if (zerodhaInterval === '5minute') {
+      fromDate.setDate(fromDate.getDate() - 15); // 15 days for 5-min
+    } else if (zerodhaInterval === '15minute') {
+      fromDate.setDate(fromDate.getDate() - 30); // 30 days for 15-min
+    } else if (zerodhaInterval === '30minute' || zerodhaInterval === '60minute') {
+      fromDate.setDate(fromDate.getDate() - 60); // 60 days for 30/60-min
     } else {
       fromDate.setDate(fromDate.getDate() - 30);
     }
     const from = fromDate.toISOString().split('T')[0];
     
     const apiKey = process.env.ZERODHA_API_KEY;
+    
+    console.log(`Fetching historical data for token ${instrumentToken}, interval ${zerodhaInterval}, from ${from} to ${to}`);
     
     const response = await axios.get(
       `https://api.kite.trade/instruments/historical/${instrumentToken}/${zerodhaInterval}?from=${from}&to=${to}`,
@@ -418,6 +453,7 @@ router.get('/historical/:instrumentToken', async (req, res) => {
         close: c[4],
         volume: c[5]
       }));
+      console.log(`Returning ${candles.length} candles for ${instrumentToken}`);
       res.json(candles);
     } else {
       res.json([]);
@@ -554,6 +590,319 @@ router.post('/seed-mcx', protectAdmin, superAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error('Seed MCX error:', error.response?.data || error.message);
+    res.status(500).json({ message: error.response?.data?.message || error.message });
+  }
+});
+
+// Sync ALL instruments from Zerodha and save to database
+router.post('/sync-all-instruments', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    if (!zerodhaSession.accessToken) {
+      return res.status(401).json({ message: 'Not logged in to Zerodha. Please connect first.' });
+    }
+    
+    const apiKey = process.env.ZERODHA_API_KEY;
+    
+    // Download instruments CSV from Zerodha
+    console.log('Downloading instruments from Zerodha...');
+    const response = await axios.get(
+      'https://api.kite.trade/instruments',
+      {
+        headers: {
+          'X-Kite-Version': '3',
+          'Authorization': `token ${apiKey}:${zerodhaSession.accessToken}`
+        }
+      }
+    );
+    
+    // Parse CSV
+    const lines = response.data.split('\n');
+    const headers = lines[0].split(',');
+    
+    const allInstruments = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      
+      const values = lines[i].split(',');
+      const inst = {};
+      headers.forEach((h, idx) => {
+        inst[h.trim()] = values[idx]?.trim();
+      });
+      allInstruments.push(inst);
+    }
+    
+    console.log(`Total instruments from Zerodha: ${allInstruments.length}`);
+    
+    const Instrument = (await import('../models/Instrument.js')).default;
+    
+    let added = 0;
+    let updated = 0;
+    let errors = 0;
+    
+    // 1. NSE Equity (Stocks) - Top 200 by volume/popularity
+    const nseEquity = allInstruments.filter(i => 
+      i.exchange === 'NSE' && 
+      i.segment === 'NSE' &&
+      i.instrument_type === 'EQ'
+    );
+    
+    // Popular stocks list (Nifty 50 + Nifty Next 50 + popular ones)
+    const popularStocks = [
+      'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR', 'SBIN', 'BHARTIARTL',
+      'KOTAKBANK', 'ITC', 'LT', 'AXISBANK', 'ASIANPAINT', 'MARUTI', 'TITAN', 'BAJFINANCE',
+      'SUNPHARMA', 'ULTRACEMCO', 'NESTLEIND', 'WIPRO', 'HCLTECH', 'TATAMOTORS', 'POWERGRID',
+      'NTPC', 'ONGC', 'JSWSTEEL', 'TATASTEEL', 'ADANIENT', 'ADANIPORTS', 'COALINDIA',
+      'BAJAJFINSV', 'TECHM', 'GRASIM', 'INDUSINDBK', 'HINDALCO', 'DRREDDY', 'CIPLA',
+      'EICHERMOT', 'DIVISLAB', 'BPCL', 'BRITANNIA', 'HEROMOTOCO', 'APOLLOHOSP', 'SBILIFE',
+      'HDFCLIFE', 'TATACONSUM', 'UPL', 'SHREECEM', 'BAJAJ-AUTO', 'M&M',
+      // Additional popular stocks
+      'ZOMATO', 'PAYTM', 'NYKAA', 'DELHIVERY', 'IRCTC', 'TATAELXSI', 'PERSISTENT',
+      'COFORGE', 'MPHASIS', 'LTIM', 'PIIND', 'AARTIIND', 'DEEPAKNTR', 'NAVINFLUOR',
+      'AUROPHARMA', 'BIOCON', 'LUPIN', 'TORNTPHARM', 'ALKEM', 'IPCALAB',
+      'BANKBARODA', 'PNB', 'CANBK', 'UNIONBANK', 'IOB', 'FEDERALBNK', 'IDFCFIRSTB',
+      'VEDL', 'NMDC', 'SAIL', 'JINDALSTEL', 'NATIONALUM', 'HINDZINC',
+      'TATAPOWER', 'ADANIGREEN', 'ADANIPOWER', 'NHPC', 'SJVN', 'IRFC',
+      'HAL', 'BEL', 'BHEL', 'L&TFH', 'RECLTD', 'PFC',
+      'INDIGO', 'TRENT', 'DMART', 'PAGEIND', 'MANYAVAR', 'ABFRL',
+      'PIDILITIND', 'BERGEPAINT', 'KANSAINER', 'AKZONOBEL',
+      'GODREJCP', 'DABUR', 'MARICO', 'COLPAL', 'EMAMILTD',
+      'HAVELLS', 'VOLTAS', 'BLUESTARCO', 'CROMPTON', 'ORIENTELEC',
+      'POLYCAB', 'KEI', 'FINOLEX', 'AMBER',
+      'DLF', 'GODREJPROP', 'OBEROIRLTY', 'PRESTIGE', 'BRIGADE', 'SOBHA',
+      'ZYDUSLIFE', 'GLENMARK', 'NATCOPHARM', 'LAURUSLABS', 'GRANULES'
+    ];
+    
+    for (const stock of nseEquity) {
+      if (popularStocks.includes(stock.tradingsymbol)) {
+        try {
+          const existing = await Instrument.findOne({ token: stock.instrument_token });
+          const instrumentData = {
+            token: stock.instrument_token,
+            symbol: stock.tradingsymbol,
+            name: stock.name || stock.tradingsymbol,
+            exchange: 'NSE',
+            segment: 'EQUITY',
+            instrumentType: 'STOCK',
+            category: 'STOCKS',
+            lotSize: parseInt(stock.lot_size) || 1,
+            tickSize: parseFloat(stock.tick_size) || 0.05,
+            isEnabled: true,
+            isFeatured: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN'].includes(stock.tradingsymbol)
+          };
+          
+          if (existing) {
+            await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+            updated++;
+          } else {
+            await Instrument.create(instrumentData);
+            added++;
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+    }
+    
+    // 2. NSE Indices
+    const indices = allInstruments.filter(i => 
+      i.exchange === 'NSE' && i.segment === 'INDICES'
+    );
+    
+    const popularIndices = ['NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE', 'NIFTY MIDCAP 50', 'NIFTY IT', 'INDIA VIX'];
+    
+    for (const idx of indices) {
+      if (popularIndices.includes(idx.tradingsymbol)) {
+        try {
+          const existing = await Instrument.findOne({ token: idx.instrument_token });
+          const instrumentData = {
+            token: idx.instrument_token,
+            symbol: idx.tradingsymbol.replace(' ', ''),
+            name: idx.tradingsymbol,
+            exchange: 'NSE',
+            segment: 'EQUITY',
+            instrumentType: 'INDEX',
+            category: 'INDICES',
+            lotSize: 1,
+            isEnabled: true,
+            isFeatured: true
+          };
+          
+          if (existing) {
+            await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+            updated++;
+          } else {
+            await Instrument.create(instrumentData);
+            added++;
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+    }
+    
+    // 3. NFO - Futures and Options (current week + next week expiry)
+    const nfoFutures = allInstruments.filter(i => 
+      i.exchange === 'NFO' && 
+      i.instrument_type === 'FUT' &&
+      (i.name === 'NIFTY' || i.name === 'BANKNIFTY' || i.name === 'FINNIFTY')
+    );
+    
+    // Get nearest 2 expiries for futures
+    const sortedFutures = nfoFutures.sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+    const nearestFutures = sortedFutures.slice(0, 6); // 2 expiries x 3 indices
+    
+    for (const fut of nearestFutures) {
+      try {
+        const existing = await Instrument.findOne({ token: fut.instrument_token });
+        const instrumentData = {
+          token: fut.instrument_token,
+          symbol: fut.tradingsymbol,
+          name: `${fut.name} FUT`,
+          exchange: 'NFO',
+          segment: 'FNO',
+          instrumentType: 'FUTURES',
+          category: fut.name,
+          lotSize: parseInt(fut.lot_size) || 25,
+          tickSize: parseFloat(fut.tick_size) || 0.05,
+          expiry: new Date(fut.expiry),
+          tradingSymbol: fut.tradingsymbol,
+          isEnabled: true,
+          isFeatured: true
+        };
+        
+        if (existing) {
+          await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+          updated++;
+        } else {
+          await Instrument.create(instrumentData);
+          added++;
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    
+    // 4. NFO Options - ATM strikes for current week
+    const nfoOptions = allInstruments.filter(i => 
+      i.exchange === 'NFO' && 
+      (i.instrument_type === 'CE' || i.instrument_type === 'PE') &&
+      (i.name === 'NIFTY' || i.name === 'BANKNIFTY')
+    );
+    
+    // Get current week expiry options
+    const today = new Date();
+    const currentWeekOptions = nfoOptions.filter(opt => {
+      const expiry = new Date(opt.expiry);
+      const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+      return diffDays >= 0 && diffDays <= 7;
+    });
+    
+    // NIFTY ATM strikes (around 24000-24500)
+    const niftyStrikes = [23500, 23600, 23700, 23800, 23900, 24000, 24100, 24200, 24300, 24400, 24500, 24600, 24700, 24800, 24900, 25000];
+    // BANKNIFTY ATM strikes (around 51000-52000)
+    const bnStrikes = [50500, 50700, 50900, 51000, 51100, 51300, 51500, 51700, 51900, 52000, 52100, 52300, 52500];
+    
+    for (const opt of currentWeekOptions) {
+      const strike = parseFloat(opt.strike);
+      const isNiftyATM = opt.name === 'NIFTY' && niftyStrikes.includes(strike);
+      const isBNATM = opt.name === 'BANKNIFTY' && bnStrikes.includes(strike);
+      
+      if (isNiftyATM || isBNATM) {
+        try {
+          const existing = await Instrument.findOne({ token: opt.instrument_token });
+          const instrumentData = {
+            token: opt.instrument_token,
+            symbol: opt.tradingsymbol,
+            name: `${opt.name} ${strike} ${opt.instrument_type}`,
+            exchange: 'NFO',
+            segment: 'FNO',
+            instrumentType: 'OPTIONS',
+            optionType: opt.instrument_type,
+            strike: strike,
+            category: opt.name,
+            lotSize: parseInt(opt.lot_size) || 25,
+            tickSize: parseFloat(opt.tick_size) || 0.05,
+            expiry: new Date(opt.expiry),
+            tradingSymbol: opt.tradingsymbol,
+            isEnabled: true
+          };
+          
+          if (existing) {
+            await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+            updated++;
+          } else {
+            await Instrument.create(instrumentData);
+            added++;
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+    }
+    
+    // 5. MCX Commodities
+    const mcxFutures = allInstruments.filter(i => 
+      i.exchange === 'MCX' && i.instrument_type === 'FUT'
+    );
+    
+    const mcxSymbols = ['GOLD', 'GOLDM', 'SILVER', 'SILVERM', 'CRUDEOIL', 'CRUDEOILM', 'NATURALGAS', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL'];
+    
+    for (const baseSymbol of mcxSymbols) {
+      const contracts = mcxFutures.filter(i => 
+        i.tradingsymbol && i.tradingsymbol.startsWith(baseSymbol)
+      ).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+      
+      if (contracts.length > 0) {
+        const contract = contracts[0]; // Nearest expiry
+        try {
+          const existing = await Instrument.findOne({ symbol: baseSymbol, exchange: 'MCX' });
+          const instrumentData = {
+            token: contract.instrument_token,
+            symbol: baseSymbol,
+            name: contract.name || baseSymbol,
+            exchange: 'MCX',
+            segment: 'MCX',
+            instrumentType: 'FUTURES',
+            category: 'MCX',
+            lotSize: parseInt(contract.lot_size) || 1,
+            tickSize: parseFloat(contract.tick_size) || 1,
+            expiry: new Date(contract.expiry),
+            tradingSymbol: contract.tradingsymbol,
+            isEnabled: true,
+            isFeatured: ['GOLD', 'GOLDM', 'SILVER', 'CRUDEOIL'].includes(baseSymbol)
+          };
+          
+          if (existing) {
+            await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+            updated++;
+          } else {
+            await Instrument.create(instrumentData);
+            added++;
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+    }
+    
+    // Subscribe to all new tokens
+    const allDbInstruments = await Instrument.find({ isEnabled: true }).select('token').lean();
+    const tokens = allDbInstruments.map(i => parseInt(i.token)).filter(t => !isNaN(t));
+    
+    if (tokens.length > 0) {
+      subscribeTokens(tokens);
+    }
+    
+    res.json({
+      message: `Instruments synced from Zerodha`,
+      added,
+      updated,
+      errors,
+      totalInDatabase: await Instrument.countDocuments(),
+      subscribedTokens: tokens.length
+    });
+  } catch (error) {
+    console.error('Sync all instruments error:', error.response?.data || error.message);
     res.status(500).json({ message: error.response?.data?.message || error.message });
   }
 });
