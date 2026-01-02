@@ -18,7 +18,12 @@ const MARKET_HOURS = {
   BSE: { open: { hour: 9, minute: 15 }, close: { hour: 15, minute: 30 } },
   NFO: { open: { hour: 9, minute: 15 }, close: { hour: 15, minute: 30 } },
   MCX: { open: { hour: 9, minute: 0 }, close: { hour: 23, minute: 30 } },
+  BINANCE: { open: { hour: 0, minute: 0 }, close: { hour: 23, minute: 59 } }, // 24/7
+  CRYPTO: { open: { hour: 0, minute: 0 }, close: { hour: 23, minute: 59 } }, // 24/7
 };
+
+// USD to INR conversion rate
+const USD_TO_INR = 83;
 
 class TradingService {
   
@@ -39,6 +44,11 @@ class TradingService {
 
   // Check if market is open
   static isMarketOpen(exchange = 'NSE') {
+    // Crypto/Binance is always open 24/7
+    if (exchange === 'BINANCE' || exchange === 'CRYPTO') {
+      return { open: true, reason: 'Crypto markets are open 24/7' };
+    }
+    
     // Get current time in IST
     const now = new Date();
     const istOptions = { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: 'numeric', hour12: false, weekday: 'short' };
@@ -48,7 +58,7 @@ class TradingService {
     const [weekday, time] = istTimeStr.split(' ');
     const [hours, minutes] = time.split(':').map(Number);
     
-    // Check weekend
+    // Check weekend (not for crypto)
     if (weekday === 'Sat' || weekday === 'Sun') {
       return { open: false, reason: 'Market closed on weekends' };
     }
@@ -89,11 +99,19 @@ class TradingService {
   static calculateMargin(order, user, leverage = 1) {
     const { segment, productType, side, quantity, price, lotSize = 1 } = order;
     const effectiveLotSize = lotSize || this.getLotSize(order.symbol, order.category);
-    const tradeValue = quantity * effectiveLotSize * price;
+    
+    // For crypto, convert USD to INR for margin calculation
+    const isCrypto = segment === 'CRYPTO' || order.isCrypto || order.exchange === 'BINANCE';
+    const effectivePrice = isCrypto ? price * USD_TO_INR : price;
+    const tradeValue = quantity * effectiveLotSize * effectivePrice;
     
     let baseMargin = 0;
 
-    if (segment === 'EQUITY' || segment === 'equity') {
+    if (isCrypto) {
+      // Crypto spot trading - full value required (1x leverage for spot)
+      baseMargin = tradeValue;
+      if (productType === 'MIS') baseMargin *= 0.1; // 10% margin for crypto intraday
+    } else if (segment === 'EQUITY' || segment === 'equity') {
       if (productType === 'CNC') {
         baseMargin = side === 'BUY' ? tradeValue : 0;
       } else if (productType === 'MIS') {
@@ -124,7 +142,8 @@ class TradingService {
       marginRequired: Math.round(marginRequired * 100) / 100,
       tradeValue: Math.round(tradeValue * 100) / 100,
       effectiveMargin: Math.round(baseMargin * 100) / 100,
-      leverage
+      leverage,
+      isCrypto
     };
   }
 
@@ -233,6 +252,9 @@ class TradingService {
       throw new Error('User not linked to any admin. Please contact support.');
     }
 
+    // Determine if crypto trade
+    const isCrypto = orderData.segment === 'CRYPTO' || orderData.isCrypto || orderData.exchange === 'BINANCE';
+    
     const trade = new Trade({
       user: userId,
       userId: user.userId,
@@ -241,7 +263,9 @@ class TradingService {
       instrumentType: orderData.instrumentType || 'OPTIONS',
       symbol: orderData.symbol,
       token: orderData.token, // Store token for price lookup
-      exchange: orderData.exchange || 'NFO',
+      pair: orderData.pair, // For crypto trading pairs
+      isCrypto: isCrypto,
+      exchange: orderData.exchange || (isCrypto ? 'BINANCE' : 'NFO'),
       expiry: orderData.expiry,
       strike: orderData.strike,
       optionType: orderData.optionType,

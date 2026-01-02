@@ -4011,14 +4011,17 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Get live price data from marketData
+  // Determine if crypto
+  const isCrypto = instrument?.isCrypto || instrument?.segment === 'CRYPTO' || instrument?.exchange === 'BINANCE';
+  
+  // Get live price data from marketData or instrument (for crypto)
   const liveData = marketData[instrument?.token] || {};
-  const ltp = liveData.ltp || instrument?.ltp || 0;
-  const liveBid = liveData.bid || ltp;
-  const liveAsk = liveData.ask || ltp;
+  const ltp = isCrypto ? (instrument?.ltp || 0) : (liveData.ltp || instrument?.ltp || 0);
+  const liveBid = isCrypto ? ltp : (liveData.bid || ltp);
+  const liveAsk = isCrypto ? ltp : (liveData.ask || ltp);
 
   const lotSize = instrument?.lotSize || 1;
-  const totalQuantity = parseInt(quantity || 1) * lotSize;
+  const totalQuantity = parseFloat(quantity || 1) * lotSize;
   const orderValue = ltp * totalQuantity;
 
   // Determine segment type
@@ -4026,7 +4029,11 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const isMCX = instrument?.segment === 'MCX' || instrument?.exchange === 'MCX';
 
   // Product types based on segment
-  const productTypes = isFnO || isMCX
+  const productTypes = isCrypto
+    ? [
+        { value: 'MIS', label: 'Spot', desc: 'Crypto spot trading' }
+      ]
+    : isFnO || isMCX
     ? [
         { value: 'MIS', label: 'Intraday', desc: 'Square off same day' },
         { value: 'NRML', label: 'Carry Forward', desc: 'Hold overnight' }
@@ -4051,9 +4058,11 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
       const orderData = {
         symbol: instrument.symbol,
         token: instrument.token,
-        exchange: instrument.exchange,
-        segment: instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO'),
-        instrumentType: instrument.instrumentType || 'FUTURES',
+        pair: instrument.pair, // For crypto
+        isCrypto: isCrypto,
+        exchange: instrument.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
+        segment: isCrypto ? 'CRYPTO' : (instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO')),
+        instrumentType: isCrypto ? 'CRYPTO' : (instrument.instrumentType || 'FUTURES'),
         optionType: instrument.optionType || null,
         strike: instrument.strike || null,
         expiry: instrument.expiry || null,
@@ -4062,11 +4071,11 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
         orderType: orderPriceType,
         side: orderType.toUpperCase(),
         quantity: totalQuantity,
-        lots: parseInt(quantity),
+        lots: parseFloat(quantity),
         lotSize: lotSize,
         price: ltp,
-        bidPrice: liveBid, // Send bid price for SELL orders
-        askPrice: liveAsk, // Send ask price for BUY orders
+        bidPrice: liveBid,
+        askPrice: liveAsk,
         leverage: 1
       };
 
@@ -4082,9 +4091,10 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
 
       // Show trade executed popup with details
       const trade = data.trade;
+      const priceSymbol = isCrypto ? '$' : '₹';
       const statusMsg = trade?.status === 'PENDING' 
-        ? `📋 LIMIT ORDER PLACED - ${instrument.symbol} @ ₹${limitPrice}` 
-        : `✅ TRADE EXECUTED - ${trade?.side} ${instrument.symbol} @ ₹${trade?.entryPrice?.toLocaleString()} | Qty: ${trade?.quantity}`;
+        ? `📋 LIMIT ORDER PLACED - ${instrument.symbol} @ ${priceSymbol}${limitPrice}` 
+        : `✅ TRADE EXECUTED - ${trade?.side} ${instrument.symbol} @ ${priceSymbol}${trade?.entryPrice?.toLocaleString()} | Qty: ${trade?.quantity}`;
       
       setSuccess(statusMsg);
       // Refresh wallet and positions after successful order
@@ -4129,8 +4139,8 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
                 : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
             }`}
           >
-            <div className="text-xs opacity-70">Bid Price</div>
-            <div className="text-xl">₹{liveBid?.toLocaleString() || '--'}</div>
+            <div className="text-xs opacity-70">{isCrypto ? 'Price' : 'Bid Price'}</div>
+            <div className="text-xl">{isCrypto ? '$' : '₹'}{liveBid?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '--'}</div>
             <div className="text-sm">SELL</div>
           </button>
           <button
@@ -4141,8 +4151,8 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
                 : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
             }`}
           >
-            <div className="text-xs opacity-70">Ask Price</div>
-            <div className="text-xl">₹{liveAsk?.toLocaleString() || '--'}</div>
+            <div className="text-xs opacity-70">{isCrypto ? 'Price' : 'Ask Price'}</div>
+            <div className="text-xl">{isCrypto ? '$' : '₹'}{liveAsk?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '--'}</div>
             <div className="text-sm">BUY</div>
           </button>
         </div>

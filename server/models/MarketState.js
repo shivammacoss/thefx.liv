@@ -25,6 +25,18 @@ const marketStateSchema = new mongoose.Schema({
       openTime: { type: String, default: '09:15' },
       closeTime: { type: String, default: '15:30' },
       intradaySquareOffTime: { type: String, default: '15:25' }
+    },
+    MCX: {
+      isOpen: { type: Boolean, default: false },
+      openTime: { type: String, default: '09:00' },
+      closeTime: { type: String, default: '23:30' },
+      intradaySquareOffTime: { type: String, default: '23:25' }
+    },
+    CRYPTO: {
+      isOpen: { type: Boolean, default: true }, // Crypto is 24/7
+      openTime: { type: String, default: '00:00' },
+      closeTime: { type: String, default: '23:59' },
+      intradaySquareOffTime: { type: String, default: '23:59' }
     }
   },
   
@@ -68,6 +80,11 @@ marketStateSchema.statics.getState = async function() {
 
 // Static method to check if trading is allowed
 marketStateSchema.statics.isTradingAllowed = async function(segment = 'EQUITY') {
+  // CRYPTO is always open 24/7
+  if (segment === 'CRYPTO') {
+    return true;
+  }
+  
   const state = await this.getState();
   
   // If manual override is on, use global status

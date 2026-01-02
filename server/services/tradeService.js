@@ -43,7 +43,7 @@ class TradeService {
   
   // Open a new trade
   static async openTrade(tradeData, userId) {
-    // 1. Check market status
+    // 1. Check market status (CRYPTO is always open)
     await this.checkMarketOpen(tradeData.segment);
     
     // 2. Get user and admin
@@ -55,6 +55,8 @@ class TradeService {
     
     // 3. Get leverage from admin charges
     let leverage = 1;
+    const isCrypto = tradeData.segment === 'CRYPTO' || tradeData.isCrypto;
+    
     if (tradeData.productType === 'MIS') {
       if (tradeData.segment === 'EQUITY') {
         leverage = admin.charges?.intradayLeverage || 5;
@@ -64,14 +66,27 @@ class TradeService {
         leverage = tradeData.side === 'BUY' 
           ? admin.charges?.optionBuyLeverage || 1
           : admin.charges?.optionSellLeverage || 1;
+      } else if (isCrypto) {
+        // Crypto leverage (default 1x for spot, can be configured)
+        leverage = admin.charges?.cryptoLeverage || 1;
       }
     }
     
     // 4. Calculate required margin
     const lotSize = tradeData.lotSize || 1;
     const lots = tradeData.lots || Math.ceil(tradeData.quantity / lotSize);
+    
+    // For crypto, price is in USD - convert to INR for margin calculation
+    let entryPrice = tradeData.entryPrice;
+    const usdToInr = 83; // Approximate USD to INR rate
+    
+    if (isCrypto) {
+      // Crypto prices are in USD, convert to INR for margin
+      entryPrice = tradeData.entryPrice * usdToInr;
+    }
+    
     const requiredMargin = this.calculateMargin(
-      tradeData.entryPrice,
+      entryPrice,
       tradeData.quantity,
       lotSize,
       leverage,
@@ -93,16 +108,19 @@ class TradeService {
       segment: tradeData.segment,
       instrumentType: tradeData.instrumentType,
       symbol: tradeData.symbol,
-      exchange: tradeData.exchange || 'NSE',
+      token: tradeData.token,
+      pair: tradeData.pair, // For crypto
+      isCrypto: isCrypto,
+      exchange: tradeData.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
       expiry: tradeData.expiry,
       strike: tradeData.strike,
       optionType: tradeData.optionType,
       side: tradeData.side,
-      productType: tradeData.productType,
+      productType: tradeData.productType || (isCrypto ? 'MIS' : 'MIS'),
       quantity: tradeData.quantity,
       lotSize,
       lots,
-      entryPrice: tradeData.entryPrice,
+      entryPrice: tradeData.entryPrice, // Store original price (USD for crypto)
       currentPrice: tradeData.entryPrice,
       marginUsed: requiredMargin,
       leverage,
