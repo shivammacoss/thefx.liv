@@ -1,0 +1,282 @@
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
+const walletTransactionSchema = new mongoose.Schema({
+  type: {
+    type: String,
+    enum: ['deposit', 'withdraw', 'credit', 'debit'],
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  performedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin'
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Generate unique user ID
+const generateUserId = () => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `USR${timestamp}${random}`;
+};
+
+const userSchema = new mongoose.Schema({
+  // Unique user ID
+  userId: {
+    type: String,
+    unique: true
+  },
+  
+  // Admin code - links user to admin (can be changed by Super Admin for transfers)
+  adminCode: {
+    type: String,
+    required: false,
+    index: true
+  },
+  
+  // Reference to admin
+  admin: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  fullName: {
+    type: String,
+    default: ''
+  },
+  phone: {
+    type: String,
+    default: ''
+  },
+  role: {
+    type: String,
+    default: 'user'
+  },
+  
+  // Trading status
+  tradingStatus: {
+    type: String,
+    enum: ['ACTIVE', 'BLOCKED', 'SUSPENDED'],
+    default: 'ACTIVE'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  // Enhanced Wallet System
+  wallet: {
+    // Cash Balance (Free Balance) - Actual deposited money
+    cashBalance: {
+      type: Number,
+      default: 0
+    },
+    // Used Margin - Currently blocked for open positions
+    usedMargin: {
+      type: Number,
+      default: 0
+    },
+    // Collateral Value (Stocks pledged, FD, etc.)
+    collateralValue: {
+      type: Number,
+      default: 0
+    },
+    // Realized P&L - Booked profit/loss from closed trades
+    realizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Unrealized P&L - Live profit/loss from open positions (MTM)
+    unrealizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Today's Realized P&L
+    todayRealizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Today's Unrealized P&L
+    todayUnrealizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Legacy balance field for backward compatibility
+    balance: {
+      type: Number,
+      default: 0
+    },
+    transactions: [walletTransactionSchema]
+  },
+  // Margin Settings
+  marginSettings: {
+    // Equity Intraday Leverage (e.g., 5 means 5x)
+    equityIntradayLeverage: {
+      type: Number,
+      default: 5
+    },
+    // F&O Leverage
+    foLeverage: {
+      type: Number,
+      default: 1
+    },
+    // Max loss percentage before RMS kicks in
+    maxLossPercent: {
+      type: Number,
+      default: 80 // 80% of margin
+    },
+    // Auto square-off enabled
+    autoSquareOff: {
+      type: Boolean,
+      default: true
+    }
+  },
+  // RMS (Risk Management) Settings
+  rmsSettings: {
+    // Is RMS active for this user
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    // Last RMS check timestamp
+    lastCheck: {
+      type: Date,
+      default: null
+    },
+    // RMS triggered count today
+    triggeredCount: {
+      type: Number,
+      default: 0
+    },
+    // Is trading blocked due to RMS
+    tradingBlocked: {
+      type: Boolean,
+      default: false
+    },
+    blockReason: {
+      type: String,
+      default: null
+    }
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin'
+  }
+}, { timestamps: true });
+
+// Virtual: Calculate Available Margin
+userSchema.virtual('availableMargin').get(function() {
+  return this.wallet.cashBalance 
+    + this.wallet.collateralValue 
+    + Math.max(0, this.wallet.unrealizedPnL) // Only add unrealized profit
+    - Math.abs(Math.min(0, this.wallet.unrealizedPnL)) // Subtract unrealized loss
+    - this.wallet.usedMargin;
+});
+
+// Virtual: Total Balance (for display)
+userSchema.virtual('totalBalance').get(function() {
+  return this.wallet.cashBalance + this.wallet.realizedPnL;
+});
+
+// Method: Check if user can place order
+userSchema.methods.canPlaceOrder = function(requiredMargin) {
+  if (this.rmsSettings.tradingBlocked) return { allowed: false, reason: this.rmsSettings.blockReason };
+  if (!this.isActive) return { allowed: false, reason: 'Account is inactive' };
+  
+  const available = this.wallet.cashBalance 
+    + this.wallet.collateralValue 
+    + Math.max(0, this.wallet.unrealizedPnL)
+    - Math.abs(Math.min(0, this.wallet.unrealizedPnL))
+    - this.wallet.usedMargin;
+  
+  if (available < requiredMargin) {
+    return { allowed: false, reason: 'Insufficient margin', available, required: requiredMargin };
+  }
+  
+  return { allowed: true, available };
+};
+
+// Method: Block margin for order
+userSchema.methods.blockMargin = function(amount) {
+  this.wallet.usedMargin += amount;
+  return this.save();
+};
+
+// Method: Release margin
+userSchema.methods.releaseMargin = function(amount) {
+  this.wallet.usedMargin = Math.max(0, this.wallet.usedMargin - amount);
+  return this.save();
+};
+
+// Method: Update unrealized P&L
+userSchema.methods.updateUnrealizedPnL = function(amount) {
+  this.wallet.unrealizedPnL = amount;
+  this.wallet.todayUnrealizedPnL = amount;
+  return this.save();
+};
+
+// Method: Book realized P&L
+userSchema.methods.bookRealizedPnL = function(amount) {
+  this.wallet.realizedPnL += amount;
+  this.wallet.todayRealizedPnL += amount;
+  this.wallet.cashBalance += amount; // Add to cash balance
+  return this.save();
+};
+
+userSchema.pre('save', async function(next) {
+  // Generate userId for new users
+  if (this.isNew && !this.userId) {
+    let id = generateUserId();
+    let exists = await mongoose.model('User').findOne({ userId: id });
+    while (exists) {
+      id = generateUserId();
+      exists = await mongoose.model('User').findOne({ userId: id });
+    }
+    this.userId = id;
+  }
+  
+  // Hash password if modified
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 12);
+  }
+  next();
+});
+
+// Index for faster queries
+userSchema.index({ adminCode: 1, isActive: 1 });
+userSchema.index({ adminCode: 1, tradingStatus: 1 });
+
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+export default mongoose.model('User', userSchema);
