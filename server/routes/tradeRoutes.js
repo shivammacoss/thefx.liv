@@ -260,9 +260,34 @@ router.get('/admin/trades', protectAdmin, async (req, res) => {
     if (status) query.status = status;
     
     const trades = await Trade.find(query)
-      .populate('user', 'username fullName userId')
+      .populate('user', 'username fullName userId email')
       .sort({ openedAt: -1 })
       .limit(200);
+    
+    res.json(trades);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Super Admin: Get all trades across all admins with optional admin filter
+router.get('/admin/all-trades', protectAdmin, async (req, res) => {
+  try {
+    // Only Super Admin can access this
+    if (req.admin.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Super Admin only.' });
+    }
+    
+    const { status, adminCode } = req.query;
+    let query = {};
+    
+    if (adminCode) query.adminCode = adminCode;
+    if (status) query.status = status;
+    
+    const trades = await Trade.find(query)
+      .populate('user', 'username fullName userId email')
+      .sort({ openedAt: -1 })
+      .limit(500);
     
     res.json(trades);
   } catch (error) {

@@ -154,8 +154,35 @@ const UserDashboard = () => {
   const [indicesData, setIndicesData] = useState({});
   const [marketData, setMarketData] = useState({}); // Shared market data for chart and instruments
   const [positionsRefreshKey, setPositionsRefreshKey] = useState(0); // Key to trigger positions refresh
+  const [activeSegment, setActiveSegment] = useState('NSE'); // Track active segment for currency display
+  const [usdRate, setUsdRate] = useState(83.50); // USD to INR rate (default fallback)
   
   const refreshPositions = () => setPositionsRefreshKey(k => k + 1);
+  
+  // Fetch USD/INR exchange rate
+  useEffect(() => {
+    const fetchUsdRate = async () => {
+      try {
+        // Try to get rate from API or use fallback
+        const { data } = await axios.get('/api/exchange-rate/usdinr').catch(() => ({ data: { rate: 83.50 } }));
+        if (data?.rate) setUsdRate(data.rate);
+      } catch (error) {
+        // Use default rate if API fails
+      }
+    };
+    fetchUsdRate();
+    // Refresh rate every 5 minutes
+    const interval = setInterval(fetchUsdRate, 300000);
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Convert INR to USD
+  const convertToUsd = (inrAmount) => {
+    return (inrAmount / usdRate).toFixed(2);
+  };
+  
+  // Check if currently viewing crypto
+  const isCryptoMode = activeSegment === 'Crypto';
 
   // Connect to Socket.IO for real-time market data (shared across components)
   useEffect(() => {
@@ -316,10 +343,14 @@ const UserDashboard = () => {
 
         {/* Right side - Only Trading Account Balance */}
         <div className="flex items-center gap-4">
-          {/* Trading Account Balance Display */}
+          {/* Trading Account Balance Display - Shows USD when in Crypto mode */}
           <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
-            <Wallet size={18} className="text-green-400" />
-            <span className="text-green-400 font-medium">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+            <Wallet size={18} className={isCryptoMode ? "text-orange-400" : "text-green-400"} />
+            {isCryptoMode ? (
+              <span className="text-orange-400 font-medium">${convertToUsd(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0)}</span>
+            ) : (
+              <span className="text-green-400 font-medium">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+            )}
           </div>
           <div className="hidden sm:flex items-center gap-2 text-sm">
             <User size={18} className="text-gray-400" />
@@ -339,8 +370,12 @@ const UserDashboard = () => {
         </button>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
-            <Wallet size={16} className="text-green-400" />
-            <span className="text-green-400 font-medium text-sm">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+            <Wallet size={16} className={isCryptoMode ? "text-orange-400" : "text-green-400"} />
+            {isCryptoMode ? (
+              <span className="text-orange-400 font-medium text-sm">${convertToUsd(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0)}</span>
+            ) : (
+              <span className="text-green-400 font-medium text-sm">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+            )}
           </div>
           <div className="flex items-center gap-1 text-sm">
             <User size={16} className="text-gray-400" />
@@ -400,6 +435,7 @@ const UserDashboard = () => {
             onBuySell={handleQuickTrade}
             user={user}
             marketData={marketData}
+            onSegmentChange={setActiveSegment}
           />
         </div>
 
@@ -456,6 +492,7 @@ const UserDashboard = () => {
             onBuySell={openBuySell}
             user={user}
             marketData={marketData}
+            onSegmentChange={setActiveSegment}
           />
         )}
         {mobileView === 'chart' && (
@@ -560,10 +597,16 @@ const UserDashboard = () => {
   );
 };
 
-const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {} }) => {
+const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs
+  
+  // Notify parent when segment changes
+  const handleSegmentChange = (segment) => {
+    setActiveSegment(segment);
+    if (onSegmentChange) onSegmentChange(segment);
+  };
   const [watchlist, setWatchlist] = useState(() => {
     const saved = localStorage.getItem('ntrader_watchlist');
     return saved ? JSON.parse(saved) : ['NIFTY 50', 'NIFTY BANK', 'SBIN', 'RELIANCE'];
@@ -810,7 +853,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
         {segmentTabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveSegment(tab.id)}
+            onClick={() => handleSegmentChange(tab.id)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition ${
               activeSegment === tab.id 
                 ? 'bg-green-600 text-white' 
@@ -1178,65 +1221,81 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
   // Initialize chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
+    
+    // Small delay to ensure container has dimensions
+    const initTimer = setTimeout(() => {
+      if (!chartContainerRef.current) return;
+      
+      const containerWidth = chartContainerRef.current.clientWidth || 800;
+      const containerHeight = chartContainerRef.current.clientHeight || 400;
 
-    const chart = createChart(chartContainerRef.current, {
-      layout: {
-        background: { color: '#111111' },
-        textColor: '#d1d5db',
-      },
-      grid: {
-        vertLines: { color: '#1f1f1f' },
-        horzLines: { color: '#1f1f1f' },
-      },
-      crosshair: {
-        mode: 1,
-      },
-      rightPriceScale: {
-        borderColor: '#2a2a2a',
-      },
-      timeScale: {
-        borderColor: '#2a2a2a',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-    });
+      const chart = createChart(chartContainerRef.current, {
+        width: containerWidth,
+        height: containerHeight,
+        layout: {
+          background: { color: '#111111' },
+          textColor: '#d1d5db',
+        },
+        grid: {
+          vertLines: { color: '#1f1f1f' },
+          horzLines: { color: '#1f1f1f' },
+        },
+        crosshair: {
+          mode: 1,
+        },
+        rightPriceScale: {
+          borderColor: '#2a2a2a',
+        },
+        timeScale: {
+          borderColor: '#2a2a2a',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+      });
 
-    chartRef.current = chart;
+      chartRef.current = chart;
 
-    candlestickSeriesRef.current = chart.addCandlestickSeries({
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      borderDownColor: '#ef4444',
-      borderUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-      wickUpColor: '#22c55e',
-    });
+      candlestickSeriesRef.current = chart.addCandlestickSeries({
+        upColor: '#22c55e',
+        downColor: '#ef4444',
+        borderDownColor: '#ef4444',
+        borderUpColor: '#22c55e',
+        wickDownColor: '#ef4444',
+        wickUpColor: '#22c55e',
+      });
 
-    volumeSeriesRef.current = chart.addHistogramSeries({
-      color: '#26a69a',
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    });
+      volumeSeriesRef.current = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+      });
 
-    chart.priceScale('').applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
+      chart.priceScale('').applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+      });
 
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        });
-      }
-    };
+      const handleResize = () => {
+        if (chartContainerRef.current && chartRef.current) {
+          chartRef.current.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+          });
+        }
+      };
 
-    window.addEventListener('resize', handleResize);
-    handleResize();
+      window.addEventListener('resize', handleResize);
+      
+      // Initial resize after a brief delay
+      setTimeout(handleResize, 100);
+    }, 50);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
+      clearTimeout(initTimer);
+      if (chartRef.current) {
+        window.removeEventListener('resize', () => {});
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
     };
   }, []);
 
@@ -1319,14 +1378,14 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
       </div>
 
       {/* Chart Area */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-[300px]">
         {!selectedInstrument ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
             <BarChart2 size={48} className="mb-4 opacity-30" />
             <p>Select an instrument to view chart</p>
           </div>
         ) : (
-          <div ref={chartContainerRef} className="w-full h-full" />
+          <div ref={chartContainerRef} className="absolute inset-0" />
         )}
       </div>
 
@@ -1728,19 +1787,21 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
           const pnl = pos.side === 'BUY' 
             ? (ltp - pos.entryPrice) * pos.quantity 
             : (pos.entryPrice - ltp) * pos.quantity;
+          const isCrypto = pos.isCrypto || pos.segment === 'CRYPTO' || pos.exchange === 'BINANCE';
+          const currencySymbol = isCrypto ? '$' : '₹';
           return (
             <div key={pos._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
               <div className="truncate text-purple-400 font-mono text-xs">{pos.userId || user?.userId || '-'}</div>
-              <div className="truncate font-medium">{pos.symbol}</div>
+              <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{pos.symbol}</div>
               <div className={pos.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{pos.side}</div>
               <div className="text-right">{pos.quantity}</div>
-              <div className="text-right">₹{pos.entryPrice?.toFixed(2)}</div>
-              <div className="text-right">₹{ltp?.toFixed(2)}</div>
-              <div className="text-right text-yellow-400" title={`Spread: ${pos.spread || 0} pts, Comm: ₹${pos.commission || 0}`}>
-                ₹{((pos.commission || 0)).toFixed(2)}
+              <div className="text-right">{currencySymbol}{pos.entryPrice?.toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{ltp?.toFixed(2)}</div>
+              <div className="text-right text-yellow-400" title={`Spread: ${pos.spread || 0} pts, Comm: ${currencySymbol}${pos.commission || 0}`}>
+                {currencySymbol}{((pos.commission || 0)).toFixed(2)}
               </div>
               <div className={`text-right font-medium ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                {pnl >= 0 ? '+' : ''}{currencySymbol}{pnl.toFixed(2)}
               </div>
               <div className="text-center">
                 <button 
@@ -1758,45 +1819,53 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
         {activeTab === 'pending' && pendingOrders.length === 0 && (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">No pending orders</div>
         )}
-        {activeTab === 'pending' && pendingOrders.map(order => (
-          <div key={order._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
-            <div className="truncate text-purple-400 font-mono text-xs">{order.userId || user?.userId || '-'}</div>
-            <div className="truncate font-medium">{order.symbol}</div>
-            <div className={order.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{order.side}</div>
-            <div className="text-right">{order.quantity}</div>
-            <div className="text-right">₹{order.limitPrice?.toFixed(2) || '-'}</div>
-            <div className="text-right">-</div>
-            <div className="text-right text-yellow-400">₹{(order.commission || 0).toFixed(2)}</div>
-            <div className="text-right text-gray-400">{order.orderType}</div>
-            <div className="text-center">
-              <button 
-                onClick={() => handleCancelOrder(order._id)}
-                className="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 rounded text-xs"
-              >
-                Cancel
-              </button>
+        {activeTab === 'pending' && pendingOrders.map(order => {
+          const isCrypto = order.isCrypto || order.segment === 'CRYPTO' || order.exchange === 'BINANCE';
+          const currencySymbol = isCrypto ? '$' : '₹';
+          return (
+            <div key={order._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+              <div className="truncate text-purple-400 font-mono text-xs">{order.userId || user?.userId || '-'}</div>
+              <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{order.symbol}</div>
+              <div className={order.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{order.side}</div>
+              <div className="text-right">{order.quantity}</div>
+              <div className="text-right">{currencySymbol}{order.limitPrice?.toFixed(2) || '-'}</div>
+              <div className="text-right">-</div>
+              <div className="text-right text-yellow-400">{currencySymbol}{(order.commission || 0).toFixed(2)}</div>
+              <div className="text-right text-gray-400">{order.orderType}</div>
+              <div className="text-center">
+                <button 
+                  onClick={() => handleCancelOrder(order._id)}
+                  className="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 rounded text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {activeTab === 'history' && history.length === 0 && (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">No trade history</div>
         )}
-        {activeTab === 'history' && history.map(trade => (
-          <div key={trade._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
-            <div className="truncate text-purple-400 font-mono text-xs">{trade.userId || user?.userId || '-'}</div>
-            <div className="truncate font-medium">{trade.symbol}</div>
-            <div className={trade.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{trade.side}</div>
-            <div className="text-right">{trade.quantity}</div>
-            <div className="text-right">₹{trade.entryPrice?.toFixed(2)}</div>
-            <div className="text-right">₹{trade.exitPrice?.toFixed(2) || '-'}</div>
-            <div className="text-right text-yellow-400">₹{(trade.commission || 0).toFixed(2)}</div>
-            <div className={`text-right font-medium ${(trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {(trade.realizedPnL || 0) >= 0 ? '+' : ''}₹{(trade.realizedPnL || 0).toFixed(2)}
+        {activeTab === 'history' && history.map(trade => {
+          const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+          const currencySymbol = isCrypto ? '$' : '₹';
+          return (
+            <div key={trade._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+              <div className="truncate text-purple-400 font-mono text-xs">{trade.userId || user?.userId || '-'}</div>
+              <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
+              <div className={trade.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{trade.side}</div>
+              <div className="text-right">{trade.quantity}</div>
+              <div className="text-right">{currencySymbol}{trade.entryPrice?.toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{trade.exitPrice?.toFixed(2) || '-'}</div>
+              <div className="text-right text-yellow-400">{currencySymbol}{(trade.commission || 0).toFixed(2)}</div>
+              <div className={`text-right font-medium ${(trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {(trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.realizedPnL || 0).toFixed(2)}
+              </div>
+              <div className="text-center text-xs text-gray-400">{trade.closeReason || 'CLOSED'}</div>
             </div>
-            <div className="text-center text-xs text-gray-400">{trade.closeReason || 'CLOSED'}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -2040,6 +2109,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [usdRate, setUsdRate] = useState(83.50); // Default USD/INR rate
 
   // Determine if crypto
   const isCrypto = instrument?.isCrypto || instrument?.segment === 'CRYPTO' || instrument?.exchange === 'BINANCE';
@@ -2052,6 +2122,27 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   
   // Price symbol for display
   const priceSymbol = isCrypto ? '$' : '₹';
+  
+  // Convert INR to USD for crypto
+  const convertToUsd = (inrAmount) => {
+    if (!inrAmount || !usdRate) return '0.00';
+    return (inrAmount / usdRate).toFixed(2);
+  };
+
+  // Fetch USD rate for crypto
+  useEffect(() => {
+    if (isCrypto) {
+      const fetchUsdRate = async () => {
+        try {
+          const { data } = await axios.get('/api/exchange-rate/usdinr');
+          if (data.rate) setUsdRate(data.rate);
+        } catch (err) {
+          console.log('Using default USD rate');
+        }
+      };
+      fetchUsdRate();
+    }
+  }, [isCrypto]);
 
   // Fetch available leverages and market status
   useEffect(() => {
@@ -2413,7 +2504,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
           {isFnO && (
             <div className="flex justify-between text-xs mt-2">
               <span className="text-gray-500">Total Qty: <span className="text-white font-medium">{totalQuantity}</span></span>
-              <span className="text-gray-500">Value: <span className="text-white">₹{(totalQuantity * parseFloat(price || 0)).toLocaleString()}</span></span>
+              <span className="text-gray-500">Value: <span className="text-white">{priceSymbol}{(totalQuantity * parseFloat(price || 0)).toLocaleString()}</span></span>
             </div>
           )}
           {/* Quick lot buttons */}
@@ -2447,8 +2538,8 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
             />
             <div className="text-xs text-gray-500 mt-1">
               {orderMode === 'LIMIT' 
-                ? `Order executes when price ${orderType === 'buy' ? 'falls to' : 'rises to'} ₹${limitPrice || '...'}`
-                : `Order triggers when price ${orderType === 'buy' ? 'rises to' : 'falls to'} ₹${limitPrice || '...'}`
+                ? `Order executes when price ${orderType === 'buy' ? 'falls to' : 'rises to'} ${priceSymbol}${limitPrice || '...'}`
+                : `Order triggers when price ${orderType === 'buy' ? 'rises to' : 'falls to'} ${priceSymbol}${limitPrice || '...'}`
               }
             </div>
           </div>
@@ -2479,9 +2570,9 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         </div>
         {(stopLoss || target) && (
           <div className="text-xs text-gray-500">
-            {stopLoss && <span className="text-red-400">SL: ₹{stopLoss}</span>}
+            {stopLoss && <span className="text-red-400">SL: {priceSymbol}{stopLoss}</span>}
             {stopLoss && target && ' | '}
-            {target && <span className="text-green-400">Target: ₹{target}</span>}
+            {target && <span className="text-green-400">Target: {priceSymbol}{target}</span>}
             {' - Auto exit when price hits'}
           </div>
         )}
@@ -2502,18 +2593,31 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         <div className="bg-dark-700 rounded p-3 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Available Balance</span>
-            <span className="text-green-400">₹{marginPreview?.availableBalance?.toLocaleString() || walletData?.availableMargin?.toLocaleString() || '0'}</span>
+            <span className="text-green-400">
+              {isCrypto 
+                ? `$${convertToUsd(marginPreview?.availableBalance || walletData?.availableMargin || 0)}`
+                : `₹${(marginPreview?.availableBalance || walletData?.availableMargin || 0).toLocaleString()}`
+              }
+            </span>
           </div>
           {leverage > 1 && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-400">Effective Buying Power</span>
-              <span className="text-purple-400">₹{((marginPreview?.availableBalance || 0) * leverage).toLocaleString()}</span>
+              <span className="text-purple-400">
+                {isCrypto 
+                  ? `$${convertToUsd((marginPreview?.availableBalance || 0) * leverage)}`
+                  : `₹${((marginPreview?.availableBalance || 0) * leverage).toLocaleString()}`
+                }
+              </span>
             </div>
           )}
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Required Margin</span>
             <span className={marginPreview?.canPlace === false ? 'text-red-400' : ''}>
-              ₹{marginPreview?.marginRequired?.toLocaleString() || '--'}
+              {isCrypto 
+                ? `$${convertToUsd(marginPreview?.marginRequired || 0)}`
+                : `₹${marginPreview?.marginRequired?.toLocaleString() || '--'}`
+              }
             </span>
           </div>
           {marginPreview && !marginPreview.canPlace && (
@@ -2551,7 +2655,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
 };
 
 // Mobile Components - Uses same database instruments as desktop
-const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {} }) => {
+const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
   const [expandedSegments, setExpandedSegments] = useState([]); // Start with all collapsed
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -2561,6 +2665,12 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs like desktop
   const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
+  
+  // Notify parent when segment changes
+  const handleSegmentChange = (segment) => {
+    setActiveSegment(segment);
+    if (onSegmentChange) onSegmentChange(segment);
+  };
   
   // Segment tabs configuration (same as desktop)
   const segmentTabs = [
@@ -2721,7 +2831,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
         {segmentTabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveSegment(tab.id)}
+            onClick={() => handleSegmentChange(tab.id)}
             className={`px-3 py-1.5 text-xs font-medium rounded whitespace-nowrap transition ${
               activeSegment === tab.id 
                 ? 'bg-green-600 text-white' 
@@ -3030,14 +3140,14 @@ const MobileChartPanel = ({ selectedInstrument, onBuySell, onBack, marketData = 
       </div>
 
       {/* Chart */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-[250px]">
         {!selectedInstrument ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
             <RefreshCw size={40} className="mb-4 opacity-30" />
             <p className="text-sm">Select an instrument</p>
           </div>
         ) : (
-          <div ref={chartContainerRef} className="w-full h-full" />
+          <div ref={chartContainerRef} className="absolute inset-0" />
         )}
       </div>
 

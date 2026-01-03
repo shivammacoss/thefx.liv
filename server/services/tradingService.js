@@ -244,9 +244,9 @@ class TradingService {
     if (!adminCode && user.admin) {
       const userAdmin = await Admin.findById(user.admin);
       adminCode = userAdmin?.adminCode || 'SYSTEM';
-      // Update user with adminCode for future trades
+      // Update user with adminCode for future trades using updateOne to avoid validation issues
+      await User.updateOne({ _id: user._id }, { $set: { adminCode: adminCode } });
       user.adminCode = adminCode;
-      await user.save();
     }
     // If still no adminCode, use SYSTEM as default for crypto trades
     if (!adminCode) {
@@ -304,10 +304,25 @@ class TradingService {
     
     // Block margin from tradingBalance and deduct commission (dual wallet system)
     // Margin is blocked (reserved), commission is deducted permanently
-    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
-    user.wallet.usedMargin = (user.wallet.usedMargin || 0) + marginRequired;
-    user.wallet.blocked = (user.wallet.blocked || 0) + marginRequired;
-    await user.save();
+    const newTradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
+    const newUsedMargin = (user.wallet.usedMargin || 0) + marginRequired;
+    const newBlocked = (user.wallet.blocked || 0) + marginRequired;
+    
+    // Use updateOne to avoid validation issues with segmentPermissions
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 
+        'wallet.tradingBalance': newTradingBalance,
+        'wallet.usedMargin': newUsedMargin,
+        'wallet.blocked': newBlocked
+      }}
+    );
+    
+    // Update local user object
+    user.wallet.tradingBalance = newTradingBalance;
+    user.wallet.usedMargin = newUsedMargin;
+    user.wallet.blocked = newBlocked;
+    
     await trade.save();
 
     return {
@@ -431,11 +446,21 @@ class TradingService {
     await trade.save();
 
     // Release blocked margin and add/subtract P&L to tradingBalance (dual wallet system)
-    user.wallet.usedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
-    user.wallet.blocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL; // Return margin + P&L
-    user.wallet.realizedPnL = (user.wallet.realizedPnL || 0) + netPnL; // Track realized P&L
-    await user.save();
+    const newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
+    const newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
+    const newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL;
+    const newRealizedPnL = (user.wallet.realizedPnL || 0) + netPnL;
+    
+    // Use updateOne to avoid validation issues with segmentPermissions
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 
+        'wallet.usedMargin': newUsedMargin,
+        'wallet.blocked': newBlocked,
+        'wallet.tradingBalance': newTradingBalance,
+        'wallet.realizedPnL': newRealizedPnL
+      }}
+    );
 
     return { 
       trade, 
@@ -568,11 +593,19 @@ class TradingService {
 
     const user = await User.findById(userId);
     // Release blocked margin - update both primary and legacy fields
-    user.wallet.usedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
-    user.wallet.blocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    // Return margin to tradingBalance (commission was already deducted, so just return margin)
-    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed;
-    await user.save();
+    const newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
+    const newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
+    const newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed;
+    
+    // Use updateOne to avoid validation issues with segmentPermissions
+    await User.updateOne(
+      { _id: userId },
+      { $set: { 
+        'wallet.usedMargin': newUsedMargin,
+        'wallet.blocked': newBlocked,
+        'wallet.tradingBalance': newTradingBalance
+      }}
+    );
 
     trade.status = 'CANCELLED';
     await trade.save();

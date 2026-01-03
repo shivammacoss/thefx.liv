@@ -96,9 +96,11 @@ class TradeService {
     // 5. Validate margin
     await this.validateMargin(userId, requiredMargin);
     
-    // 6. Block margin
-    user.wallet.usedMargin += requiredMargin;
-    await user.save();
+    // 6. Block margin - use updateOne to avoid validation issues
+    await User.updateOne(
+      { _id: userId },
+      { $inc: { 'wallet.usedMargin': requiredMargin } }
+    );
     
     // 7. Create trade
     const trade = await Trade.create({
@@ -149,15 +151,17 @@ class TradeService {
     // Close trade and calculate P&L
     trade.closeTrade(exitPrice, reason);
     
-    // Release margin
-    user.wallet.usedMargin -= trade.marginUsed;
+    // Release margin and book P&L - use updateOne to avoid validation issues
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { 
+        'wallet.usedMargin': -trade.marginUsed,
+        'wallet.cashBalance': trade.netPnL,
+        'wallet.realizedPnL': trade.netPnL,
+        'wallet.todayRealizedPnL': trade.netPnL
+      }}
+    );
     
-    // Book P&L to user wallet
-    user.wallet.cashBalance += trade.netPnL;
-    user.wallet.realizedPnL += trade.netPnL;
-    user.wallet.todayRealizedPnL += trade.netPnL;
-    
-    await user.save();
     await trade.save();
     
     // Create ledger entry for user

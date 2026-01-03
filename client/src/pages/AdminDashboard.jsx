@@ -50,6 +50,7 @@ const AdminDashboard = () => {
     { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
     { path: '/admin/admins', icon: Shield, label: 'Admin Management' },
     { path: '/admin/all-users', icon: Users, label: 'All Users' },
+    { path: '/admin/all-trades', icon: FileText, label: 'All User Trades' },
     { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
     { path: '/admin/instruments', icon: TrendingUp, label: 'Instruments' },
     { path: '/admin/lot-settings', icon: Settings, label: 'Lot Management' },
@@ -187,6 +188,7 @@ const AdminDashboard = () => {
           {/* Super Admin Only Routes */}
           {isSuperAdmin && <Route path="admins/*" element={<AdminManagement />} />}
           {isSuperAdmin && <Route path="all-users" element={<AllUsersManagement />} />}
+          {isSuperAdmin && <Route path="all-trades" element={<SuperAdminAllTrades />} />}
           {isSuperAdmin && <Route path="create-user" element={<SuperAdminCreateUser />} />}
           {isSuperAdmin && <Route path="instruments" element={<InstrumentManagement />} />}
           {isSuperAdmin && <Route path="lot-settings" element={<LotManagement />} />}
@@ -4741,41 +4743,45 @@ const AdminTrades = () => {
         <>
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {trades.map(trade => (
-              <div key={trade._id} className="bg-dark-800 rounded-lg p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <div className="font-bold">{trade.symbol}</div>
-                    <div className="text-xs text-gray-400">{trade.segment} • {trade.productType}</div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                    {trade.status}
-                  </span>
-                </div>
-                <div className="text-sm text-gray-400 mb-2">
-                  User: {trade.user?.fullName || trade.user?.username}
-                </div>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {trade.side}
+            {trades.map(trade => {
+              const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+              const currencySymbol = isCrypto ? '$' : '₹';
+              return (
+                <div key={trade._id} className="bg-dark-800 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <div className={`font-bold ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
+                      <div className="text-xs text-gray-400">{trade.segment} • {trade.productType}</div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                      {trade.status}
                     </span>
-                    <span className="ml-2 text-sm">Qty: {trade.quantity}</span>
                   </div>
-                  <div className={`font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}₹{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
+                  <div className="text-sm text-gray-400 mb-2">
+                    User: {trade.user?.fullName || trade.user?.username}
                   </div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {trade.side}
+                      </span>
+                      <span className="ml-2 text-sm">Qty: {trade.quantity}</span>
+                    </div>
+                    <div className={`font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  {trade.status === 'OPEN' && (
+                    <button
+                      onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
+                      className="w-full mt-3 px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm"
+                    >
+                      Force Close
+                    </button>
+                  )}
                 </div>
-                {trade.status === 'OPEN' && (
-                  <button
-                    onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
-                    className="w-full mt-3 px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm"
-                  >
-                    Force Close
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Desktop Table View */}
@@ -4796,44 +4802,48 @@ const AdminTrades = () => {
                 </tr>
               </thead>
               <tbody>
-                {trades.map(trade => (
-                  <tr key={trade._id} className="border-t border-dark-600">
-                    <td className="px-4 py-3 font-mono text-xs">{trade.tradeId}</td>
-                    <td className="px-4 py-3">
-                      <div>{trade.user?.fullName || trade.user?.username}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{trade.symbol}</div>
-                      <div className="text-xs text-gray-500">{trade.segment} • {trade.productType}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                        {trade.side}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">{trade.quantity}</td>
-                    <td className="px-4 py-3 text-right">₹{trade.entryPrice?.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right">₹{(trade.exitPrice || trade.currentPrice || trade.entryPrice)?.toFixed(2)}</td>
-                    <td className={`px-4 py-3 text-right font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}₹{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                        {trade.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {trade.status === 'OPEN' && (
-                        <button
-                          onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
-                          className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
-                        >
-                          Close
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {trades.map(trade => {
+                  const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+                  const currencySymbol = isCrypto ? '$' : '₹';
+                  return (
+                    <tr key={trade._id} className="border-t border-dark-600">
+                      <td className="px-4 py-3 font-mono text-xs">{trade.tradeId}</td>
+                      <td className="px-4 py-3">
+                        <div>{trade.user?.fullName || trade.user?.username}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className={`font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
+                        <div className="text-xs text-gray-500">{trade.segment} • {trade.productType}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {trade.side}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">{trade.quantity}</td>
+                      <td className="px-4 py-3 text-right">{currencySymbol}{trade.entryPrice?.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right">{currencySymbol}{(trade.exitPrice || trade.currentPrice || trade.entryPrice)?.toFixed(2)}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                          {trade.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {trade.status === 'OPEN' && (
+                          <button
+                            onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+                          >
+                            Close
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -4847,6 +4857,254 @@ const AdminTrades = () => {
           onClose={() => setShowCreateModal(false)}
           onSuccess={() => { setShowCreateModal(false); fetchTrades(); }}
         />
+      )}
+    </div>
+  );
+};
+
+// Super Admin All Trades - View all trades across all admins with admin filter
+const SuperAdminAllTrades = () => {
+  const { admin } = useAuth();
+  const [trades, setTrades] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [selectedAdmin, setSelectedAdmin] = useState('');
+
+  useEffect(() => {
+    fetchAdmins();
+  }, []);
+
+  useEffect(() => {
+    fetchTrades();
+  }, [filter, selectedAdmin]);
+
+  const fetchAdmins = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/admins', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setAdmins(data);
+    } catch (error) {
+      console.error('Error fetching admins:', error);
+    }
+  };
+
+  const fetchTrades = async () => {
+    try {
+      setLoading(true);
+      let url = '/api/trade/admin/all-trades';
+      const params = new URLSearchParams();
+      if (filter) params.append('status', filter);
+      if (selectedAdmin) params.append('adminCode', selectedAdmin);
+      if (params.toString()) url += `?${params.toString()}`;
+      
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setTrades(data);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForceClose = async (tradeId, currentPrice) => {
+    const exitPrice = prompt('Enter exit price:', currentPrice);
+    if (!exitPrice) return;
+    
+    try {
+      await axios.post(`/api/trade/admin/trade/${tradeId}/close`, {
+        exitPrice: Number(exitPrice)
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchTrades();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error closing trade');
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <h1 className="text-xl md:text-2xl font-bold">All User Trades</h1>
+      </div>
+
+      {/* Admin Filter */}
+      <div className="flex flex-wrap gap-4 mb-6">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Filter by Admin</label>
+          <select
+            value={selectedAdmin}
+            onChange={(e) => setSelectedAdmin(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+          >
+            <option value="">All Admins</option>
+            {admins.map(adm => (
+              <option key={adm._id} value={adm.adminCode}>
+                {adm.name || adm.username} ({adm.adminCode})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2 items-end">
+          <button onClick={() => setFilter('')} className={`px-4 py-2 rounded ${!filter ? 'bg-purple-600' : 'bg-dark-700'}`}>All</button>
+          <button onClick={() => setFilter('OPEN')} className={`px-4 py-2 rounded ${filter === 'OPEN' ? 'bg-green-600' : 'bg-dark-700'}`}>Open</button>
+          <button onClick={() => setFilter('CLOSED')} className={`px-4 py-2 rounded ${filter === 'CLOSED' ? 'bg-red-600' : 'bg-dark-700'}`}>Closed</button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Trades</div>
+          <div className="text-2xl font-bold">{trades.length}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Open</div>
+          <div className="text-2xl font-bold text-green-400">{trades.filter(t => t.status === 'OPEN').length}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Closed</div>
+          <div className="text-2xl font-bold text-gray-400">{trades.filter(t => t.status === 'CLOSED').length}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total P&L</div>
+          <div className={`text-2xl font-bold ${trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            ₹{trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
+          </div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Brokerage</div>
+          <div className="text-2xl font-bold text-purple-400">
+            ₹{trades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+      ) : trades.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">No trades found</div>
+      ) : (
+        <>
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {trades.map(trade => {
+              const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+              const currencySymbol = isCrypto ? '$' : '₹';
+              return (
+                <div key={trade._id} className="bg-dark-800 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <div className={`font-bold ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
+                      <div className="text-xs text-gray-400">{trade.segment} • {trade.productType}</div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                      {trade.status}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-400 mb-1">
+                    User: {trade.user?.fullName || trade.user?.username}
+                  </div>
+                  <div className="text-xs text-purple-400 mb-2">
+                    Admin: {trade.adminCode}
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {trade.side}
+                      </span>
+                      <span className="ml-2 text-sm">Qty: {trade.quantity}</span>
+                    </div>
+                    <div className={`font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  {trade.status === 'OPEN' && (
+                    <button
+                      onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
+                      className="w-full mt-3 px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm"
+                    >
+                      Force Close
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-dark-700">
+                <tr>
+                  <th className="text-left px-4 py-3 text-gray-400">Trade ID</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Admin</th>
+                  <th className="text-left px-4 py-3 text-gray-400">User</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Symbol</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Side</th>
+                  <th className="text-right px-4 py-3 text-gray-400">Qty</th>
+                  <th className="text-right px-4 py-3 text-gray-400">Entry</th>
+                  <th className="text-right px-4 py-3 text-gray-400">Exit/LTP</th>
+                  <th className="text-right px-4 py-3 text-gray-400">P&L</th>
+                  <th className="text-center px-4 py-3 text-gray-400">Status</th>
+                  <th className="text-center px-4 py-3 text-gray-400">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map(trade => {
+                  const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+                  const currencySymbol = isCrypto ? '$' : '₹';
+                  return (
+                    <tr key={trade._id} className="border-t border-dark-600">
+                      <td className="px-4 py-3 font-mono text-xs">{trade.tradeId}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-purple-400 font-mono text-xs">{trade.adminCode}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>{trade.user?.fullName || trade.user?.username}</div>
+                        <div className="text-xs text-gray-500">{trade.user?.email}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className={`font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
+                        <div className="text-xs text-gray-500">{trade.segment} • {trade.productType}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {trade.side}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">{trade.quantity}</td>
+                      <td className="px-4 py-3 text-right">{currencySymbol}{trade.entryPrice?.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right">{currencySymbol}{(trade.exitPrice || trade.currentPrice || trade.entryPrice)?.toFixed(2)}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                          {trade.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {trade.status === 'OPEN' && (
+                          <button
+                            onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+                          >
+                            Close
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

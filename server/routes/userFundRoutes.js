@@ -228,16 +228,16 @@ router.post('/internal-transfer', protectUser, async (req, res) => {
     const usedMargin = user.wallet?.usedMargin || 0;
     const availableTradingBalance = tradingBalance - usedMargin;
     
+    let newCashBalance, newTradingBalance;
+    
     if (direction === 'toAccount') {
       // Transfer from Main Wallet to Trading Account
       if (amount > mainWalletBalance) {
         return res.status(400).json({ message: `Insufficient balance in Main Wallet. Available: ₹${mainWalletBalance}` });
       }
       
-      // Deduct from main wallet, add to trading account
-      user.wallet.cashBalance -= amount;
-      user.wallet.tradingBalance += amount;
-      user.wallet.balance = user.wallet.cashBalance; // Legacy field
+      newCashBalance = mainWalletBalance - amount;
+      newTradingBalance = tradingBalance + amount;
       
     } else {
       // Transfer from Trading Account to Main Wallet
@@ -245,13 +245,25 @@ router.post('/internal-transfer', protectUser, async (req, res) => {
         return res.status(400).json({ message: 'Insufficient available balance in Trading Account' });
       }
       
-      // Deduct from trading account, add to main wallet
-      user.wallet.tradingBalance -= amount;
-      user.wallet.cashBalance += amount;
-      user.wallet.balance = user.wallet.cashBalance; // Legacy field
+      newTradingBalance = tradingBalance - amount;
+      newCashBalance = mainWalletBalance + amount;
     }
     
-    await user.save();
+    // Use updateOne to avoid full document validation issues with segmentPermissions
+    await User.updateOne(
+      { _id: req.user._id },
+      { 
+        $set: { 
+          'wallet.cashBalance': newCashBalance,
+          'wallet.tradingBalance': newTradingBalance,
+          'wallet.balance': newCashBalance // Legacy field
+        }
+      }
+    );
+    
+    // Update local user object for response
+    user.wallet.cashBalance = newCashBalance;
+    user.wallet.tradingBalance = newTradingBalance;
     
     // Create ledger entry for the transfer
     const description = direction === 'toAccount' 
