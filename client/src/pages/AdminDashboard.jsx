@@ -3215,6 +3215,8 @@ const MarketControl = () => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [zerodhaStatus, setZerodhaStatus] = useState(null);
+  const [editingSegment, setEditingSegment] = useState(null);
+  const [segmentForm, setSegmentForm] = useState({});
 
   useEffect(() => {
     fetchMarketState();
@@ -3272,12 +3274,48 @@ const MarketControl = () => {
     }
   };
 
+  const toggleSegment = async (segment) => {
+    try {
+      const { data } = await axios.put(`/api/trade/market-state/segment/${segment}/toggle`, {}, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setMarketState(data);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error toggling segment');
+    }
+  };
+
+  const updateSegmentTimings = async (segment) => {
+    try {
+      const { data } = await axios.put(`/api/trade/market-state/segment/${segment}`, segmentForm, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setMarketState(data);
+      setEditingSegment(null);
+      setSegmentForm({});
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating segment');
+    }
+  };
+
+  const openEditModal = (segment) => {
+    const seg = marketState.segments[segment];
+    setSegmentForm({
+      dataStartTime: seg.dataStartTime || '09:00',
+      tradingStartTime: seg.tradingStartTime || '09:15',
+      tradingEndTime: seg.tradingEndTime || '15:30',
+      dataEndTime: seg.dataEndTime || '15:30',
+      intradaySquareOffTime: seg.intradaySquareOffTime || '15:15',
+      preMarketDataOnly: seg.preMarketDataOnly !== false
+    });
+    setEditingSegment(segment);
+  };
+
   const connectZerodha = async () => {
     try {
       const { data } = await axios.get('/api/zerodha/login-url', {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
-      // Redirect to Zerodha login
       window.location.href = data.loginUrl;
     } catch (error) {
       alert(error.response?.data?.message || 'Error getting Zerodha login URL');
@@ -3300,6 +3338,14 @@ const MarketControl = () => {
     return <div className="flex items-center justify-center h-64"><RefreshCw className="animate-spin" size={32} /></div>;
   }
 
+  const segments = ['EQUITY', 'FNO', 'MCX', 'CRYPTO'];
+  const segmentColors = {
+    EQUITY: 'blue',
+    FNO: 'purple',
+    MCX: 'yellow',
+    CRYPTO: 'green'
+  };
+
   return (
     <div className="p-4 md:p-6">
       <h1 className="text-2xl font-bold mb-6">Market Control</h1>
@@ -3310,7 +3356,6 @@ const MarketControl = () => {
         <p className="text-gray-400 text-sm mb-4">Connect to Zerodha Kite API for live market data feed</p>
         
         <div className="grid md:grid-cols-1 gap-4">
-          {/* Zerodha Kite */}
           <div className="bg-dark-700 rounded-lg p-4 border border-dark-600">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
@@ -3328,60 +3373,29 @@ const MarketControl = () => {
             </div>
             {zerodhaStatus?.connected ? (
               <>
-                <div className="text-xs text-gray-400 mb-3">
-                  User ID: {zerodhaStatus.userId}
-                </div>
+                <div className="text-xs text-gray-400 mb-3">User ID: {zerodhaStatus.userId}</div>
                 <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const { data } = await axios.post('/api/zerodha/seed-mcx', {}, {
-                          headers: { Authorization: `Bearer ${admin.token}` }
-                        });
-                        alert(data.message);
-                      } catch (error) {
-                        alert(error.response?.data?.message || 'Error seeding MCX');
-                      }
-                    }}
-                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm"
-                  >
-                    Seed MCX
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const { data } = await axios.post('/api/zerodha/subscribe-all', {}, {
-                          headers: { Authorization: `Bearer ${admin.token}` }
-                        });
-                        alert(data.message);
-                      } catch (error) {
-                        alert(error.response?.data?.message || 'Error subscribing');
-                      }
-                    }}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm"
-                  >
-                    Subscribe All
-                  </button>
+                  <button onClick={async () => {
+                    try {
+                      const { data } = await axios.post('/api/zerodha/seed-mcx', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(data.message);
+                    } catch (error) { alert(error.response?.data?.message || 'Error seeding MCX'); }
+                  }} className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm">Seed MCX</button>
+                  <button onClick={async () => {
+                    try {
+                      const { data } = await axios.post('/api/zerodha/subscribe-all', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(data.message);
+                    } catch (error) { alert(error.response?.data?.message || 'Error subscribing'); }
+                  }} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm">Subscribe All</button>
                 </div>
-                <button
-                  onClick={disconnectZerodha}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm"
-                >
-                  Disconnect
-                </button>
+                <button onClick={disconnectZerodha} className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm">Disconnect</button>
               </>
             ) : (
-              <button
-                onClick={connectZerodha}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm"
-              >
-                Connect to Kite
-              </button>
+              <button onClick={connectZerodha} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm">Connect to Kite</button>
             )}
           </div>
         </div>
 
-        {/* Redirect URL Info */}
         <div className="mt-4 p-3 bg-dark-700 rounded-lg border border-dark-600">
           <h4 className="text-sm font-medium mb-2">Kite Connect Redirect URL</h4>
           <p className="text-xs text-gray-400 mb-2">Add this URL in your Kite Connect app settings:</p>
@@ -3397,25 +3411,17 @@ const MarketControl = () => {
           <div>
             <h2 className="text-xl font-semibold">Global Market Status</h2>
             <p className="text-gray-400 text-sm mt-1">
-              {marketState?.isMarketOpen 
-                ? 'Market is OPEN - Trading is allowed' 
-                : 'Market is CLOSED - Trading is disabled'}
+              {marketState?.isMarketOpen ? 'Market is OPEN - Trading is allowed' : 'Market is CLOSED - Trading is disabled'}
             </p>
           </div>
           <button
             onClick={toggleMarket}
             disabled={updating}
-            className={`px-8 py-4 rounded-lg text-lg font-bold transition ${
-              marketState?.isMarketOpen 
-                ? 'bg-red-600 hover:bg-red-700' 
-                : 'bg-green-600 hover:bg-green-700'
-            }`}
+            className={`px-8 py-4 rounded-lg text-lg font-bold transition ${marketState?.isMarketOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
           >
             {updating ? 'Updating...' : marketState?.isMarketOpen ? 'CLOSE MARKET' : 'OPEN MARKET'}
           </button>
         </div>
-
-        {/* Status Indicator */}
         <div className="mt-6 flex items-center gap-4">
           <div className={`w-4 h-4 rounded-full ${marketState?.isMarketOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
           <span className={`text-lg font-bold ${marketState?.isMarketOpen ? 'text-green-400' : 'text-red-400'}`}>
@@ -3424,36 +3430,187 @@ const MarketControl = () => {
         </div>
       </div>
 
+      {/* Segment-wise Timing Controls */}
+      <div className="bg-dark-800 rounded-lg p-6 mb-6">
+        <h2 className="text-xl font-semibold mb-4">Segment Timings</h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Configure market data and trading hours for each segment. Data can start before trading hours (pre-market data only mode).
+        </p>
+        
+        <div className="grid md:grid-cols-2 gap-4">
+          {segments.map(segment => {
+            const seg = marketState?.segments?.[segment] || {};
+            const color = segmentColors[segment];
+            return (
+              <div key={segment} className={`bg-dark-700 rounded-lg p-4 border ${seg.isOpen ? `border-${color}-500/50` : 'border-dark-600'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold text-${color}-400`}>{segment}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs ${seg.isOpen ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {seg.isOpen ? 'OPEN' : 'CLOSED'}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openEditModal(segment)}
+                      className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs"
+                    >
+                      Edit Timings
+                    </button>
+                    <button
+                      onClick={() => toggleSegment(segment)}
+                      className={`px-2 py-1 rounded text-xs ${seg.isOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+                    >
+                      {seg.isOpen ? 'Close' : 'Open'}
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-dark-800 rounded p-2">
+                    <div className="text-gray-500">Data Start</div>
+                    <div className="font-mono text-blue-400">{seg.dataStartTime || '09:00'}</div>
+                  </div>
+                  <div className="bg-dark-800 rounded p-2">
+                    <div className="text-gray-500">Trading Start</div>
+                    <div className="font-mono text-green-400">{seg.tradingStartTime || '09:15'}</div>
+                  </div>
+                  <div className="bg-dark-800 rounded p-2">
+                    <div className="text-gray-500">Trading End</div>
+                    <div className="font-mono text-red-400">{seg.tradingEndTime || '15:30'}</div>
+                  </div>
+                  <div className="bg-dark-800 rounded p-2">
+                    <div className="text-gray-500">Data End</div>
+                    <div className="font-mono text-purple-400">{seg.dataEndTime || '15:30'}</div>
+                  </div>
+                </div>
+                
+                <div className="mt-2 text-xs text-gray-500">
+                  Square-off: {seg.intradaySquareOffTime || '15:15'} | 
+                  Pre-market data: {seg.preMarketDataOnly !== false ? 'Yes' : 'No'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Info Cards */}
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-2 gap-6 mb-6">
         <div className="bg-dark-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 text-green-400">When Market is OPEN</h3>
+          <h3 className="text-lg font-semibold mb-4 text-blue-400">Pre-Market Data Mode</h3>
           <ul className="space-y-2 text-sm text-gray-300">
-            <li>✅ Users can place new orders</li>
-            <li>✅ Users can modify orders</li>
-            <li>✅ New positions can be opened</li>
-            <li>✅ Square-off allowed</li>
-            <li>✅ RMS actions active</li>
+            <li>📊 Market data is visible to users</li>
+            <li>❌ Trading is NOT allowed</li>
+            <li>⏰ Active between Data Start and Trading Start times</li>
+            <li>💡 Users can analyze market before trading begins</li>
           </ul>
         </div>
 
         <div className="bg-dark-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 text-red-400">When Market is CLOSED</h3>
+          <h3 className="text-lg font-semibold mb-4 text-green-400">Trading Hours</h3>
           <ul className="space-y-2 text-sm text-gray-300">
-            <li>❌ No new orders allowed</li>
-            <li>❌ No modifications allowed</li>
-            <li>❌ No new positions</li>
-            <li>✅ Square-off still allowed</li>
-            <li>✅ RMS actions still work</li>
-            <li>✅ Admin settlement allowed</li>
+            <li>✅ Full trading allowed</li>
+            <li>📊 Market data visible</li>
+            <li>⏰ Active between Trading Start and Trading End</li>
+            <li>🔄 Auto square-off at configured time</li>
           </ul>
         </div>
       </div>
 
       {/* Last Updated */}
       {marketState?.lastUpdatedAt && (
-        <div className="mt-6 text-sm text-gray-500">
+        <div className="text-sm text-gray-500">
           Last updated: {new Date(marketState.lastUpdatedAt).toLocaleString()}
+        </div>
+      )}
+
+      {/* Edit Segment Modal */}
+      {editingSegment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-lg w-full max-w-md p-6">
+            <div className="flex justify-between mb-4">
+              <h2 className="text-xl font-bold">Edit {editingSegment} Timings</h2>
+              <button onClick={() => setEditingSegment(null)}><X size={24} /></button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Data Start Time</label>
+                  <input
+                    type="time"
+                    value={segmentForm.dataStartTime}
+                    onChange={e => setSegmentForm({...segmentForm, dataStartTime: e.target.value})}
+                    className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When market data becomes visible</p>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Trading Start Time</label>
+                  <input
+                    type="time"
+                    value={segmentForm.tradingStartTime}
+                    onChange={e => setSegmentForm({...segmentForm, tradingStartTime: e.target.value})}
+                    className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When trading is allowed</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Trading End Time</label>
+                  <input
+                    type="time"
+                    value={segmentForm.tradingEndTime}
+                    onChange={e => setSegmentForm({...segmentForm, tradingEndTime: e.target.value})}
+                    className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When trading stops</p>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Data End Time</label>
+                  <input
+                    type="time"
+                    value={segmentForm.dataEndTime}
+                    onChange={e => setSegmentForm({...segmentForm, dataEndTime: e.target.value})}
+                    className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When market data stops</p>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Intraday Square-off Time</label>
+                <input
+                  type="time"
+                  value={segmentForm.intradaySquareOffTime}
+                  onChange={e => setSegmentForm({...segmentForm, intradaySquareOffTime: e.target.value})}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">Auto square-off intraday positions</p>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="preMarketDataOnly"
+                  checked={segmentForm.preMarketDataOnly}
+                  onChange={e => setSegmentForm({...segmentForm, preMarketDataOnly: e.target.checked})}
+                  className="w-4 h-4"
+                />
+                <label htmlFor="preMarketDataOnly" className="text-sm text-gray-400">
+                  Enable pre-market data only mode (show data but no trading before trading start)
+                </label>
+              </div>
+              
+              <div className="flex gap-3 mt-6">
+                <button onClick={() => setEditingSegment(null)} className="flex-1 bg-dark-600 py-2 rounded">Cancel</button>
+                <button onClick={() => updateSegmentTimings(editingSegment)} className="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded">Save Timings</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

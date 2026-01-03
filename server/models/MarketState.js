@@ -16,27 +16,39 @@ const marketStateSchema = new mongoose.Schema({
   segments: {
     EQUITY: {
       isOpen: { type: Boolean, default: false },
-      openTime: { type: String, default: '09:15' },
-      closeTime: { type: String, default: '15:30' },
-      intradaySquareOffTime: { type: String, default: '15:15' }
+      dataStartTime: { type: String, default: '09:00' }, // When market data starts
+      tradingStartTime: { type: String, default: '09:15' }, // When trading is allowed
+      tradingEndTime: { type: String, default: '15:30' }, // When trading ends
+      dataEndTime: { type: String, default: '15:30' }, // When market data ends
+      intradaySquareOffTime: { type: String, default: '15:15' },
+      preMarketDataOnly: { type: Boolean, default: true } // Show data but no trading before tradingStartTime
     },
     FNO: {
       isOpen: { type: Boolean, default: false },
-      openTime: { type: String, default: '09:15' },
-      closeTime: { type: String, default: '15:30' },
-      intradaySquareOffTime: { type: String, default: '15:25' }
+      dataStartTime: { type: String, default: '09:00' },
+      tradingStartTime: { type: String, default: '09:15' },
+      tradingEndTime: { type: String, default: '15:30' },
+      dataEndTime: { type: String, default: '15:30' },
+      intradaySquareOffTime: { type: String, default: '15:25' },
+      preMarketDataOnly: { type: Boolean, default: true }
     },
     MCX: {
       isOpen: { type: Boolean, default: false },
-      openTime: { type: String, default: '09:00' },
-      closeTime: { type: String, default: '23:30' },
-      intradaySquareOffTime: { type: String, default: '23:25' }
+      dataStartTime: { type: String, default: '09:00' },
+      tradingStartTime: { type: String, default: '09:00' },
+      tradingEndTime: { type: String, default: '23:30' },
+      dataEndTime: { type: String, default: '23:30' },
+      intradaySquareOffTime: { type: String, default: '23:25' },
+      preMarketDataOnly: { type: Boolean, default: false }
     },
     CRYPTO: {
       isOpen: { type: Boolean, default: true }, // Crypto is 24/7
-      openTime: { type: String, default: '00:00' },
-      closeTime: { type: String, default: '23:59' },
-      intradaySquareOffTime: { type: String, default: '23:59' }
+      dataStartTime: { type: String, default: '00:00' },
+      tradingStartTime: { type: String, default: '00:00' },
+      tradingEndTime: { type: String, default: '23:59' },
+      dataEndTime: { type: String, default: '23:59' },
+      intradaySquareOffTime: { type: String, default: '23:59' },
+      preMarketDataOnly: { type: Boolean, default: false }
     }
   },
   
@@ -78,25 +90,73 @@ marketStateSchema.statics.getState = async function() {
   return state;
 };
 
+// Helper to check if current time is within range
+const isTimeInRange = (startTime, endTime) => {
+  const now = new Date();
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const startMinutes = startHour * 60 + startMin;
+  const endMinutes = endHour * 60 + endMin;
+  
+  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+};
+
 // Static method to check if trading is allowed
 marketStateSchema.statics.isTradingAllowed = async function(segment = 'EQUITY') {
-  // CRYPTO is always open 24/7
-  if (segment === 'CRYPTO') {
-    return true;
-  }
-  
   const state = await this.getState();
   
-  // If manual override is on, use global status
+  // If manual override is on, use global status only
   if (state.manualOverride) {
-    return state.isMarketOpen;
+    return { allowed: state.isMarketOpen, reason: state.isMarketOpen ? 'Market open' : 'Market closed by admin' };
   }
   
   // Check segment-specific status
   const segmentState = state.segments[segment];
-  if (!segmentState) return state.isMarketOpen;
+  if (!segmentState) {
+    return { allowed: state.isMarketOpen, reason: state.isMarketOpen ? 'Market open' : 'Market closed' };
+  }
   
-  return segmentState.isOpen && state.isMarketOpen;
+  // Check if segment is enabled
+  if (!segmentState.isOpen) {
+    return { allowed: false, reason: `${segment} segment is closed` };
+  }
+  
+  // Check if global market is open
+  if (!state.isMarketOpen) {
+    return { allowed: false, reason: 'Market is closed' };
+  }
+  
+  // Check trading time window
+  const tradingStart = segmentState.tradingStartTime || '09:15';
+  const tradingEnd = segmentState.tradingEndTime || '15:30';
+  
+  if (!isTimeInRange(tradingStart, tradingEnd)) {
+    // Check if we're in data-only mode (pre-market)
+    const dataStart = segmentState.dataStartTime || tradingStart;
+    const dataEnd = segmentState.dataEndTime || tradingEnd;
+    
+    if (isTimeInRange(dataStart, dataEnd)) {
+      return { allowed: false, reason: 'Pre-market hours - data only, trading not allowed', dataOnly: true };
+    }
+    return { allowed: false, reason: `Trading hours: ${tradingStart} - ${tradingEnd}` };
+  }
+  
+  return { allowed: true, reason: 'Trading allowed' };
+};
+
+// Static method to check if market data should be shown
+marketStateSchema.statics.isDataAllowed = async function(segment = 'EQUITY') {
+  const state = await this.getState();
+  
+  const segmentState = state.segments[segment];
+  if (!segmentState) return true;
+  
+  const dataStart = segmentState.dataStartTime || '09:00';
+  const dataEnd = segmentState.dataEndTime || '15:30';
+  
+  return isTimeInRange(dataStart, dataEnd);
 };
 
 // Method to update market status

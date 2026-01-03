@@ -83,6 +83,71 @@ router.put('/market-state', protectAdmin, superAdminOnly, async (req, res) => {
   }
 });
 
+// Update segment timings (Super Admin only)
+router.put('/market-state/segment/:segment', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const { segment } = req.params;
+    const { isOpen, dataStartTime, tradingStartTime, tradingEndTime, dataEndTime, intradaySquareOffTime, preMarketDataOnly } = req.body;
+    
+    const validSegments = ['EQUITY', 'FNO', 'MCX', 'CRYPTO'];
+    if (!validSegments.includes(segment)) {
+      return res.status(400).json({ message: 'Invalid segment' });
+    }
+    
+    const state = await MarketState.getState();
+    
+    // Update segment settings
+    if (isOpen !== undefined) state.segments[segment].isOpen = isOpen;
+    if (dataStartTime) state.segments[segment].dataStartTime = dataStartTime;
+    if (tradingStartTime) state.segments[segment].tradingStartTime = tradingStartTime;
+    if (tradingEndTime) state.segments[segment].tradingEndTime = tradingEndTime;
+    if (dataEndTime) state.segments[segment].dataEndTime = dataEndTime;
+    if (intradaySquareOffTime) state.segments[segment].intradaySquareOffTime = intradaySquareOffTime;
+    if (preMarketDataOnly !== undefined) state.segments[segment].preMarketDataOnly = preMarketDataOnly;
+    
+    state.lastUpdatedAt = new Date();
+    state.updatedBy = req.admin._id;
+    await state.save();
+    
+    res.json(state);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Toggle segment status (Super Admin only)
+router.put('/market-state/segment/:segment/toggle', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const { segment } = req.params;
+    
+    const validSegments = ['EQUITY', 'FNO', 'MCX', 'CRYPTO'];
+    if (!validSegments.includes(segment)) {
+      return res.status(400).json({ message: 'Invalid segment' });
+    }
+    
+    const state = await MarketState.getState();
+    state.segments[segment].isOpen = !state.segments[segment].isOpen;
+    state.lastUpdatedAt = new Date();
+    state.updatedBy = req.admin._id;
+    await state.save();
+    
+    res.json(state);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Check if trading is allowed for a segment
+router.get('/market-state/trading-status/:segment', async (req, res) => {
+  try {
+    const { segment } = req.params;
+    const result = await MarketState.isTradingAllowed(segment);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==================== USER TRADING ROUTES ====================
 
 // Place a new trade
