@@ -3,7 +3,7 @@ import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { 
-  TrendingUp, Users, LogOut, Plus, Search, Edit, Trash2, 
+  Users, LogOut, Plus, Search, Edit, Trash2, TrendingUp,
   Key, Wallet, Eye, EyeOff, X, ArrowUpCircle, ArrowDownCircle,
   RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus
 } from 'lucide-react';
@@ -53,13 +53,14 @@ const AdminDashboard = () => {
     { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
     { path: '/admin/instruments', icon: TrendingUp, label: 'Instruments' },
     { path: '/admin/lot-settings', icon: Settings, label: 'Lot Management' },
-    { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
+    { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
     { path: '/admin/charges', icon: CreditCard, label: 'Charge Management' },
     { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
     { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
     { path: '/admin/profile', icon: Settings, label: 'Profile' },
   ] : [
     { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
+    { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
     { path: '/admin/users', icon: Users, label: 'User Management' },
     { path: '/admin/trades', icon: FileText, label: 'Trade Management' },
     { path: '/admin/charges', icon: CreditCard, label: 'Charge Management' },
@@ -74,8 +75,7 @@ const AdminDashboard = () => {
       {/* Mobile Header */}
       <header className="md:hidden bg-dark-800 border-b border-dark-600 px-4 py-3 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2">
-          <TrendingUp className="w-7 h-7 text-green-500" />
-          <span className="text-lg font-bold">NTrader</span>
+          <span className="text-lg font-bold">THEFX</span>
           <span className={`text-xs ml-1 ${isSuperAdmin ? 'text-yellow-400' : 'text-purple-400'}`}>
             {isSuperAdmin ? 'Super Admin' : 'Admin'}
           </span>
@@ -130,8 +130,7 @@ const AdminDashboard = () => {
       <aside className="hidden md:flex w-64 bg-dark-800 border-r border-dark-600 flex-col">
         <div className="p-4 border-b border-dark-600">
           <Link to="/" className="flex items-center gap-2">
-            <TrendingUp className="w-8 h-8 text-green-500" />
-            <span className="text-xl font-bold">NTrader</span>
+            <span className="text-xl font-bold">THEFX</span>
           </Link>
           <p className={`text-xs mt-1 ${isSuperAdmin ? 'text-yellow-400' : 'text-purple-400'}`}>
             {isSuperAdmin ? 'Super Admin Panel' : 'Admin Panel'}
@@ -192,9 +191,11 @@ const AdminDashboard = () => {
           {isSuperAdmin && <Route path="instruments" element={<InstrumentManagement />} />}
           {isSuperAdmin && <Route path="lot-settings" element={<LotManagement />} />}
           {isSuperAdmin && <Route path="fund-requests" element={<SuperAdminFundRequests />} />}
+          {isSuperAdmin && <Route path="admin-fund-requests" element={<AdminFundRequestsManagement />} />}
           {isSuperAdmin && <Route path="market-control" element={<MarketControl />} />}
           {isSuperAdmin && <Route path="bank-management" element={<BankManagement />} />}
           {/* Admin Only Routes */}
+          {!isSuperAdmin && <Route path="wallet" element={<AdminWallet />} />}
           {!isSuperAdmin && <Route path="users/*" element={<UserManagement />} />}
           {!isSuperAdmin && <Route path="trades" element={<AdminTrades />} />}
           {!isSuperAdmin && <Route path="fund-requests" element={<FundRequests />} />}
@@ -1977,6 +1978,421 @@ const AddBankModal = ({ token, onClose, onSuccess }) => {
           <button type="submit" disabled={loading} className="w-full bg-green-600 py-2 rounded">{loading ? 'Adding...' : 'Add Account'}</button>
         </form>
       </div>
+    </div>
+  );
+};
+
+// Admin Wallet - For Admin to view wallet, request funds, download ledger
+const AdminWallet = () => {
+  const { admin, updateAdmin } = useAuth();
+  const [walletData, setWalletData] = useState(null);
+  const [fundRequests, setFundRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestAmount, setRequestAmount] = useState('');
+  const [requestReason, setRequestReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+
+  useEffect(() => {
+    fetchWalletData();
+    fetchFundRequests();
+  }, []);
+
+  const fetchWalletData = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/my-wallet', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setWalletData(data);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchFundRequests = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/my-fund-requests', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setFundRequests(data);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
+  const handleRequestFund = async (e) => {
+    e.preventDefault();
+    if (!requestAmount || Number(requestAmount) <= 0) {
+      setMessage({ type: 'error', text: 'Enter valid amount' });
+      return;
+    }
+    setSubmitting(true);
+    setMessage({ type: '', text: '' });
+    try {
+      await axios.post('/api/admin/manage/fund-request', {
+        amount: Number(requestAmount),
+        reason: requestReason
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setMessage({ type: 'success', text: 'Fund request submitted successfully' });
+      setRequestAmount('');
+      setRequestReason('');
+      setShowRequestModal(false);
+      fetchFundRequests();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.message || 'Error submitting request' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const downloadLedger = async () => {
+    try {
+      const response = await axios.get('/api/admin/manage/my-ledger/download', {
+        headers: { Authorization: `Bearer ${admin.token}` },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `admin-ledger-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      alert('Error downloading ledger');
+    }
+  };
+
+  const downloadUserTransactions = async () => {
+    try {
+      const response = await axios.get('/api/admin/manage/user-transactions/download', {
+        headers: { Authorization: `Bearer ${admin.token}` },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `user-transactions-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      alert('Error downloading transactions');
+    }
+  };
+
+  if (loading) {
+    return <div className="p-6 text-center"><RefreshCw className="animate-spin inline" size={24} /></div>;
+  }
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <h1 className="text-2xl font-bold">My Wallet</h1>
+        <button
+          onClick={() => setShowRequestModal(true)}
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"
+        >
+          <Plus size={20} />
+          Request Funds
+        </button>
+      </div>
+
+      {message.text && (
+        <div className={`mb-4 p-3 rounded ${message.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Wallet Balance Card */}
+      <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl p-6 mb-6">
+        <div className="text-white/80 text-sm mb-1">Available Balance</div>
+        <div className="text-4xl font-bold text-white mb-4">₹{(walletData?.wallet?.balance || 0).toLocaleString()}</div>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <div className="text-white/60">Total Deposited</div>
+            <div className="text-white font-semibold">₹{(walletData?.wallet?.totalDeposited || 0).toLocaleString()}</div>
+          </div>
+          <div>
+            <div className="text-white/60">Total Withdrawn</div>
+            <div className="text-white font-semibold">₹{(walletData?.wallet?.totalWithdrawn || 0).toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* User Summary Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Users</div>
+          <div className="text-2xl font-bold text-purple-400">{walletData?.summary?.totalUsers || 0}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">User Deposits</div>
+          <div className="text-2xl font-bold text-green-400">₹{(walletData?.summary?.totalUserDeposits || 0).toLocaleString()}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">User Withdrawals</div>
+          <div className="text-2xl font-bold text-red-400">₹{(walletData?.summary?.totalUserWithdrawals || 0).toLocaleString()}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Distributed to Users</div>
+          <div className="text-2xl font-bold text-blue-400">₹{(walletData?.summary?.distributedToUsers || 0).toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* P&L Summary */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total User Profits</div>
+          <div className="text-2xl font-bold text-green-400">₹{(walletData?.summary?.totalUserProfits || 0).toLocaleString()}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total User Losses</div>
+          <div className="text-2xl font-bold text-red-400">₹{(walletData?.summary?.totalUserLosses || 0).toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* Download Buttons */}
+      <div className="flex flex-wrap gap-3 mb-6">
+        <button onClick={downloadLedger} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg">
+          <FileText size={18} /> Download My Ledger
+        </button>
+        <button onClick={downloadUserTransactions} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">
+          <FileText size={18} /> Download User Transactions
+        </button>
+      </div>
+
+      {/* Fund Requests History */}
+      <div className="bg-dark-800 rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-4">My Fund Requests</h2>
+        {fundRequests.length === 0 ? (
+          <div className="text-center py-4 text-gray-400">No fund requests yet</div>
+        ) : (
+          <div className="space-y-2">
+            {fundRequests.map(req => (
+              <div key={req._id} className="flex items-center justify-between bg-dark-700 rounded p-3">
+                <div>
+                  <div className="font-medium">₹{req.amount.toLocaleString()}</div>
+                  <div className="text-xs text-gray-400">{req.reason || 'No reason'}</div>
+                  <div className="text-xs text-gray-500">{new Date(req.createdAt).toLocaleString()}</div>
+                </div>
+                <span className={`px-3 py-1 rounded text-sm ${
+                  req.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' :
+                  req.status === 'REJECTED' ? 'bg-red-500/20 text-red-400' :
+                  'bg-yellow-500/20 text-yellow-400'
+                }`}>
+                  {req.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Ledger */}
+      <div className="bg-dark-800 rounded-lg p-4">
+        <h2 className="text-lg font-semibold mb-4">Recent Transactions</h2>
+        {!walletData?.ledger?.length ? (
+          <div className="text-center py-4 text-gray-400">No transactions yet</div>
+        ) : (
+          <div className="space-y-2">
+            {walletData.ledger.slice(0, 10).map(entry => (
+              <div key={entry._id} className="flex items-center justify-between bg-dark-700 rounded p-3">
+                <div>
+                  <div className="text-sm">{entry.reason}</div>
+                  <div className="text-xs text-gray-400">{entry.description}</div>
+                  <div className="text-xs text-gray-500">{new Date(entry.createdAt).toLocaleString()}</div>
+                </div>
+                <div className="text-right">
+                  <div className={entry.type === 'CREDIT' ? 'text-green-400' : 'text-red-400'}>
+                    {entry.type === 'CREDIT' ? '+' : '-'}₹{entry.amount.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-400">Bal: ₹{entry.balanceAfter.toLocaleString()}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Request Fund Modal */}
+      {showRequestModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-lg w-full max-w-md p-6">
+            <div className="flex justify-between mb-4">
+              <h2 className="text-xl font-bold">Request Funds</h2>
+              <button onClick={() => setShowRequestModal(false)}><X size={24} /></button>
+            </div>
+            <p className="text-gray-400 text-sm mb-4">
+              Request funds from Super Admin. Your current balance is ₹{(walletData?.wallet?.balance || 0).toLocaleString()}
+            </p>
+            <form onSubmit={handleRequestFund} className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Amount (₹)</label>
+                <input
+                  type="number"
+                  value={requestAmount}
+                  onChange={e => setRequestAmount(e.target.value)}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  placeholder="Enter amount"
+                  required
+                  min="1"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Reason (optional)</label>
+                <textarea
+                  value={requestReason}
+                  onChange={e => setRequestReason(e.target.value)}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  placeholder="Why do you need these funds?"
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowRequestModal(false)} className="flex-1 bg-dark-600 py-2 rounded">
+                  Cancel
+                </button>
+                <button type="submit" disabled={submitting} className="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded">
+                  {submitting ? 'Submitting...' : 'Submit Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Admin Fund Requests Management - For Super Admin to approve/reject admin fund requests
+const AdminFundRequestsManagement = () => {
+  const { admin } = useAuth();
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('PENDING');
+  const [processing, setProcessing] = useState(null);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [filter]);
+
+  const fetchRequests = async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`/api/admin/manage/admin-fund-requests?status=${filter}`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setRequests(data);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (requestId, status, remarks = '') => {
+    setProcessing(requestId);
+    try {
+      await axios.put(`/api/admin/manage/admin-fund-requests/${requestId}`, {
+        status,
+        remarks
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchRequests();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error processing request');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <h1 className="text-2xl font-bold mb-6">Admin Fund Requests</h1>
+
+      {/* Filter Tabs */}
+      <div className="flex gap-2 mb-6">
+        {['PENDING', 'APPROVED', 'REJECTED'].map(status => (
+          <button
+            key={status}
+            onClick={() => setFilter(status)}
+            className={`px-4 py-2 rounded-lg ${filter === status ? 
+              status === 'PENDING' ? 'bg-yellow-600' :
+              status === 'APPROVED' ? 'bg-green-600' : 'bg-red-600'
+              : 'bg-dark-700'}`}
+          >
+            {status}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">No {filter.toLowerCase()} requests</div>
+      ) : (
+        <div className="space-y-4">
+          {requests.map(req => (
+            <div key={req._id} className="bg-dark-800 rounded-lg p-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-lg">{req.admin?.name || req.admin?.username}</span>
+                    <span className="font-mono bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded text-sm">{req.adminCode}</span>
+                  </div>
+                  <div className="text-sm text-gray-400 mt-1">{req.admin?.email}</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    Current Balance: ₹{(req.admin?.wallet?.balance || 0).toLocaleString()}
+                  </div>
+                  {req.reason && <div className="text-sm mt-2 text-gray-300">Reason: {req.reason}</div>}
+                  <div className="text-xs text-gray-500 mt-1">{new Date(req.createdAt).toLocaleString()}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-400">Requested Amount</div>
+                  <div className="text-2xl font-bold text-green-400">₹{req.amount.toLocaleString()}</div>
+                </div>
+                {filter === 'PENDING' && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(req._id, 'APPROVED')}
+                      disabled={processing === req._id}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded flex items-center gap-1"
+                    >
+                      <ArrowUpCircle size={18} /> Approve
+                    </button>
+                    <button
+                      onClick={() => handleAction(req._id, 'REJECTED')}
+                      disabled={processing === req._id}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded flex items-center gap-1"
+                    >
+                      <ArrowDownCircle size={18} /> Reject
+                    </button>
+                  </div>
+                )}
+                {filter !== 'PENDING' && (
+                  <span className={`px-4 py-2 rounded ${
+                    req.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {req.status}
+                  </span>
+                )}
+              </div>
+              {req.adminRemarks && (
+                <div className="mt-3 pt-3 border-t border-dark-600 text-sm text-gray-400">
+                  Remarks: {req.adminRemarks}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -4340,9 +4756,27 @@ const ProfileSettings = () => {
   const { admin, setAdmin } = useAuth();
   const [profileData, setProfileData] = useState({ name: admin?.name || '', email: admin?.email || '', phone: admin?.phone || '' });
   const [passwordData, setPasswordData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [brandingData, setBrandingData] = useState({ brandName: admin?.branding?.brandName || '', logoUrl: admin?.branding?.logoUrl || '', welcomeTitle: admin?.branding?.welcomeTitle || '' });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showPasswords, setShowPasswords] = useState(false);
+
+  const handleBrandingUpdate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const { data } = await axios.put('/api/admin/manage/branding', brandingData, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setAdmin({ ...admin, branding: data.branding });
+      setMessage({ type: 'success', text: 'Branding updated successfully' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.message || 'Error updating branding' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
@@ -4484,6 +4918,123 @@ const ProfileSettings = () => {
           </form>
         </div>
       </div>
+
+      {/* Branding Settings - Only for ADMIN role */}
+      {admin?.role === 'ADMIN' && (
+        <div className="mt-6 bg-dark-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">Branding Settings</h2>
+          <p className="text-gray-400 text-sm mb-4">
+            Customize your login page branding. Users who register via your referral link will see this branding.
+          </p>
+          <form onSubmit={handleBrandingUpdate} className="space-y-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Brand Name</label>
+              <input
+                type="text"
+                value={brandingData.brandName}
+                onChange={e => setBrandingData({ ...brandingData, brandName: e.target.value })}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                placeholder="Your Brand Name (e.g., FKG)"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Welcome Title</label>
+              <input
+                type="text"
+                value={brandingData.welcomeTitle}
+                onChange={e => setBrandingData({ ...brandingData, welcomeTitle: e.target.value })}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 text-lg"
+                placeholder="Welcome to FKG Trading"
+              />
+              <p className="text-xs text-gray-500 mt-1">This title will be displayed prominently on the login page</p>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Logo</label>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <label className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-center gap-2 bg-dark-700 border border-dark-600 border-dashed rounded px-4 py-3 hover:border-green-500 transition">
+                      <Plus size={18} className="text-gray-400" />
+                      <span className="text-gray-400">Upload Logo</span>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/svg+xml,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        if (file.size > 5 * 1024 * 1024) {
+                          setMessage({ type: 'error', text: 'File size must be less than 5MB' });
+                          return;
+                        }
+                        setLoading(true);
+                        setMessage({ type: '', text: '' });
+                        try {
+                          const formData = new FormData();
+                          formData.append('logo', file);
+                          const { data } = await axios.post('/api/upload/logo', formData, {
+                            headers: { 
+                              Authorization: `Bearer ${admin.token}`,
+                              'Content-Type': 'multipart/form-data'
+                            }
+                          });
+                          setBrandingData({ ...brandingData, logoUrl: data.logoUrl });
+                          setAdmin({ ...admin, branding: data.branding });
+                          setMessage({ type: 'success', text: 'Logo uploaded successfully' });
+                        } catch (error) {
+                          setMessage({ type: 'error', text: error.response?.data?.message || 'Error uploading logo' });
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                    />
+                  </label>
+                  {brandingData.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setLoading(true);
+                        try {
+                          await axios.delete('/api/upload/logo', {
+                            headers: { Authorization: `Bearer ${admin.token}` }
+                          });
+                          setBrandingData({ ...brandingData, logoUrl: '' });
+                          setAdmin({ ...admin, branding: { ...admin.branding, logoUrl: '' } });
+                          setMessage({ type: 'success', text: 'Logo removed' });
+                        } catch (error) {
+                          setMessage({ type: 'error', text: 'Error removing logo' });
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      className="px-3 py-3 bg-red-600/20 text-red-400 rounded hover:bg-red-600/30"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">Supported: JPEG, PNG, GIF, SVG, WebP (max 5MB)</p>
+              </div>
+            </div>
+            {brandingData.logoUrl && (
+              <div className="p-3 bg-dark-700 rounded">
+                <p className="text-sm text-gray-400 mb-2">Preview:</p>
+                <img src={brandingData.logoUrl} alt="Logo Preview" className="h-16 object-contain" onError={(e) => e.target.style.display = 'none'} />
+              </div>
+            )}
+            <button type="submit" disabled={loading} className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
+              {loading ? 'Saving...' : 'Update Branding'}
+            </button>
+          </form>
+          {admin?.referralUrl && (
+            <div className="mt-4 p-3 bg-dark-700 rounded">
+              <p className="text-sm text-gray-400 mb-1">Your Referral Link:</p>
+              <code className="text-green-400 text-sm break-all">{admin.referralUrl}</code>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Account Info */}
       <div className="mt-6 bg-dark-800 rounded-lg p-6">

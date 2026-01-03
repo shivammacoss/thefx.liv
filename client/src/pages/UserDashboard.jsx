@@ -5,7 +5,7 @@ import { createChart } from 'lightweight-charts';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import {
-  TrendingUp, Search, LogOut, Wallet, RefreshCw, Plus,
+  Search, LogOut, Wallet, RefreshCw, Plus, TrendingUp,
   ChevronDown, ChevronRight, Settings, Bell, User, X,
   BarChart2, History, ListOrdered, UserCircle, Menu,
   ArrowDownCircle, ArrowUpCircle, CreditCard, Copy, Check, Building2
@@ -247,8 +247,7 @@ const UserDashboard = () => {
       <header className="bg-dark-800 border-b border-dark-600 px-4 py-2 hidden md:flex items-center justify-between">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <TrendingUp className="w-7 h-7 text-green-500" />
-            <span className="text-lg font-bold">NTrader</span>
+            <span className="text-lg font-bold">THEFX</span>
           </div>
           
           {/* Market Indices - Live Data */}
@@ -328,8 +327,7 @@ const UserDashboard = () => {
       {/* Header - Mobile */}
       <header className="bg-dark-800 border-b border-dark-600 px-4 py-3 flex md:hidden items-center justify-between">
         <div className="flex items-center gap-2">
-          <TrendingUp className="w-6 h-6 text-green-500" />
-          <span className="text-lg font-bold">NTrader</span>
+          <span className="text-lg font-bold">THEFX</span>
         </div>
         <div className="flex items-center gap-3">
           <button className="text-gray-400 hover:text-white">

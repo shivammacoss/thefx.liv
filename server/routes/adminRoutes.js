@@ -7,6 +7,25 @@ import { protectAdmin, generateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Get admin branding by referral code (public endpoint for login page)
+router.get('/branding/:refCode', async (req, res) => {
+  try {
+    const admin = await Admin.findOne({ referralCode: req.params.refCode });
+    
+    if (!admin) {
+      return res.json({ brandName: '', logoUrl: '', welcomeTitle: '' });
+    }
+    
+    res.json({
+      brandName: admin.branding?.brandName || '',
+      logoUrl: admin.branding?.logoUrl || '',
+      welcomeTitle: admin.branding?.welcomeTitle || ''
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Admin Login
 router.post('/login', async (req, res) => {
   try {

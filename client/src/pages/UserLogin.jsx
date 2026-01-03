@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { TrendingUp, Eye, EyeOff, BarChart2, Wallet, Zap, LineChart, CandlestickChart } from 'lucide-react';
+import { Eye, EyeOff, BarChart2, Wallet, Zap, LineChart } from 'lucide-react';
+import axios from 'axios';
 
 const UserLogin = () => {
   const [searchParams] = useSearchParams();
@@ -16,6 +17,24 @@ const UserLogin = () => {
     adminCode: '',
     referralCode: refCode
   });
+  
+  // Branding state
+  const [branding, setBranding] = useState({ brandName: '', logoUrl: '', welcomeTitle: '' });
+  
+  // Fetch admin branding if referral code exists
+  useEffect(() => {
+    const fetchBranding = async () => {
+      if (refCode) {
+        try {
+          const { data } = await axios.get(`/api/admin/branding/${refCode}`);
+          setBranding(data);
+        } catch (err) {
+          console.error('Failed to fetch branding:', err);
+        }
+      }
+    };
+    fetchBranding();
+  }, [refCode]);
   
   // Allow direct registration - users without ref code will be assigned to Super Admin
   const canRegister = true;
@@ -62,13 +81,16 @@ const UserLogin = () => {
         
         <div className="w-full max-w-md relative z-10">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-3 mb-4">
-              <div className="p-3 bg-green-600 rounded-xl">
-                <TrendingUp className="w-8 h-8 text-white" />
-              </div>
-              <span className="text-3xl font-bold text-white">NTrader</span>
-            </div>
-            <p className="text-gray-400">Welcome back, trader!</p>
+            {branding.logoUrl && (
+              <img src={branding.logoUrl} alt="Logo" className="h-20 mx-auto mb-4 object-contain" />
+            )}
+            {branding.welcomeTitle ? (
+              <h1 className="text-2xl font-bold text-white mb-2">{branding.welcomeTitle}</h1>
+            ) : branding.brandName ? (
+              <h1 className="text-2xl font-bold text-white mb-2">Welcome to {branding.brandName}</h1>
+            ) : (
+              <p className="text-gray-400">Welcome back, trader!</p>
+            )}
           </div>
 
           <div className="bg-dark-800/90 backdrop-blur-xl p-8 rounded-2xl border border-green-500/20 shadow-2xl">
@@ -203,10 +225,7 @@ const UserLogin = () => {
         </div>
         
         <div className="relative z-10 text-center">
-          <div className="flex items-center justify-center gap-3 mb-8">
-            <CandlestickChart className="w-16 h-16 text-green-500" />
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-4">Trade Smarter</h1>
+                    <h1 className="text-4xl font-bold text-white mb-4">Trade Smarter</h1>
           <p className="text-xl text-gray-400 mb-12">NSE • BSE • MCX • F&O</p>
           
           <div className="grid grid-cols-2 gap-6 max-w-md">

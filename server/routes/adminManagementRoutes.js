@@ -1,9 +1,11 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import BankAccount from '../models/BankAccount.js';
 import FundRequest from '../models/FundRequest.js';
 import WalletLedger from '../models/WalletLedger.js';
+import AdminFundRequest from '../models/AdminFundRequest.js';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -1066,6 +1068,32 @@ router.put('/update-profile', protectAdmin, async (req, res) => {
   }
 });
 
+// Update branding settings (Admin only)
+router.put('/branding', protectAdmin, async (req, res) => {
+  try {
+    const { brandName, logoUrl, welcomeTitle } = req.body;
+    
+    const admin = await Admin.findById(req.admin._id);
+    if (!admin) return res.status(404).json({ message: 'Admin not found' });
+    
+    if (!admin.branding) {
+      admin.branding = {};
+    }
+    
+    if (brandName !== undefined) admin.branding.brandName = brandName;
+    if (logoUrl !== undefined) admin.branding.logoUrl = logoUrl;
+    if (welcomeTitle !== undefined) admin.branding.welcomeTitle = welcomeTitle;
+    
+    await admin.save();
+    res.json({ 
+      message: 'Branding updated successfully',
+      branding: admin.branding 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==================== SUPER ADMIN - ADMIN PASSWORD RESET ====================
 
 // Reset admin password (Super Admin only)
@@ -1081,8 +1109,14 @@ router.put('/admins/:id/reset-password', protectAdmin, superAdminOnly, async (re
     if (!admin) return res.status(404).json({ message: 'Admin not found' });
     if (admin.role === 'SUPER_ADMIN') return res.status(403).json({ message: 'Cannot reset Super Admin password here' });
     
-    admin.password = newPassword;
-    await admin.save();
+    // Hash the password manually to ensure it's properly hashed
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    
+    // Use updateOne to bypass pre-save hook since we're manually hashing
+    await Admin.updateOne(
+      { _id: req.params.id },
+      { $set: { password: hashedPassword } }
+    );
     
     res.json({ message: 'Admin password reset successfully' });
   } catch (error) {
@@ -1231,6 +1265,295 @@ router.put('/admins/:id/charges', protectAdmin, superAdminOnly, async (req, res)
     await admin.save();
     
     res.json({ message: 'Charges updated', admin });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== ADMIN FUND REQUEST SYSTEM ====================
+
+// Admin creates fund request to Super Admin
+router.post('/fund-request', protectAdmin, async (req, res) => {
+  try {
+    const { amount, reason } = req.body;
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+    
+    // Only ADMIN role can request funds
+    if (req.admin.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only admins can request funds' });
+    }
+    
+    const fundRequest = await AdminFundRequest.create({
+      admin: req.admin._id,
+      adminCode: req.admin.adminCode,
+      amount,
+      reason: reason || ''
+    });
+    
+    res.status(201).json({ message: 'Fund request submitted', fundRequest });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin gets their fund requests
+router.get('/my-fund-requests', protectAdmin, async (req, res) => {
+  try {
+    const requests = await AdminFundRequest.find({ admin: req.admin._id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(requests);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Super Admin gets all pending fund requests
+router.get('/admin-fund-requests', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const { status } = req.query;
+    const query = status ? { status } : {};
+    
+    const requests = await AdminFundRequest.find(query)
+      .populate('admin', 'name username email adminCode wallet')
+      .sort({ createdAt: -1 });
+    res.json(requests);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Super Admin approves/rejects fund request
+router.put('/admin-fund-requests/:id', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const { status, remarks } = req.body;
+    
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+    
+    const fundRequest = await AdminFundRequest.findById(req.params.id);
+    if (!fundRequest) return res.status(404).json({ message: 'Request not found' });
+    if (fundRequest.status !== 'PENDING') {
+      return res.status(400).json({ message: 'Request already processed' });
+    }
+    
+    fundRequest.status = status;
+    fundRequest.processedBy = req.admin._id;
+    fundRequest.processedAt = new Date();
+    fundRequest.adminRemarks = remarks || '';
+    await fundRequest.save();
+    
+    // If approved, add funds to admin wallet
+    if (status === 'APPROVED') {
+      const admin = await Admin.findById(fundRequest.admin);
+      if (admin) {
+        admin.wallet.balance += fundRequest.amount;
+        admin.wallet.totalDeposited += fundRequest.amount;
+        await admin.save();
+        
+        // Create ledger entry
+        await WalletLedger.create({
+          ownerType: 'ADMIN',
+          ownerId: admin._id,
+          adminCode: admin.adminCode,
+          type: 'CREDIT',
+          reason: 'ADMIN_DEPOSIT',
+          amount: fundRequest.amount,
+          balanceAfter: admin.wallet.balance,
+          description: `Fund request ${fundRequest.requestId} approved`,
+          performedBy: req.admin._id
+        });
+      }
+    }
+    
+    res.json({ message: `Request ${status.toLowerCase()}`, fundRequest });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== ADMIN WALLET & LEDGER ====================
+
+// Admin gets their own wallet details and summary
+router.get('/my-wallet', protectAdmin, async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id);
+    
+    // Get user transaction summary
+    const users = await User.find({ adminCode: admin.adminCode });
+    
+    let totalUserDeposits = 0;
+    let totalUserWithdrawals = 0;
+    let totalUserProfits = 0;
+    let totalUserLosses = 0;
+    let totalUserBalance = 0;
+    
+    users.forEach(user => {
+      totalUserBalance += user.wallet?.cashBalance || 0;
+      // Sum from wallet transactions if available
+      if (user.wallet?.transactions) {
+        user.wallet.transactions.forEach(tx => {
+          if (tx.type === 'deposit') totalUserDeposits += tx.amount;
+          if (tx.type === 'withdraw') totalUserWithdrawals += tx.amount;
+        });
+      }
+      // Sum P&L
+      const pnl = user.wallet?.totalPnL || 0;
+      if (pnl > 0) totalUserProfits += pnl;
+      else totalUserLosses += Math.abs(pnl);
+    });
+    
+    // Get ledger entries for this admin
+    const ledgerEntries = await WalletLedger.find({ 
+      ownerType: 'ADMIN', 
+      ownerId: admin._id 
+    }).sort({ createdAt: -1 }).limit(100);
+    
+    // Calculate distributed amount (funds given to users)
+    const distributedToUsers = await WalletLedger.aggregate([
+      { 
+        $match: { 
+          adminCode: admin.adminCode,
+          ownerType: 'USER',
+          reason: 'FUND_ADD'
+        } 
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
+    res.json({
+      wallet: admin.wallet,
+      summary: {
+        totalUsers: users.length,
+        totalUserBalance,
+        totalUserDeposits,
+        totalUserWithdrawals,
+        totalUserProfits,
+        totalUserLosses,
+        distributedToUsers: distributedToUsers[0]?.total || 0
+      },
+      ledger: ledgerEntries
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin gets their ledger for download (CSV format)
+router.get('/my-ledger/download', protectAdmin, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    
+    const query = { 
+      ownerType: 'ADMIN', 
+      ownerId: req.admin._id 
+    };
+    
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = new Date(from);
+      if (to) query.createdAt.$lte = new Date(to);
+    }
+    
+    const ledger = await WalletLedger.find(query).sort({ createdAt: -1 });
+    
+    // Generate CSV
+    const headers = ['Date', 'Type', 'Reason', 'Amount', 'Balance After', 'Description'];
+    const rows = ledger.map(entry => [
+      new Date(entry.createdAt).toLocaleString(),
+      entry.type,
+      entry.reason,
+      entry.amount,
+      entry.balanceAfter,
+      entry.description || ''
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=admin-ledger-${Date.now()}.csv`);
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin gets user transactions summary for their users
+router.get('/user-transactions-summary', protectAdmin, async (req, res) => {
+  try {
+    const adminCode = req.admin.role === 'SUPER_ADMIN' ? req.query.adminCode : req.admin.adminCode;
+    
+    if (!adminCode && req.admin.role !== 'SUPER_ADMIN') {
+      return res.status(400).json({ message: 'Admin code required' });
+    }
+    
+    const query = adminCode ? { adminCode } : {};
+    
+    // Get all user ledger entries
+    const userLedger = await WalletLedger.find({ 
+      ...query,
+      ownerType: 'USER' 
+    }).sort({ createdAt: -1 }).limit(500);
+    
+    // Aggregate by reason
+    const summary = await WalletLedger.aggregate([
+      { $match: { ...query, ownerType: 'USER' } },
+      { 
+        $group: { 
+          _id: '$reason', 
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        } 
+      }
+    ]);
+    
+    res.json({ ledger: userLedger, summary });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Download user transactions as CSV
+router.get('/user-transactions/download', protectAdmin, async (req, res) => {
+  try {
+    const adminCode = req.admin.role === 'SUPER_ADMIN' ? req.query.adminCode : req.admin.adminCode;
+    const { from, to } = req.query;
+    
+    const query = { ownerType: 'USER' };
+    if (adminCode) query.adminCode = adminCode;
+    
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = new Date(from);
+      if (to) query.createdAt.$lte = new Date(to);
+    }
+    
+    const ledger = await WalletLedger.find(query)
+      .populate('ownerId', 'username fullName userId')
+      .sort({ createdAt: -1 });
+    
+    // Generate CSV
+    const headers = ['Date', 'User', 'User ID', 'Type', 'Reason', 'Amount', 'Balance After', 'Description'];
+    const rows = ledger.map(entry => [
+      new Date(entry.createdAt).toLocaleString(),
+      entry.ownerId?.fullName || entry.ownerId?.username || 'N/A',
+      entry.ownerId?.userId || 'N/A',
+      entry.type,
+      entry.reason,
+      entry.amount,
+      entry.balanceAfter,
+      entry.description || ''
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=user-transactions-${Date.now()}.csv`);
+    res.send(csv);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

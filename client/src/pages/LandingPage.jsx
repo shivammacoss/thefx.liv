@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, Zap, ArrowRight, BarChart3, CandlestickChart, LineChart, Shield } from 'lucide-react';
+import { Zap, ArrowRight, BarChart3, LineChart, Shield } from 'lucide-react';
 
 const LandingPage = () => {
   return (
@@ -7,8 +7,7 @@ const LandingPage = () => {
       {/* Header */}
       <header className="flex items-center justify-between px-8 py-4 border-b border-dark-600 bg-dark-800/50 backdrop-blur-sm fixed w-full z-50">
         <div className="flex items-center gap-2">
-          <TrendingUp className="w-8 h-8 text-green-500" />
-          <span className="text-xl font-bold">NTrader</span>
+          <span className="text-xl font-bold">THEFX</span>
         </div>
         <div className="flex gap-4">
           <Link to="/login" className="px-4 py-2 text-gray-300 hover:text-white transition">
@@ -30,10 +29,7 @@ const LandingPage = () => {
           </div>
 
           <div className="relative z-10 flex flex-col items-center justify-center px-8 py-20">
-            <div className="flex items-center gap-2 mb-6">
-              <CandlestickChart className="w-12 h-12 text-green-500" />
-            </div>
-            <h1 className="text-5xl md:text-6xl font-bold mb-6 text-center bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+                        <h1 className="text-5xl md:text-6xl font-bold mb-6 text-center bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
               Professional Trading Platform
             </h1>
             <p className="text-xl text-gray-400 mb-10 text-center max-w-2xl">
@@ -46,7 +42,6 @@ const LandingPage = () => {
                 to="/login?register=true" 
                 className="flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 rounded-xl font-semibold transition shadow-lg shadow-green-500/25"
               >
-                <TrendingUp size={20} />
                 Create Account
                 <ArrowRight size={18} />
               </Link>
@@ -99,7 +94,7 @@ const LandingPage = () => {
 
       {/* Footer */}
       <footer className="text-center py-6 text-gray-500 border-t border-dark-600 bg-dark-800/50">
-        <p>© 2024 NTrader. All rights reserved.</p>
+        <p>© 2024 THEFX. All rights reserved.</p>
         <div className="flex justify-center gap-6 mt-2 text-sm">
           <Link to="/login" className="hover:text-green-400 transition">Login</Link>
           <span className="hover:text-gray-400 transition cursor-default">Terms</span>

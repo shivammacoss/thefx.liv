@@ -293,6 +293,22 @@ const adminSchema = new mongoose.Schema({
   referralUrl: {
     type: String,
     default: ''
+  },
+  
+  // Branding settings for login/register page
+  branding: {
+    brandName: {
+      type: String,
+      default: ''
+    },
+    logoUrl: {
+      type: String,
+      default: ''
+    },
+    welcomeTitle: {
+      type: String,
+      default: ''
+    }
   }
 }, { timestamps: true });
 
