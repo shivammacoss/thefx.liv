@@ -4,7 +4,10 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import UserLogin from './pages/UserLogin';
+import UserDashboardNew from './pages/UserDashboardNew';
 import UserDashboard from './pages/UserDashboard';
+import UserOrders from './pages/UserOrders';
+import UserTransactions from './pages/UserTransactions';
 import LandingPage from './pages/LandingPage';
 
 class ErrorBoundary extends React.Component {
@@ -57,11 +60,32 @@ function App() {
                 <AdminDashboard />
               </ProtectedAdminRoute>
             } />
-            <Route path="/dashboard/*" element={
+            {/* Trader Room - Separate page without sidebar */}
+            <Route path="/user/trader-room" element={
               <ProtectedUserRoute>
                 <UserDashboard />
               </ProtectedUserRoute>
             } />
+            {/* Orders Page - Full page orders history */}
+            <Route path="/user/orders" element={
+              <ProtectedUserRoute>
+                <UserOrders />
+              </ProtectedUserRoute>
+            } />
+            {/* Transactions Page - All wallet and fund transactions */}
+            <Route path="/user/transactions" element={
+              <ProtectedUserRoute>
+                <UserTransactions />
+              </ProtectedUserRoute>
+            } />
+            {/* User CRM Dashboard with sidebar */}
+            <Route path="/user/*" element={
+              <ProtectedUserRoute>
+                <UserDashboardNew />
+              </ProtectedUserRoute>
+            } />
+            <Route path="/dashboard" element={<Navigate to="/user/home" replace />} />
+            <Route path="/dashboard/*" element={<Navigate to="/user/home" replace />} />
           </Routes>
         </Router>
       </AuthProvider>

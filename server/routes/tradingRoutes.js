@@ -36,6 +36,7 @@ router.post('/order', protect, async (req, res) => {
     res.status(201).json(result);
   } catch (error) {
     console.error('Order error:', error.message);
+    console.error('Order error stack:', error.stack);
     res.status(400).json({ message: error.message });
   }
 });
@@ -114,8 +115,9 @@ router.post('/margin-preview', protect, async (req, res) => {
     const leverage = req.body.leverage || 1;
     const marginCalc = TradingService.calculateMargin(req.body, req.user, leverage);
     
-    const walletBalance = req.user.wallet?.balance || 0;
-    const blockedMargin = req.user.wallet?.blocked || 0;
+    // Use cashBalance (primary) or balance (legacy) for wallet - same as trading service
+    const walletBalance = req.user.wallet?.cashBalance || req.user.wallet?.balance || 0;
+    const blockedMargin = req.user.wallet?.usedMargin || req.user.wallet?.blocked || 0;
     const availableBalance = walletBalance - blockedMargin;
     
     res.json({

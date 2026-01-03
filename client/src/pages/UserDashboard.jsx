@@ -8,7 +8,8 @@ import {
   Search, LogOut, Wallet, RefreshCw, Plus, TrendingUp,
   ChevronDown, ChevronRight, Settings, Bell, User, X,
   BarChart2, History, ListOrdered, UserCircle, Menu,
-  ArrowDownCircle, ArrowUpCircle, CreditCard, Copy, Check, Building2
+  ArrowDownCircle, ArrowUpCircle, CreditCard, Copy, Check, Building2,
+  Home, ArrowLeft, ClipboardList
 } from 'lucide-react';
 import MarketWatch from '../components/MarketWatch';
 
@@ -141,7 +142,7 @@ const UserDashboard = () => {
   const [selectedInstrument, setSelectedInstrument] = useState(null);
   const [walletData, setWalletData] = useState(null);
   const [activeTab, setActiveTab] = useState('positions');
-  const [quickMode, setQuickMode] = useState(false);
+  const [quickMode, setQuickMode] = useState(true); // Always use quick order system
   const [mobileView, setMobileView] = useState('quotes');
   const [showBuySellModal, setShowBuySellModal] = useState(false);
   const [orderType, setOrderType] = useState('buy');
@@ -178,6 +179,11 @@ const UserDashboard = () => {
           finnifty: finnifty || prev.finnifty
         }));
       }
+    });
+    
+    // Listen for real-time crypto ticks from Binance WebSocket
+    socket.on('crypto_tick', (ticks) => {
+      setMarketData(prev => ({ ...prev, ...ticks }));
     });
     
     return () => socket.disconnect();
@@ -246,9 +252,23 @@ const UserDashboard = () => {
       {/* Header - Desktop */}
       <header className="bg-dark-800 border-b border-dark-600 px-4 py-2 hidden md:flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-bold">THEFX</span>
-          </div>
+          {/* Home Button */}
+          <button 
+            onClick={() => navigate('/user/home')}
+            className="flex items-center gap-2 bg-dark-700 hover:bg-dark-600 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Home size={18} className="text-green-400" />
+            <span className="text-sm font-medium">Home</span>
+          </button>
+          
+          {/* Orders Button */}
+          <button 
+            onClick={() => navigate('/user/orders')}
+            className="flex items-center gap-2 bg-dark-700 hover:bg-dark-600 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <ClipboardList size={18} className="text-blue-400" />
+            <span className="text-sm font-medium">Orders</span>
+          </button>
           
           {/* Market Indices - Live Data */}
           <div className="hidden lg:flex items-center gap-6 text-sm">
@@ -294,70 +314,54 @@ const UserDashboard = () => {
           </div>
         </div>
 
-        {/* Right side */}
+        {/* Right side - Only Trading Account Balance */}
         <div className="flex items-center gap-4">
-          {/* Wallet Button */}
-          <button 
-            onClick={() => setShowWalletModal(true)}
-            className="flex items-center gap-2 bg-dark-700 hover:bg-dark-600 px-3 py-1.5 rounded-lg transition-colors"
-          >
+          {/* Trading Account Balance Display */}
+          <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
             <Wallet size={18} className="text-green-400" />
-            <span className="text-green-400 font-medium">₹{walletData?.wallet?.balance?.toLocaleString() || '0'}</span>
-            <Plus size={14} className="text-gray-400" />
-          </button>
-          <button onClick={() => setShowNotificationsModal(true)} className="text-gray-400 hover:text-white">
-            <Bell size={20} />
-          </button>
-          <button onClick={() => setShowSettingsModal(true)} className="text-gray-400 hover:text-white">
-            <Settings size={20} />
-          </button>
+            <span className="text-green-400 font-medium">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+          </div>
           <div className="hidden sm:flex items-center gap-2 text-sm">
             <User size={18} className="text-gray-400" />
             <span>{user?.username}</span>
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-red-400 hover:text-red-300"
-          >
-            <LogOut size={20} />
-          </button>
         </div>
       </header>
 
       {/* Header - Mobile */}
       <header className="bg-dark-800 border-b border-dark-600 px-4 py-3 flex md:hidden items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold">THEFX</span>
-        </div>
+        <button 
+          onClick={() => navigate('/user/home')}
+          className="flex items-center gap-2 bg-dark-700 hover:bg-dark-600 px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <Home size={18} className="text-green-400" />
+          <span className="text-sm font-medium">Home</span>
+        </button>
         <div className="flex items-center gap-3">
-          <button className="text-gray-400 hover:text-white">
-            <Search size={20} />
-          </button>
-          <button onClick={() => setShowNotificationsModal(true)} className="text-gray-400 hover:text-white">
-            <Bell size={20} />
-          </button>
-          <button 
-            onClick={() => setShowMobileMenu(!showMobileMenu)}
-            className="text-gray-400 hover:text-white"
-          >
-            <Menu size={20} />
-          </button>
+          <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
+            <Wallet size={16} className="text-green-400" />
+            <span className="text-green-400 font-medium text-sm">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-1 text-sm">
+            <User size={16} className="text-gray-400" />
+            <span className="text-gray-400">{user?.username}</span>
+          </div>
         </div>
       </header>
 
-      {/* Mobile Menu Dropdown */}
-      {showMobileMenu && (
+      {/* Mobile Menu Dropdown - Removed, not needed anymore */}
+      {false && showMobileMenu && (
         <div 
           className="md:hidden absolute top-14 right-2 bg-dark-700 rounded-lg shadow-xl z-50 py-2 min-w-[200px]"
-          onClick={(e) => e.stopPropagation()} // Prevent menu from closing when clicking inside
+          onClick={(e) => e.stopPropagation()}
         >
           <div className="px-4 py-2 border-b border-dark-600">
             <p className="text-sm text-gray-400">Logged in as</p>
             <p className="font-medium">{user?.username}</p>
           </div>
           <div className="px-4 py-2 border-b border-dark-600">
-            <p className="text-sm text-gray-400">Balance</p>
-            <p className="font-medium text-green-400">₹{walletData?.cashBalance?.toLocaleString() || walletData?.wallet?.balance?.toLocaleString() || '0'}</p>
+            <p className="text-sm text-gray-400">Trading Balance</p>
+            <p className="font-medium text-green-400">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</p>
           </div>
           <button 
             onClick={() => { setShowWalletModal(true); setShowMobileMenu(false); }}
@@ -388,58 +392,60 @@ const UserDashboard = () => {
 
       {/* Main Content - Desktop */}
       <div className="flex-1 hidden md:flex overflow-hidden">
-        {/* Left Sidebar - Instruments */}
-        <InstrumentsPanel 
-          selectedInstrument={selectedInstrument}
-          onSelectInstrument={setSelectedInstrument}
-          onBuySell={quickMode ? handleQuickTrade : openBuySell}
-          quickMode={quickMode}
-          user={user}
-          marketData={marketData}
-        />
+        {/* Left Sidebar - Instruments - Fixed width */}
+        <div className="flex-shrink-0 w-64">
+          <InstrumentsPanel 
+            selectedInstrument={selectedInstrument}
+            onSelectInstrument={setSelectedInstrument}
+            onBuySell={handleQuickTrade}
+            user={user}
+            marketData={marketData}
+          />
+        </div>
 
-        {/* Center - Chart */}
-        <div className="flex-1 flex flex-col">
-          <ChartPanel selectedInstrument={selectedInstrument} marketData={marketData} />
+        {/* Center - Chart - Flexible width */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <ChartPanel 
+            selectedInstrument={selectedInstrument} 
+            marketData={marketData}
+            sidebarOpen={!!tradeInstrument}
+          />
           
           {/* Bottom - Positions */}
           <PositionsPanel 
             activeTab={activeTab}
             setActiveTab={setActiveTab}
-            quickMode={quickMode}
-            setQuickMode={setQuickMode}
             walletData={walletData}
             user={user}
             marketData={marketData}
             refreshKey={positionsRefreshKey}
+            selectedInstrument={selectedInstrument}
+            onRefreshPositions={refreshPositions}
           />
         </div>
 
-        {/* Right Sidebar - Portfolio or Trading Panel */}
-        {quickMode && tradeInstrument ? (
-          <TradingPanel 
-            instrument={tradeInstrument}
-            orderType={orderType}
-            setOrderType={setOrderType}
-            walletData={walletData}
-            onClose={() => setTradeInstrument(null)}
-            user={user}
-            marketData={marketData}
-            onRefreshWallet={fetchWallet}
-            onRefreshPositions={refreshPositions}
-          />
-        ) : (
-          <PortfolioPanel 
-            walletData={walletData} 
-            onOpenWallet={() => setShowWalletModal(true)}
-            user={user}
-            marketData={marketData}
-          />
-        )}
+        {/* Right Sidebar - Trading Panel - Fixed width with smooth animation */}
+        <div className={`flex-shrink-0 overflow-hidden transition-all duration-200 ease-out ${tradeInstrument ? 'w-72' : 'w-0'}`}>
+          {tradeInstrument && (
+            <div className="w-72 h-full">
+              <TradingPanel 
+                instrument={tradeInstrument}
+                orderType={orderType}
+                setOrderType={setOrderType}
+                walletData={walletData}
+                onClose={() => setTradeInstrument(null)}
+                user={user}
+                marketData={marketData}
+                onRefreshWallet={fetchWallet}
+                onRefreshPositions={refreshPositions}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Content - Mobile */}
-      <div className="flex-1 flex flex-col md:hidden overflow-hidden">
+      <div className="flex-1 flex flex-col md:hidden overflow-hidden pb-16">
         {mobileView === 'quotes' && (
           <MobileInstrumentsPanel 
             selectedInstrument={selectedInstrument}
@@ -471,8 +477,8 @@ const UserDashboard = () => {
         )}
       </div>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden bg-dark-800 border-t border-dark-600 flex items-center justify-around py-2 safe-area-bottom">
+      {/* Mobile Bottom Navigation - Fixed */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-800 border-t border-dark-600 flex items-center justify-around py-2 z-40">
         <button 
           onClick={() => setMobileView('quotes')}
           className={`flex flex-col items-center p-2 ${mobileView === 'quotes' ? 'text-green-400' : 'text-gray-400'}`}
@@ -502,11 +508,11 @@ const UserDashboard = () => {
           <span className="text-xs mt-1">Positions</span>
         </button>
         <button 
-          onClick={() => setMobileView('profile')}
-          className={`flex flex-col items-center p-2 ${mobileView === 'profile' ? 'text-green-400' : 'text-gray-400'}`}
+          onClick={() => navigate('/user/orders')}
+          className="flex flex-col items-center p-2 text-gray-400"
         >
-          <UserCircle size={20} />
-          <span className="text-xs mt-1">Profile</span>
+          <History size={20} />
+          <span className="text-xs mt-1">Orders</span>
         </button>
       </nav>
 
@@ -554,7 +560,7 @@ const UserDashboard = () => {
   );
 };
 
-const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, quickMode, user, marketData = {} }) => {
+const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {} }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs
@@ -783,7 +789,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
   const filteredInstruments = getFilteredInstruments();
 
   return (
-    <aside className="w-72 bg-dark-800 border-r border-dark-600 flex flex-col">
+    <aside className="w-full h-full bg-dark-800 border-r border-dark-600 flex flex-col">
       {/* Market Status Indicator */}
       <div className="px-3 py-2 border-b border-dark-600 flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">
@@ -867,7 +873,6 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
                 }}
                 isSelected={selectedInstrument?.symbol === inst.symbol}
                 onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                quickMode={quickMode}
                 onBuySell={onBuySell}
                 inWatchlist={isInWatchlist(inst.symbol)}
                 onAddToWatchlist={() => addToWatchlist(inst.symbol)}
@@ -883,9 +888,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, q
   );
 };
 
-const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFuture, isCrypto, isDemo, quickMode, onBuySell, inWatchlist, onRemoveFromWatchlist, onAddToWatchlist }) => {
-  const [isHovered, setIsHovered] = useState(false);
-
+const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFuture, isCrypto, isDemo, onBuySell, inWatchlist, onRemoveFromWatchlist, onAddToWatchlist }) => {
   // Determine symbol color based on type
   const getSymbolColor = () => {
     if (isDemo) return 'text-purple-400';
@@ -909,17 +912,15 @@ const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFutu
   return (
     <div
       onClick={onSelect}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={`flex items-center justify-between px-4 py-3 cursor-pointer border-b border-dark-700 ${
+      className={`flex items-center justify-between px-3 py-2.5 cursor-pointer border-b border-dark-700 ${
         isSelected 
-          ? 'bg-dark-700' 
+          ? 'bg-green-600/20 border-l-2 border-l-green-500' 
           : 'hover:bg-dark-750'
       }`}
     >
       {/* Left: Symbol and Name */}
-      <div className="flex-1 min-w-0">
-        <div className={`font-bold text-sm uppercase ${getSymbolColor()}`}>
+      <div className="flex-1 min-w-0 mr-2">
+        <div className={`font-bold text-sm uppercase ${isSelected ? 'text-green-400' : getSymbolColor()}`}>
           {instrument.symbol}
         </div>
         <div className="text-xs text-gray-500 truncate">
@@ -927,8 +928,8 @@ const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFutu
         </div>
       </div>
       
-      {/* Right: Price and Change */}
-      <div className="text-right flex-shrink-0">
+      {/* Center: Price and Change */}
+      <div className="text-right flex-shrink-0 mr-2">
         <div className="text-sm font-medium text-gray-300">
           {formatPrice(instrument.ltp) || '-'}
         </div>
@@ -937,29 +938,28 @@ const InstrumentRow = ({ instrument, isSelected, onSelect, isCall, isPut, isFutu
         </div>
       </div>
 
-      {/* Action Buttons - Show on hover */}
-      {isHovered && (
-        <div className="flex items-center gap-1 ml-2">
-          {/* Buy/Sell Buttons - Indian Standard: S left, B right */}
-          <button 
-            onClick={(e) => { e.stopPropagation(); onBuySell('sell', instrument); }}
-            className="px-2 py-1 text-xs bg-red-600 hover:bg-red-700 rounded font-medium"
-          >
-            S
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onBuySell('buy', instrument); }}
-            className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 rounded font-medium"
-          >
-            B
-          </button>
-        </div>
-      )}
+      {/* Right: B/S Circle Buttons */}
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <button 
+          onClick={() => onBuySell('sell', instrument)}
+          className="w-7 h-7 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center text-xs font-bold transition-colors"
+          title="Sell"
+        >
+          S
+        </button>
+        <button 
+          onClick={() => onBuySell('buy', instrument)}
+          className="w-7 h-7 rounded-full bg-green-600 hover:bg-green-700 flex items-center justify-center text-xs font-bold transition-colors"
+          title="Buy"
+        >
+          B
+        </button>
+      </div>
     </div>
   );
 };
 
-const ChartPanel = ({ selectedInstrument, marketData }) => {
+const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candlestickSeriesRef = useRef(null);
@@ -969,10 +969,42 @@ const ChartPanel = ({ selectedInstrument, marketData }) => {
   const [livePrice, setLivePrice] = useState(null);
   const lastCandleRef = useRef(null);
 
+  // Resize chart when sidebar opens/closes
+  useEffect(() => {
+    if (chartRef.current && chartContainerRef.current) {
+      // Immediate resize
+      chartRef.current.applyOptions({
+        width: chartContainerRef.current.clientWidth,
+        height: chartContainerRef.current.clientHeight,
+      });
+      // Also resize after animation completes
+      const timer = setTimeout(() => {
+        if (chartRef.current && chartContainerRef.current) {
+          chartRef.current.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+          });
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [sidebarOpen]);
+
   // Update live price from marketData (Socket.IO) - same source as instruments panel
   useEffect(() => {
+    // For crypto, check by pair or symbol as well
+    const isCrypto = selectedInstrument?.isCrypto || selectedInstrument?.exchange === 'BINANCE';
+    let data = null;
+    
     if (selectedInstrument?.token && marketData[selectedInstrument.token]) {
-      const data = marketData[selectedInstrument.token];
+      data = marketData[selectedInstrument.token];
+    } else if (isCrypto && selectedInstrument?.pair && marketData[selectedInstrument.pair]) {
+      data = marketData[selectedInstrument.pair];
+    } else if (selectedInstrument?.symbol && marketData[selectedInstrument.symbol]) {
+      data = marketData[selectedInstrument.symbol];
+    }
+    
+    if (data) {
       setLivePrice({
         ltp: data.ltp,
         open: data.open,
@@ -1316,12 +1348,15 @@ const ChartPanel = ({ selectedInstrument, marketData }) => {
   );
 };
 
-const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, walletData, user, marketData, refreshKey }) => {
+const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData, refreshKey, selectedInstrument, onRefreshPositions }) => {
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [totalPnL, setTotalPnL] = useState(0);
+  const [quickQty, setQuickQty] = useState('1');
+  const [quickTrading, setQuickTrading] = useState(false);
+  const [quickError, setQuickError] = useState('');
 
   useEffect(() => {
     if (user?.token) {
@@ -1375,6 +1410,100 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
     }
   };
 
+  // Close all positions in profit
+  const handleCloseProfit = async () => {
+    const profitPositions = positions.filter(pos => {
+      const ltp = getCurrentPrice(pos) || pos.currentPrice || pos.entryPrice;
+      const pnl = pos.side === 'BUY' 
+        ? (ltp - pos.entryPrice) * pos.quantity 
+        : (pos.entryPrice - ltp) * pos.quantity;
+      return pnl > 0;
+    });
+    
+    if (profitPositions.length === 0) {
+      alert('No positions in profit to close');
+      return;
+    }
+    
+    if (!confirm(`Close ${profitPositions.length} position(s) in profit?`)) return;
+    
+    setLoading(true);
+    try {
+      for (const pos of profitPositions) {
+        const liveData = marketData[pos?.token] || {};
+        await axios.post(`/api/trading/close/${pos._id}`, {
+          bidPrice: liveData.bid || liveData.ltp || pos?.currentPrice,
+          askPrice: liveData.ask || liveData.ltp || pos?.currentPrice
+        }, { headers: { Authorization: `Bearer ${user.token}` } });
+      }
+      fetchPositions();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error closing positions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Close all positions in loss
+  const handleCloseLoss = async () => {
+    const lossPositions = positions.filter(pos => {
+      const ltp = getCurrentPrice(pos) || pos.currentPrice || pos.entryPrice;
+      const pnl = pos.side === 'BUY' 
+        ? (ltp - pos.entryPrice) * pos.quantity 
+        : (pos.entryPrice - ltp) * pos.quantity;
+      return pnl < 0;
+    });
+    
+    if (lossPositions.length === 0) {
+      alert('No positions in loss to close');
+      return;
+    }
+    
+    if (!confirm(`Close ${lossPositions.length} position(s) in loss?`)) return;
+    
+    setLoading(true);
+    try {
+      for (const pos of lossPositions) {
+        const liveData = marketData[pos?.token] || {};
+        await axios.post(`/api/trading/close/${pos._id}`, {
+          bidPrice: liveData.bid || liveData.ltp || pos?.currentPrice,
+          askPrice: liveData.ask || liveData.ltp || pos?.currentPrice
+        }, { headers: { Authorization: `Bearer ${user.token}` } });
+      }
+      fetchPositions();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error closing positions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Close all positions
+  const handleCloseAll = async () => {
+    if (positions.length === 0) {
+      alert('No positions to close');
+      return;
+    }
+    
+    if (!confirm(`Close ALL ${positions.length} position(s)?`)) return;
+    
+    setLoading(true);
+    try {
+      for (const pos of positions) {
+        const liveData = marketData[pos?.token] || {};
+        await axios.post(`/api/trading/close/${pos._id}`, {
+          bidPrice: liveData.bid || liveData.ltp || pos?.currentPrice,
+          askPrice: liveData.ask || liveData.ltp || pos?.currentPrice
+        }, { headers: { Authorization: `Bearer ${user.token}` } });
+      }
+      fetchPositions();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error closing positions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCancelOrder = async (tradeId) => {
     try {
       await axios.post(`/api/trading/cancel/${tradeId}`, {}, {
@@ -1383,6 +1512,55 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
       fetchPositions();
     } catch (error) {
       alert(error.response?.data?.message || 'Error cancelling order');
+    }
+  };
+
+  // Quick Trade - Execute market order directly
+  const executeQuickTrade = async (side) => {
+    const qty = parseFloat(quickQty);
+    if (!selectedInstrument || isNaN(qty) || qty <= 0) return;
+    
+    setQuickTrading(true);
+    setQuickError('');
+    
+    try {
+      const liveData = marketData[selectedInstrument.token] || {};
+      const ltp = liveData.ltp || selectedInstrument.ltp || 0;
+      const bidPrice = liveData.bid || ltp;
+      const askPrice = liveData.ask || ltp;
+      
+      // Determine if crypto
+      const isCrypto = selectedInstrument.isCrypto || selectedInstrument.segment === 'CRYPTO' || selectedInstrument.exchange === 'BINANCE';
+      
+      await axios.post('/api/trading/order', {
+        symbol: selectedInstrument.symbol,
+        token: selectedInstrument.token,
+        pair: selectedInstrument.pair,
+        isCrypto: isCrypto,
+        exchange: selectedInstrument.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
+        segment: isCrypto ? 'CRYPTO' : (selectedInstrument.segment || 'FNO'),
+        instrumentType: isCrypto ? 'CRYPTO' : (selectedInstrument.instrumentType || 'FUTURES'),
+        side: side.toUpperCase(),
+        quantity: qty,
+        lots: qty,
+        lotSize: 1,
+        price: ltp,
+        orderType: 'MARKET',
+        productType: 'MIS',
+        bidPrice,
+        askPrice,
+        leverage: 1
+      }, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      
+      fetchPositions();
+      if (onRefreshPositions) onRefreshPositions();
+    } catch (error) {
+      setQuickError(error.response?.data?.message || 'Trade failed');
+      setTimeout(() => setQuickError(''), 3000);
+    } finally {
+      setQuickTrading(false);
     }
   };
 
@@ -1446,18 +1624,47 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-400">Quick</span>
-            <button
-              onClick={() => setQuickMode(!quickMode)}
-              className={`w-10 h-5 rounded-full transition ${
-                quickMode ? 'bg-green-500' : 'bg-dark-600'
-              }`}
+          {/* Quick Trade Section - Always Visible */}
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-medium ${selectedInstrument ? 'text-green-400' : 'text-gray-500'}`}>
+              {selectedInstrument?.symbol || 'No Symbol'}
+            </span>
+            <span className="text-xs text-gray-400">
+              ₹{(selectedInstrument ? (marketData[selectedInstrument.token]?.ltp || selectedInstrument.ltp || 0) : 0).toLocaleString()}
+            </span>
+            <button 
+              onClick={() => executeQuickTrade('sell')}
+              disabled={quickTrading || !selectedInstrument}
+              className="w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-xs font-bold transition-colors"
+              title={selectedInstrument ? 'Sell' : 'Select an instrument first'}
             >
-              <div className={`w-4 h-4 bg-white rounded-full transition transform ${
-                quickMode ? 'translate-x-5' : 'translate-x-0.5'
-              }`} />
+              S
             </button>
+            <input
+              type="text"
+              value={quickQty}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                  setQuickQty(val);
+                }
+              }}
+              onBlur={(e) => {
+                const num = parseFloat(e.target.value);
+                if (isNaN(num) || num <= 0) setQuickQty('1');
+              }}
+              placeholder="Qty"
+              className="w-16 h-8 bg-dark-700 rounded text-center text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
+            />
+            <button 
+              onClick={() => executeQuickTrade('buy')}
+              disabled={quickTrading || !selectedInstrument}
+              className="w-8 h-8 rounded-full bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-xs font-bold transition-colors"
+              title={selectedInstrument ? 'Buy' : 'Select an instrument first'}
+            >
+              B
+            </button>
+            {quickError && <span className="text-xs text-red-400">{quickError}</span>}
           </div>
           <div className="text-sm">
             <span className="text-gray-400">P/L: </span>
@@ -1465,11 +1672,42 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
               {totalPnL >= 0 ? '+' : ''}₹{totalPnL.toFixed(2)}
             </span>
           </div>
+          
+          {/* Bulk Close Buttons */}
+          {activeTab === 'positions' && positions.length > 0 && (
+            <div className="flex items-center gap-2 ml-4">
+              <button
+                onClick={handleCloseLoss}
+                disabled={loading}
+                className="px-2 py-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 rounded text-xs font-medium"
+                title="Close all positions in loss"
+              >
+                Close Loss
+              </button>
+              <button
+                onClick={handleCloseProfit}
+                disabled={loading}
+                className="px-2 py-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded text-xs font-medium"
+                title="Close all positions in profit"
+              >
+                Close Profit
+              </button>
+              <button
+                onClick={handleCloseAll}
+                disabled={loading}
+                className="px-2 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded text-xs font-medium"
+                title="Close all positions"
+              >
+                Close All
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Table Header */}
-      <div className="grid grid-cols-8 gap-2 px-4 py-2 text-xs text-gray-400 border-b border-dark-700">
+      <div className="grid grid-cols-9 gap-2 px-4 py-2 text-xs text-gray-400 border-b border-dark-700">
+        <div>User ID</div>
         <div>Symbol</div>
         <div>Side</div>
         <div className="text-right">Qty</div>
@@ -1491,7 +1729,8 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
             ? (ltp - pos.entryPrice) * pos.quantity 
             : (pos.entryPrice - ltp) * pos.quantity;
           return (
-            <div key={pos._id} className="grid grid-cols-8 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+            <div key={pos._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+              <div className="truncate text-purple-400 font-mono text-xs">{pos.userId || user?.userId || '-'}</div>
               <div className="truncate font-medium">{pos.symbol}</div>
               <div className={pos.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{pos.side}</div>
               <div className="text-right">{pos.quantity}</div>
@@ -1520,7 +1759,8 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">No pending orders</div>
         )}
         {activeTab === 'pending' && pendingOrders.map(order => (
-          <div key={order._id} className="grid grid-cols-8 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+          <div key={order._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+            <div className="truncate text-purple-400 font-mono text-xs">{order.userId || user?.userId || '-'}</div>
             <div className="truncate font-medium">{order.symbol}</div>
             <div className={order.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{order.side}</div>
             <div className="text-right">{order.quantity}</div>
@@ -1543,7 +1783,8 @@ const PositionsPanel = ({ activeTab, setActiveTab, quickMode, setQuickMode, wall
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">No trade history</div>
         )}
         {activeTab === 'history' && history.map(trade => (
-          <div key={trade._id} className="grid grid-cols-8 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+          <div key={trade._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+            <div className="truncate text-purple-400 font-mono text-xs">{trade.userId || user?.userId || '-'}</div>
             <div className="truncate font-medium">{trade.symbol}</div>
             <div className={trade.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{trade.side}</div>
             <div className="text-right">{trade.quantity}</div>
@@ -1641,8 +1882,8 @@ const PortfolioPanel = ({ walletData, onOpenWallet, user, marketData }) => {
             <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">Wallet Breakdown</div>
             
             <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Cash Balance</span>
-              <span>₹{walletData?.cashBalance?.toLocaleString() || '0'}</span>
+              <span className="text-gray-400">Trading Balance</span>
+              <span>₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
             </div>
             
             <div className="flex justify-between text-sm">
@@ -1785,7 +2026,7 @@ const PortfolioPanel = ({ walletData, onOpenWallet, user, marketData }) => {
 
 // Trading Panel - Shows when Quick Trade is ON and instrument is selected
 const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose, user, marketData = {}, onRefreshWallet, onRefreshPositions }) => {
-  const [lots, setLots] = useState('1');
+  const [lots, setLots] = useState(instrument?.defaultQty?.toString() || '1');
   const [price, setPrice] = useState('');
   const [limitPrice, setLimitPrice] = useState('');
   const [stopLoss, setStopLoss] = useState('');
@@ -2026,7 +2267,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   };
 
   return (
-    <aside className="w-80 bg-dark-800 border-l border-dark-600 flex flex-col">
+    <aside className="w-full h-full bg-dark-800 border-l border-dark-600 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-dark-600">
         <div>
@@ -3292,9 +3533,9 @@ const MobileProfilePanel = ({ user, walletData, onLogout }) => {
       {/* Wallet Info */}
       <div className="p-4 border-b border-dark-600">
         <div className="bg-dark-700 rounded-xl p-4">
-          <p className="text-gray-400 text-sm mb-1">Wallet Balance</p>
+          <p className="text-gray-400 text-sm mb-1">Trading Balance</p>
           <p className="text-2xl font-bold text-green-400">
-            ₹{walletData?.cashBalance?.toLocaleString() || walletData?.wallet?.balance?.toLocaleString() || '0.00'}
+            ₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}
           </p>
           <div className="flex justify-between mt-2 text-sm">
             <span className="text-gray-400">Available Margin</span>
