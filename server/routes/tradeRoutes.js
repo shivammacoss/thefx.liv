@@ -153,6 +153,11 @@ router.get('/market-state/trading-status/:segment', async (req, res) => {
 // Place a new trade
 router.post('/trade', protectUser, async (req, res) => {
   try {
+    // Check if user is in read-only mode
+    if (req.user.isReadOnly) {
+      return res.status(403).json({ message: 'Your account is in read-only mode. You can only view and close existing trades.' });
+    }
+    
     const trade = await TradeService.openTrade(req.body, req.user._id);
     res.status(201).json(trade);
   } catch (error) {

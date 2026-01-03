@@ -5,7 +5,7 @@ import axios from 'axios';
 import { 
   Users, LogOut, Plus, Search, Edit, Trash2, TrendingUp,
   Key, Wallet, Eye, EyeOff, X, ArrowUpCircle, ArrowDownCircle,
-  RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus
+  RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus, Copy
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -1168,6 +1168,39 @@ const SuperAdminCreateUser = () => {
   const [selectedAdmin, setSelectedAdmin] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [expandedSegment, setExpandedSegment] = useState(null);
+  
+  const defaultSegmentSettings = {
+    enabled: false,
+    fraction: false,
+    maxExchangeLots: 100,
+    commissionType: 'PER_LOT',
+    commissionLot: 0,
+    maxLots: 50,
+    minLots: 1,
+    orderLots: 10,
+    exposureIntraday: 1,
+    exposureCarryForward: 1,
+    // Option Buy Settings
+    optionBuy: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50, // Number of strikes up/down from current price
+      maxExchangeLots: 100
+    },
+    // Option Sell Settings
+    optionSell: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50,
+      maxExchangeLots: 100
+    }
+  };
+  
   const [formData, setFormData] = useState({
     username: '', email: '', password: '', fullName: '', phone: '', initialBalance: 0,
     // Settings
@@ -1182,23 +1215,49 @@ const SuperAdminCreateUser = () => {
     intradaySquare: false,
     blockLimitAboveBelowHighLow: false,
     blockLimitBetweenHighLow: false,
-    // Allowed Segments
-    allowedSegments: ['NSE', 'MCX', 'EQ'],
-    // Segment Permissions
+    // Segment Settings with detailed settings
     segmentPermissions: {
-      showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
-      showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
-      showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
-      showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
-      showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
-    }
+      MCX: { ...defaultSegmentSettings, enabled: true },
+      NSEINDEX: { ...defaultSegmentSettings, enabled: true },
+      NSESTOCK: { ...defaultSegmentSettings, enabled: true },
+      BSE: { ...defaultSegmentSettings, enabled: false },
+      EQ: { ...defaultSegmentSettings, enabled: true }
+    },
+    // Global Script Settings - applies to all segments
+    scriptSettings: {},
+    // For script settings UI
+    selectedScriptSegment: null,
+    selectedScript: null,
+    segmentSymbols: {}
   });
-
-  const segmentOptions = ['NSE', 'MCX', 'BFO', 'EQ', 'CRYPTO', 'COMEX', 'FOREX', 'GLOBALINDEX'];
 
   useEffect(() => {
     fetchAdmins();
+    fetchSegmentSymbols();
   }, []);
+
+  // Fetch symbols for all segments
+  const fetchSegmentSymbols = async () => {
+    try {
+      const { data } = await axios.get('/api/instruments/by-segment', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setFormData(prev => ({ ...prev, segmentSymbols: data }));
+    } catch (error) {
+      console.error('Error fetching segment symbols:', error);
+      // Fallback with sample symbols if API fails
+      setFormData(prev => ({
+        ...prev,
+        segmentSymbols: {
+          MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
+          NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+          NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+          BSE: ['SENSEX', 'BANKEX'],
+          EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+        }
+      }));
+    }
+  };
 
   const fetchAdmins = async () => {
     try {
@@ -1216,21 +1275,19 @@ const SuperAdminCreateUser = () => {
     }
   };
 
-  const handleSegmentToggle = (segment) => {
-    setFormData(prev => ({
-      ...prev,
-      allowedSegments: prev.allowedSegments.includes(segment)
-        ? prev.allowedSegments.filter(s => s !== segment)
-        : [...prev.allowedSegments, segment]
-    }));
+  const handleSegmentClick = (segment) => {
+    setExpandedSegment(expandedSegment === segment ? null : segment);
   };
 
-  const handlePermissionToggle = (key) => {
+  const handleSegmentPermissionChange = (segment, field, value) => {
     setFormData(prev => ({
       ...prev,
       segmentPermissions: {
         ...prev.segmentPermissions,
-        [key]: !prev.segmentPermissions[key]
+        [segment]: {
+          ...prev.segmentPermissions[segment],
+          [field]: value
+        }
       }
     }));
   };
@@ -1258,15 +1315,18 @@ const SuperAdminCreateUser = () => {
         marginType: 'exposure', ledgerBalanceClosePercent: 90, profitTradeHoldSeconds: 0, lossTradeHoldSeconds: 0,
         isActivated: true, isReadOnly: false, isDemo: false, intradaySquare: false,
         blockLimitAboveBelowHighLow: false, blockLimitBetweenHighLow: false,
-        allowedSegments: ['NSE', 'MCX', 'EQ'],
         segmentPermissions: {
-          showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
-          showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
-          showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
-          showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
-          showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
-        }
+          MCX: { ...defaultSegmentSettings, enabled: true },
+          NSEINDEX: { ...defaultSegmentSettings, enabled: true },
+          NSESTOCK: { ...defaultSegmentSettings, enabled: true },
+          BSE: { ...defaultSegmentSettings, enabled: false },
+          EQ: { ...defaultSegmentSettings, enabled: true }
+        },
+        scriptSettings: {},
+        selectedScriptSegment: null,
+        selectedScript: null
       });
+      setExpandedSegment(null);
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.message || 'Failed to create user' });
     } finally {
@@ -1380,7 +1440,7 @@ const SuperAdminCreateUser = () => {
           </div>
 
           {/* Initial Balance */}
-          <div>
+          {/* <div>
             <label className="block text-sm text-gray-400 mb-2">Initial Balance (₹)</label>
             <input
               type="number"
@@ -1389,10 +1449,10 @@ const SuperAdminCreateUser = () => {
               className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
               min="0"
             />
-          </div>
+          </div> */}
 
           {/* Margin Type */}
-          <div>
+          {/* <div>
             <label className="block text-sm text-gray-400 mb-2">Margin Type</label>
             <select
               value={formData.marginType}
@@ -1402,7 +1462,7 @@ const SuperAdminCreateUser = () => {
               <option value="exposure">Exposure</option>
               <option value="margin">Margin</option>
             </select>
-          </div>
+          </div> */}
         </div>
 
         {/* Right Column - Settings */}
@@ -1486,79 +1546,900 @@ const SuperAdminCreateUser = () => {
           </div>
         </div>
 
-        {/* Segment Allow - Full Width */}
+        {/* Segment Settings - Full Width */}
         <div className="lg:col-span-2 bg-dark-800 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Allow</h2>
-          <p className="text-sm text-gray-400 mb-4">Select the segments you want to allow for this user</p>
-          <div className="flex flex-wrap gap-2">
-            {segmentOptions.map(segment => (
+          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Settings</h2>
+          <p className="text-gray-400 text-sm mb-4">Click on a segment to configure its settings. Green = Enabled, Gray = Disabled</p>
+          
+          {/* Segment Buttons */}
+          <div className="flex flex-wrap gap-3 mb-4">
+            {['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'].map(segment => (
               <button
                 key={segment}
                 type="button"
-                onClick={() => handleSegmentToggle(segment)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  formData.allowedSegments.includes(segment)
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                onClick={() => handleSegmentClick(segment)}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  expandedSegment === segment
+                    ? 'bg-yellow-600 text-white ring-2 ring-yellow-400'
+                    : formData.segmentPermissions[segment]?.enabled
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
                 }`}
               >
                 {segment}
               </button>
             ))}
           </div>
+
+          {/* Expanded Segment Settings */}
+          {expandedSegment && formData.segmentPermissions[expandedSegment] && (
+            <div className="bg-dark-700 rounded-lg p-4 border border-dark-600 animate-fadeIn">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-blue-400">{expandedSegment} Settings</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSegmentPermissionChange(expandedSegment, 'fraction', !formData.segmentPermissions[expandedSegment].fraction)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      formData.segmentPermissions[expandedSegment].fraction
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-600 text-white'
+                    }`}
+                  >
+                    {formData.segmentPermissions[expandedSegment].fraction ? 'Fraction On' : 'Fraction Off'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSegmentPermissionChange(expandedSegment, 'enabled', !formData.segmentPermissions[expandedSegment].enabled)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      formData.segmentPermissions[expandedSegment].enabled
+                        ? 'bg-green-600 text-white'
+                        : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    {formData.segmentPermissions[expandedSegment].enabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+              </div>
+              
+              {/* General Settings */}
+              <h4 className="text-sm font-medium text-gray-300 mb-2">General Settings</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].maxExchangeLots}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'maxExchangeLots', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                  <div>
+                  <label className="block text-xs text-gray-400 mb-1">Max Lots</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].maxLots}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'maxLots', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                  <select
+                    value={formData.segmentPermissions[expandedSegment].commissionType}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'commissionType', e.target.value)}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="PER_LOT">Per Lot</option>
+                    <option value="PER_TRADE">Per Trade</option>
+                    <option value="PER_CRORE">Per Crore</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].commissionLot}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'commissionLot', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Min Lots</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].minLots}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'minLots', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Order Lots</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].orderLots}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'orderLots', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Exposure Intraday</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].exposureIntraday}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'exposureIntraday', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Exposure Carry Forward</label>
+                  <input
+                    type="number"
+                    value={formData.segmentPermissions[expandedSegment].exposureCarryForward}
+                    onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'exposureCarryForward', Number(e.target.value))}
+                    className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Option Buy & Sell Settings */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Option Buy Settings */}
+                <div className="bg-dark-800 rounded-lg p-4 border border-green-900/50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-green-400">Option Buy Settings</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          fraction: !formData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                        })}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          formData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}
+                      >
+                        {formData.segmentPermissions[expandedSegment].optionBuy?.fraction ? 'Fraction On' : 'Fraction Off'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          allowed: !formData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                        })}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          formData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                            ? 'bg-green-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {formData.segmentPermissions[expandedSegment].optionBuy?.allowed ? 'Allowed' : 'Blocked'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                      <select
+                        value={formData.segmentPermissions[expandedSegment].optionBuy?.commissionType || 'PER_LOT'}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          commissionType: e.target.value
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="PER_LOT">Per Lot</option>
+                        <option value="PER_TRADE">Per Trade</option>
+                        <option value="PER_CRORE">Per Crore</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionBuy?.commission || 0}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          commission: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionBuy?.strikeSelection || 50}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          strikeSelection: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                        placeholder="Strikes from ATM"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionBuy?.maxExchangeLots || 100}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                          ...formData.segmentPermissions[expandedSegment].optionBuy,
+                          maxExchangeLots: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Option Sell Settings */}
+                <div className="bg-dark-800 rounded-lg p-4 border border-red-900/50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-red-400">Option Sell Settings</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          fraction: !formData.segmentPermissions[expandedSegment].optionSell?.fraction
+                        })}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          formData.segmentPermissions[expandedSegment].optionSell?.fraction
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}
+                      >
+                        {formData.segmentPermissions[expandedSegment].optionSell?.fraction ? 'Fraction On' : 'Fraction Off'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          allowed: !formData.segmentPermissions[expandedSegment].optionSell?.allowed
+                        })}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          formData.segmentPermissions[expandedSegment].optionSell?.allowed
+                            ? 'bg-green-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {formData.segmentPermissions[expandedSegment].optionSell?.allowed ? 'Allowed' : 'Blocked'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                      <select
+                        value={formData.segmentPermissions[expandedSegment].optionSell?.commissionType || 'PER_LOT'}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          commissionType: e.target.value
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="PER_LOT">Per Lot</option>
+                        <option value="PER_TRADE">Per Trade</option>
+                        <option value="PER_CRORE">Per Crore</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionSell?.commission || 0}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          commission: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionSell?.strikeSelection || 50}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          strikeSelection: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                        placeholder="Strikes from ATM"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                      <input
+                        type="number"
+                        value={formData.segmentPermissions[expandedSegment].optionSell?.maxExchangeLots || 100}
+                        onChange={(e) => handleSegmentPermissionChange(expandedSegment, 'optionSell', {
+                          ...formData.segmentPermissions[expandedSegment].optionSell,
+                          maxExchangeLots: Number(e.target.value)
+                        })}
+                        className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Segment Permissions - Full Width */}
+        {/* Script Settings - Separate Section - Full Width */}
         <div className="lg:col-span-2 bg-dark-800 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Permissions</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {/* MCX */}
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-blue-400 mb-2">MCX</h3>
-              <ToggleSwitch label="Show MCX" checked={formData.segmentPermissions.showMCX} onChange={() => handlePermissionToggle('showMCX')} />
-              <ToggleSwitch label="MCX Opt Buy" checked={formData.segmentPermissions.showMCXOptBuy} onChange={() => handlePermissionToggle('showMCXOptBuy')} />
-              <ToggleSwitch label="MCX Opt Sell" checked={formData.segmentPermissions.showMCXOptSell} onChange={() => handlePermissionToggle('showMCXOptSell')} />
-              <ToggleSwitch label="MCX Opt" checked={formData.segmentPermissions.showMCXOpt} onChange={() => handlePermissionToggle('showMCXOpt')} />
-            </div>
-            
-            {/* NSE Index */}
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-blue-400 mb-2">NSE Index</h3>
-              <ToggleSwitch label="Show NSE" checked={formData.segmentPermissions.showNSE} onChange={() => handlePermissionToggle('showNSE')} />
-              <ToggleSwitch label="IDX NSE" checked={formData.segmentPermissions.showIDXNSE} onChange={() => handlePermissionToggle('showIDXNSE')} />
-              <ToggleSwitch label="IDX Opt Buy" checked={formData.segmentPermissions.showIDXOptBuy} onChange={() => handlePermissionToggle('showIDXOptBuy')} />
-              <ToggleSwitch label="IDX Opt Sell" checked={formData.segmentPermissions.showIDXOptSell} onChange={() => handlePermissionToggle('showIDXOptSell')} />
-              <ToggleSwitch label="IDX Opt" checked={formData.segmentPermissions.showIDXOpt} onChange={() => handlePermissionToggle('showIDXOpt')} />
-            </div>
-            
-            {/* Stock Options */}
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-blue-400 mb-2">Stock Options</h3>
-              <ToggleSwitch label="STK Opt Buy" checked={formData.segmentPermissions.showSTKOptBuy} onChange={() => handlePermissionToggle('showSTKOptBuy')} />
-              <ToggleSwitch label="STK Opt Sell" checked={formData.segmentPermissions.showSTKOptSell} onChange={() => handlePermissionToggle('showSTKOptSell')} />
-              <ToggleSwitch label="STK Opt" checked={formData.segmentPermissions.showSTKOpt} onChange={() => handlePermissionToggle('showSTKOpt')} />
-              <ToggleSwitch label="STK NSE" checked={formData.segmentPermissions.showSTKNSE} onChange={() => handlePermissionToggle('showSTKNSE')} />
-              <ToggleSwitch label="STK EQ" checked={formData.segmentPermissions.showSTKEQ} onChange={() => handlePermissionToggle('showSTKEQ')} />
-            </div>
-            
-            {/* BSE */}
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-blue-400 mb-2">BSE</h3>
-              <ToggleSwitch label="BSE Opt Buy" checked={formData.segmentPermissions.showBSEOptBuy} onChange={() => handlePermissionToggle('showBSEOptBuy')} />
-              <ToggleSwitch label="BSE Opt Sell" checked={formData.segmentPermissions.showBSEOptSell} onChange={() => handlePermissionToggle('showBSEOptSell')} />
-              <ToggleSwitch label="BSE Opt" checked={formData.segmentPermissions.showBSEOpt} onChange={() => handlePermissionToggle('showBSEOpt')} />
-              <ToggleSwitch label="IDX BSE" checked={formData.segmentPermissions.showIDXBSE} onChange={() => handlePermissionToggle('showIDXBSE')} />
-            </div>
-            
-            {/* Others */}
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-blue-400 mb-2">Others</h3>
-              <ToggleSwitch label="CRYPTO" checked={formData.segmentPermissions.showCRYPTO} onChange={() => handlePermissionToggle('showCRYPTO')} />
-              <ToggleSwitch label="FOREX" checked={formData.segmentPermissions.showFOREX} onChange={() => handlePermissionToggle('showFOREX')} />
-              <ToggleSwitch label="COMEX" checked={formData.segmentPermissions.showCOMEX} onChange={() => handlePermissionToggle('showCOMEX')} />
-              <ToggleSwitch label="GLOBAL INDEX" checked={formData.segmentPermissions.showGLOBALINDEX} onChange={() => handlePermissionToggle('showGLOBALINDEX')} />
-            </div>
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-purple-400">Script Settings</h2>
+            <p className="text-gray-400 text-sm">Select a segment to view its symbols. Click on a symbol to customize its settings (overrides segment defaults).</p>
           </div>
+          
+          {/* Segment Tabs for Script Settings */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'].map(seg => (
+              <button
+                key={seg}
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, selectedScriptSegment: seg }))}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  formData.selectedScriptSegment === seg
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                }`}
+              >
+                {seg}
+              </button>
+            ))}
+          </div>
+          
+          {formData.selectedScriptSegment ? (
+            <div className="bg-dark-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-yellow-400">{formData.selectedScriptSegment} Symbols</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">
+                    {Object.keys(formData.scriptSettings || {}).filter(s => 
+                      formData.scriptSettings[s]?.segment === formData.selectedScriptSegment
+                    ).length} customized
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const symbols = formData.segmentSymbols?.[formData.selectedScriptSegment] || [];
+                      const newScriptSettings = { ...formData.scriptSettings };
+                      symbols.forEach(symbol => {
+                        if (!newScriptSettings[symbol]) {
+                          newScriptSettings[symbol] = {
+                            segment: formData.selectedScriptSegment,
+                            lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                            quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                          };
+                        }
+                      });
+                      setFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                    }}
+                    className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const symbols = formData.segmentSymbols?.[formData.selectedScriptSegment] || [];
+                      const newScriptSettings = { ...formData.scriptSettings };
+                      symbols.forEach(symbol => {
+                        delete newScriptSettings[symbol];
+                      });
+                      setFormData(prev => ({ ...prev, scriptSettings: newScriptSettings, selectedScript: null }));
+                    }}
+                    className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs font-medium"
+                  >
+                    Unselect All
+                  </button>
+                </div>
+              </div>
+              
+              {/* Symbol List */}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4 max-h-40 overflow-y-auto">
+                {(formData.segmentSymbols?.[formData.selectedScriptSegment] || []).map(symbol => {
+                  const isCustomized = formData.scriptSettings?.[symbol];
+                  return (
+                    <button
+                      key={symbol}
+                      type="button"
+                      onClick={() => {
+                        if (isCustomized) {
+                          setFormData(prev => ({ ...prev, selectedScript: symbol }));
+                        } else {
+                          // Add default settings for this symbol
+                          setFormData(prev => ({
+                            ...prev,
+                            selectedScript: symbol,
+                            scriptSettings: {
+                              ...prev.scriptSettings,
+                              [symbol]: {
+                                segment: formData.selectedScriptSegment,
+                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                              }
+                            }
+                          }));
+                        }
+                      }}
+                      className={`px-2 py-1.5 rounded text-xs font-medium transition-all ${
+                        isCustomized
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                      } ${formData.selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
+                    >
+                      {symbol}
+                    </button>
+                  );
+                })}
+                {(!formData.segmentSymbols?.[formData.selectedScriptSegment] || formData.segmentSymbols[formData.selectedScriptSegment].length === 0) && (
+                  <p className="col-span-full text-xs text-gray-500 italic">No symbols available for this segment</p>
+                )}
+              </div>
+              
+              {/* Selected Symbol Settings */}
+              {formData.selectedScript && formData.scriptSettings?.[formData.selectedScript] && (
+                <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-yellow-400">{formData.selectedScript} Settings</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updatedScripts = { ...formData.scriptSettings };
+                        delete updatedScripts[formData.selectedScript];
+                        setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
+                      }}
+                      className="text-red-400 hover:text-red-300 text-xs"
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+                  
+                  {/* Setting Type Selection */}
+                  <div className="mb-4">
+                    <label className="block text-xs text-gray-400 font-medium mb-2">Setting Type</label>
+                    <div className="flex gap-2">
+                      {['LOT', 'QUANTITY', 'FIXED_MARGIN', 'BROKERAGE', 'SPREAD', 'BLOCK'].map(type => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            scriptSettings: {
+                              ...prev.scriptSettings,
+                              [formData.selectedScript]: {
+                                ...prev.scriptSettings[formData.selectedScript],
+                                settingType: type
+                              }
+                            }
+                          }))}
+                          className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                            (formData.scriptSettings[formData.selectedScript]?.settingType || 'LOT') === type
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                          }`}
+                        >
+                          {type === 'LOT' ? 'Lot' : type === 'QUANTITY' ? 'Quantity' : type === 'FIXED_MARGIN' ? 'Fixed Margin' : type === 'BROKERAGE' ? 'Brokerage' : type === 'SPREAD' ? 'Spread' : 'Block'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  {/* Lot Settings - Show when LOT is selected */}
+                  {(formData.scriptSettings[formData.selectedScript]?.settingType || 'LOT') === 'LOT' && (
+                    <div className="mb-3">
+                      <span className="text-xs text-gray-400 font-medium">Lot Settings</span>
+                      <div className="grid grid-cols-3 gap-2 mt-1">
+                        <div>
+                          <label className="block text-xs text-gray-500">Max Lots</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.maxLots || 50}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, maxLots: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Min Lots</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.minLots || 1}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, minLots: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Per Order</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.perOrderLots || 10}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, perOrderLots: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Quantity Settings - Show when QUANTITY is selected */}
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'QUANTITY' && (
+                    <div className="mb-3">
+                      <span className="text-xs text-gray-400 font-medium">Quantity Settings</span>
+                      <div className="grid grid-cols-3 gap-2 mt-1">
+                        <div>
+                          <label className="block text-xs text-gray-500">Max Qty</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.quantitySettings?.maxQuantity || 1000}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  quantitySettings: { ...prev.scriptSettings[formData.selectedScript]?.quantitySettings, maxQuantity: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Min Qty</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.quantitySettings?.minQuantity || 1}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  quantitySettings: { ...prev.scriptSettings[formData.selectedScript]?.quantitySettings, minQuantity: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Per Order</label>
+                          <input
+                            type="number"
+                            value={formData.scriptSettings[formData.selectedScript]?.quantitySettings?.perOrderQuantity || 100}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  quantitySettings: { ...prev.scriptSettings[formData.selectedScript]?.quantitySettings, perOrderQuantity: Number(e.target.value) }
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Fixed Margin Settings - Show when FIXED_MARGIN is selected */}
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'FIXED_MARGIN' && (
+                    <div className="space-y-3">
+                      <span className="text-xs text-gray-400 font-medium block">Fixed Margin Settings</span>
+                      
+                      {/* Future Margins */}
+                      <div className="bg-dark-700 rounded p-3">
+                        <span className="text-xs text-blue-400 font-medium block mb-2">Future Margins</span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500">Intraday Future</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.intradayFuture || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, intradayFuture: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Carry Future</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.carryFuture || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, carryFuture: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Option Buy Margins */}
+                      <div className="bg-dark-700 rounded p-3">
+                        <span className="text-xs text-green-400 font-medium block mb-2">Option Buy Margins</span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500">Option Buy Intraday</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.optionBuyIntraday || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, optionBuyIntraday: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Option Buy Carry</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.optionBuyCarry || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, optionBuyCarry: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Option Sell Margins */}
+                      <div className="bg-dark-700 rounded p-3">
+                        <span className="text-xs text-red-400 font-medium block mb-2">Option Sell Margins</span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500">Option Sell Intraday</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.optionSellIntraday || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, optionSellIntraday: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Option Sell Carry</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.fixedMargin?.optionSellCarry || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    fixedMargin: { ...prev.scriptSettings[formData.selectedScript]?.fixedMargin, optionSellCarry: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Brokerage Settings - Show when BROKERAGE is selected */}
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'BROKERAGE' && (
+                    <div className="space-y-3">
+                      <span className="text-xs text-gray-400 font-medium block">Brokerage Settings</span>
+                      
+                      <div className="bg-dark-700 rounded p-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500">Brokerage Type</label>
+                            <select
+                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.type || 'PER_LOT'}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    brokerage: { ...prev.scriptSettings[formData.selectedScript]?.brokerage, type: e.target.value }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            >
+                              <option value="PER_LOT">Per Lot</option>
+                              <option value="PER_CRORE">Per Crore</option>
+                              <option value="PER_TRADE">Per Trade</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Brokerage Value</label>
+                            <input
+                              type="number"
+                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.value || 0}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    brokerage: { ...prev.scriptSettings[formData.selectedScript]?.brokerage, value: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Spread Settings - Show when SPREAD is selected */}
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'SPREAD' && (
+                    <div className="space-y-3">
+                      <span className="text-xs text-gray-400 font-medium block">Spread Settings</span>
+                      
+                      <div className="bg-dark-700 rounded p-3">
+                        <div>
+                          <label className="block text-xs text-gray-500">Spread Value</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={formData.scriptSettings[formData.selectedScript]?.spread || 0}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [formData.selectedScript]: {
+                                  ...prev.scriptSettings[formData.selectedScript],
+                                  spread: Number(e.target.value)
+                                }
+                              }
+                            }))}
+                            className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Block Settings - Show when BLOCK is selected */}
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'BLOCK' && (
+                    <div className="space-y-3">
+                      <span className="text-xs text-gray-400 font-medium block">Block Settings</span>
+                      
+                      <div className="bg-dark-700 rounded p-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs text-gray-500">Block Future</label>
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    block: { ...prev.scriptSettings[formData.selectedScript]?.block, future: !prev.scriptSettings[formData.selectedScript]?.block?.future }
+                                  }
+                                }
+                              }))}
+                              className={`px-3 py-1 rounded text-xs font-medium ${
+                                formData.scriptSettings[formData.selectedScript]?.block?.future
+                                  ? 'bg-red-600 text-white'
+                                  : 'bg-green-600 text-white'
+                              }`}
+                            >
+                              {formData.scriptSettings[formData.selectedScript]?.block?.future ? 'Yes' : 'No'}
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs text-gray-500">Block Option</label>
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [formData.selectedScript]: {
+                                    ...prev.scriptSettings[formData.selectedScript],
+                                    block: { ...prev.scriptSettings[formData.selectedScript]?.block, option: !prev.scriptSettings[formData.selectedScript]?.block?.option }
+                                  }
+                                }
+                              }))}
+                              className={`px-3 py-1 rounded text-xs font-medium ${
+                                formData.scriptSettings[formData.selectedScript]?.block?.option
+                                  ? 'bg-red-600 text-white'
+                                  : 'bg-green-600 text-white'
+                              }`}
+                            >
+                              {formData.scriptSettings[formData.selectedScript]?.block?.option ? 'Yes' : 'No'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 italic text-center py-4">Select a segment above to view and customize symbol settings</p>
+          )}
         </div>
 
         {/* Submit Button - Full Width */}
@@ -5230,8 +6111,60 @@ const AllUsersManagement = () => {
   const [filter, setFilter] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [showUserEditModal, setShowUserEditModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [targetAdminId, setTargetAdminId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
   const [transferring, setTransferring] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [expandedSegment, setExpandedSegment] = useState(null);
+  const [selectedScriptSegment, setSelectedScriptSegment] = useState(null);
+  const [selectedScript, setSelectedScript] = useState(null);
+  const [editFormData, setEditFormData] = useState(null);
+  
+  const segmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  
+  const defaultSegmentSettings = {
+    enabled: false,
+    fraction: false,
+    maxExchangeLots: 100,
+    commissionType: 'PER_LOT',
+    commissionLot: 0,
+    maxLots: 50,
+    minLots: 1,
+    orderLots: 10,
+    exposureIntraday: 1,
+    exposureCarryForward: 1,
+    optionBuy: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50,
+      maxExchangeLots: 100
+    },
+    optionSell: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50,
+      maxExchangeLots: 100
+    }
+  };
+  
+  const segmentSymbols = {
+    MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
+    NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+    BSE: ['SENSEX', 'BANKEX'],
+    EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+  };
 
   useEffect(() => {
     fetchAllUsers();
@@ -5283,6 +6216,83 @@ const AllUsersManagement = () => {
     }
   };
 
+  const openEditModal = (user) => {
+    setSelectedUser(user);
+    setEditFormData({
+      segmentPermissions: user.segmentPermissions || segmentOptions.reduce((acc, seg) => {
+        acc[seg] = { ...defaultSegmentSettings };
+        return acc;
+      }, {}),
+      scriptSettings: user.scriptSettings || {}
+    });
+    setExpandedSegment(null);
+    setSelectedScriptSegment(null);
+    setSelectedScript(null);
+    setShowEditModal(true);
+  };
+
+  const handleEditSegmentPermissionChange = (segment, field, value) => {
+    setEditFormData(prev => ({
+      ...prev,
+      segmentPermissions: {
+        ...prev.segmentPermissions,
+        [segment]: {
+          ...prev.segmentPermissions[segment],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const handleSaveUserSettings = async () => {
+    if (!selectedUser || !editFormData) return;
+    
+    setSaving(true);
+    try {
+      await axios.put(`/api/admin/manage/users/${selectedUser._id}/settings`, 
+        {
+          segmentPermissions: editFormData.segmentPermissions,
+          scriptSettings: editFormData.scriptSettings
+        },
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert('User settings updated successfully!');
+      setShowEditModal(false);
+      setSelectedUser(null);
+      setEditFormData(null);
+      fetchAllUsers();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating user settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCopySettings = async () => {
+    if (!selectedUser || !targetUserId) return;
+    
+    setCopying(true);
+    try {
+      await axios.post(`/api/admin/manage/users/${targetUserId}/copy-settings`, 
+        {
+          sourceUserId: selectedUser._id,
+          segmentPermissions: selectedUser.segmentPermissions,
+          scriptSettings: selectedUser.scriptSettings
+        },
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert('Settings copied successfully!');
+      setShowCopyModal(false);
+      setSelectedUser(null);
+      setTargetUserId('');
+      fetchAllUsers();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error copying settings');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const filteredUsers = users.filter(u => 
     u.username?.toLowerCase().includes(filter.toLowerCase()) ||
     u.email?.toLowerCase().includes(filter.toLowerCase()) ||
@@ -5298,8 +6308,17 @@ const AllUsersManagement = () => {
     <div className="p-4 md:p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">All Users</h1>
-        <div className="text-sm text-gray-400">
-          Total: {users.length} users
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowNotificationModal(true)}
+            className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg"
+          >
+            <FileText size={18} />
+            Send Notification
+          </button>
+          <div className="text-sm text-gray-400">
+            Total: {users.length} users
+          </div>
         </div>
       </div>
 
@@ -5355,15 +6374,56 @@ const AllUsersManagement = () => {
                     {new Date(user.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => {
-                        setSelectedUser(user);
-                        setShowTransferModal(true);
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-                    >
-                      Transfer
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => { setSelectedUser(user); setShowUserEditModal(true); }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-blue-400"
+                        title="Edit User"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        onClick={() => { setSelectedUser(user); setShowPasswordModal(true); }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-yellow-400"
+                        title="Change Password"
+                      >
+                        <Key size={16} />
+                      </button>
+                      <button
+                        onClick={() => openEditModal(user)}
+                        className="p-2 hover:bg-dark-600 rounded transition text-purple-400"
+                        title="Edit Settings"
+                      >
+                        <Settings size={16} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setShowCopyModal(true);
+                        }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-cyan-400"
+                        title="Copy Settings"
+                      >
+                        <Copy size={16} />
+                      </button>
+                      <button
+                        onClick={() => { setSelectedUser(user); setShowWalletModal(true); }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-green-400"
+                        title="Manage Wallet"
+                      >
+                        <Wallet size={16} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setShowTransferModal(true);
+                        }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-orange-400"
+                        title="Transfer User"
+                      >
+                        <UserPlus size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -5427,6 +6487,1500 @@ const AllUsersManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Copy Settings Modal */}
+      {showCopyModal && selectedUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h2 className="text-xl font-bold mb-4">Copy User Settings</h2>
+            
+            <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+              <div className="text-sm text-gray-400">Copy From</div>
+              <div className="font-medium">{selectedUser.fullName || selectedUser.username}</div>
+              <div className="text-sm text-gray-400">{selectedUser.email}</div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Copy To User</label>
+              <select
+                value={targetUserId}
+                onChange={(e) => setTargetUserId(e.target.value)}
+                className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
+              >
+                <option value="">Select User</option>
+                {users.filter(u => u._id !== selectedUser._id).map(u => (
+                  <option key={u._id} value={u._id}>
+                    {u.fullName || u.username} ({u.email}) - {u.adminCode}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-600/50 rounded-lg">
+              <div className="text-sm text-yellow-400">
+                <strong>Note:</strong> This will copy segment permissions and script settings from the selected user to the target user. The target user's existing settings will be overwritten.
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowCopyModal(false);
+                  setSelectedUser(null);
+                  setTargetUserId('');
+                }}
+                className="flex-1 bg-dark-600 hover:bg-dark-500 text-white py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCopySettings}
+                disabled={!targetUserId || copying}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {copying ? 'Copying...' : 'Copy Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Settings Modal */}
+      {showEditModal && selectedUser && editFormData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-4xl mx-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Edit User Settings</h2>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                  setEditFormData(null);
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+              <div className="text-sm text-gray-400">User</div>
+              <div className="font-medium">{selectedUser.fullName || selectedUser.username}</div>
+              <div className="text-sm text-gray-400">{selectedUser.email}</div>
+            </div>
+
+            {/* Segment Permissions */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-blue-400 mb-3">Segment Permissions</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {segmentOptions.map(segment => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => setExpandedSegment(expandedSegment === segment ? null : segment)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      expandedSegment === segment
+                        ? 'bg-blue-600 text-white'
+                        : editFormData.segmentPermissions?.[segment]?.enabled
+                          ? 'bg-green-600/20 text-green-400 border border-green-600'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                    }`}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+
+              {/* Expanded Segment Settings */}
+              {expandedSegment && editFormData.segmentPermissions?.[expandedSegment] && (
+                <div className="bg-dark-700 rounded-lg p-4 border border-dark-600">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-md font-semibold text-blue-400">{expandedSegment} Settings</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'fraction', !editFormData.segmentPermissions[expandedSegment].fraction)}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          editFormData.segmentPermissions[expandedSegment].fraction
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}
+                      >
+                        {editFormData.segmentPermissions[expandedSegment].fraction ? 'Fraction On' : 'Fraction Off'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'enabled', !editFormData.segmentPermissions[expandedSegment].enabled)}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          editFormData.segmentPermissions[expandedSegment].enabled
+                            ? 'bg-green-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {editFormData.segmentPermissions[expandedSegment].enabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* General Settings */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].maxExchangeLots || 100}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'maxExchangeLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].maxLots || 50}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'maxLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Min Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].minLots || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'minLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Order Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].orderLots || 10}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'orderLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                      <select
+                        value={editFormData.segmentPermissions[expandedSegment].commissionType || 'PER_LOT'}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'commissionType', e.target.value)}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="PER_LOT">Per Lot</option>
+                        <option value="PER_TRADE">Per Trade</option>
+                        <option value="PER_CRORE">Per Crore</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].commissionLot || 0}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'commissionLot', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Exposure Intraday</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].exposureIntraday || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'exposureIntraday', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Exposure Carry Forward</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].exposureCarryForward || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'exposureCarryForward', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Option Buy & Sell Settings */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Option Buy */}
+                    <div className="bg-dark-800 rounded-lg p-3 border border-green-900/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-medium text-green-400">Option Buy</h5>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              fraction: !editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction ? 'Fraction On' : 'Fraction Off'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              allowed: !editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                                ? 'bg-green-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed ? 'Allowed' : 'Blocked'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                          <select
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.commissionType || 'PER_LOT'}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              commissionType: e.target.value
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          >
+                            <option value="PER_LOT">Per Lot</option>
+                            <option value="PER_TRADE">Per Trade</option>
+                            <option value="PER_CRORE">Per Crore</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.commission || 0}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              commission: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.strikeSelection || 50}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              strikeSelection: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.maxExchangeLots || 100}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              maxExchangeLots: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Option Sell */}
+                    <div className="bg-dark-800 rounded-lg p-3 border border-red-900/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-medium text-red-400">Option Sell</h5>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              fraction: !editFormData.segmentPermissions[expandedSegment].optionSell?.fraction
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionSell?.fraction
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionSell?.fraction ? 'Fraction On' : 'Fraction Off'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              allowed: !editFormData.segmentPermissions[expandedSegment].optionSell?.allowed
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionSell?.allowed
+                                ? 'bg-green-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionSell?.allowed ? 'Allowed' : 'Blocked'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                          <select
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.commissionType || 'PER_LOT'}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              commissionType: e.target.value
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          >
+                            <option value="PER_LOT">Per Lot</option>
+                            <option value="PER_TRADE">Per Trade</option>
+                            <option value="PER_CRORE">Per Crore</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.commission || 0}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              commission: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.strikeSelection || 50}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              strikeSelection: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.maxExchangeLots || 100}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              maxExchangeLots: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Script Settings */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-purple-400 mb-3">Script Settings</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {segmentOptions.map(segment => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => {
+                      setSelectedScriptSegment(selectedScriptSegment === segment ? null : segment);
+                      setSelectedScript(null);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      selectedScriptSegment === segment
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                    }`}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+
+              {/* Symbol List */}
+              {selectedScriptSegment && (
+                <div className="bg-dark-700 rounded-lg p-4 border border-dark-600">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-yellow-400">{selectedScriptSegment} Symbols</h4>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        {Object.keys(editFormData.scriptSettings || {}).filter(s => 
+                          editFormData.scriptSettings[s]?.segment === selectedScriptSegment
+                        ).length} customized
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const newScriptSettings = { ...editFormData.scriptSettings };
+                          symbols.forEach(symbol => {
+                            if (!newScriptSettings[symbol]) {
+                              newScriptSettings[symbol] = {
+                                segment: selectedScriptSegment,
+                                settingType: 'LOT',
+                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                              };
+                            }
+                          });
+                          setEditFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                        }}
+                        className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const newScriptSettings = { ...editFormData.scriptSettings };
+                          symbols.forEach(symbol => {
+                            delete newScriptSettings[symbol];
+                          });
+                          setEditFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                          setSelectedScript(null);
+                        }}
+                        className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs font-medium"
+                      >
+                        Unselect All
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {(segmentSymbols[selectedScriptSegment] || []).map(symbol => (
+                      <button
+                        key={symbol}
+                        type="button"
+                        onClick={() => {
+                          if (!editFormData.scriptSettings?.[symbol]) {
+                            setEditFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [symbol]: {
+                                  segment: selectedScriptSegment,
+                                  settingType: 'LOT',
+                                  lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                }
+                              }
+                            }));
+                          }
+                          setSelectedScript(symbol);
+                        }}
+                        className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                          selectedScript === symbol
+                            ? 'bg-yellow-600 text-white'
+                            : editFormData.scriptSettings?.[symbol]
+                              ? 'bg-purple-600/30 text-purple-400 border border-purple-600'
+                              : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                        }`}
+                      >
+                        {symbol}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Selected Symbol Settings */}
+                  {selectedScript && editFormData.scriptSettings?.[selectedScript] && (
+                    <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-yellow-400">{selectedScript} Settings</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updatedScripts = { ...editFormData.scriptSettings };
+                            delete updatedScripts[selectedScript];
+                            setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
+                            setSelectedScript(null);
+                          }}
+                          className="text-red-400 hover:text-red-300 text-xs"
+                        >
+                          Reset to Default
+                        </button>
+                      </div>
+                      
+                      {/* Setting Type Selection */}
+                      <div className="mb-4">
+                        <label className="block text-xs text-gray-400 font-medium mb-2">Setting Type</label>
+                        <div className="flex flex-wrap gap-2">
+                          {['LOT', 'QUANTITY', 'FIXED_MARGIN', 'BROKERAGE', 'SPREAD', 'BLOCK'].map(type => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    settingType: type
+                                  }
+                                }
+                              }))}
+                              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                                (editFormData.scriptSettings[selectedScript]?.settingType || 'LOT') === type
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                              }`}
+                            >
+                              {type === 'LOT' ? 'Lot' : type === 'QUANTITY' ? 'Quantity' : type === 'FIXED_MARGIN' ? 'Fixed Margin' : type === 'BROKERAGE' ? 'Brokerage' : type === 'SPREAD' ? 'Spread' : 'Block'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Lot Settings */}
+                      {(editFormData.scriptSettings[selectedScript]?.settingType || 'LOT') === 'LOT' && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Max Lots</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.maxLots || 50}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, maxLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Min Lots</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.minLots || 1}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, minLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Per Order</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.perOrderLots || 10}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, perOrderLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Quantity Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'QUANTITY' && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Max Qty</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.maxQuantity || 1000}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, maxQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Min Qty</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.minQuantity || 1}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, minQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Per Order</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.perOrderQuantity || 100}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, perOrderQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Fixed Margin Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'FIXED_MARGIN' && (
+                        <div className="space-y-3">
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-blue-400 font-medium block mb-2">Future Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Intraday Future</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.intradayFuture || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, intradayFuture: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Carry Future</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.carryFuture || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, carryFuture: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-green-400 font-medium block mb-2">Option Buy Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Buy Intraday</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionBuyIntraday || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionBuyIntraday: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Buy Carry</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionBuyCarry || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionBuyCarry: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-red-400 font-medium block mb-2">Option Sell Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Sell Intraday</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionSellIntraday || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionSellIntraday: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Sell Carry</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionSellCarry || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionSellCarry: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Brokerage Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-500">Brokerage Type</label>
+                              <select
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || 'PER_LOT'}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      brokerage: { ...prev.scriptSettings[selectedScript]?.brokerage, type: e.target.value }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              >
+                                <option value="PER_LOT">Per Lot</option>
+                                <option value="PER_CRORE">Per Crore</option>
+                                <option value="PER_TRADE">Per Trade</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500">Brokerage Value</label>
+                              <input
+                                type="number"
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value || 0}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      brokerage: { ...prev.scriptSettings[selectedScript]?.brokerage, value: Number(e.target.value) }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Spread Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'SPREAD' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div>
+                            <label className="block text-xs text-gray-500">Spread Value</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editFormData.scriptSettings[selectedScript]?.spread || 0}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    spread: Number(e.target.value)
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Block Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BLOCK' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs text-gray-500">Block Future</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      block: { ...prev.scriptSettings[selectedScript]?.block, future: !prev.scriptSettings[selectedScript]?.block?.future }
+                                    }
+                                  }
+                                }))}
+                                className={`px-3 py-1 rounded text-xs font-medium ${
+                                  editFormData.scriptSettings[selectedScript]?.block?.future
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-green-600 text-white'
+                                }`}
+                              >
+                                {editFormData.scriptSettings[selectedScript]?.block?.future ? 'Yes' : 'No'}
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs text-gray-500">Block Option</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      block: { ...prev.scriptSettings[selectedScript]?.block, option: !prev.scriptSettings[selectedScript]?.block?.option }
+                                    }
+                                  }
+                                }))}
+                                className={`px-3 py-1 rounded text-xs font-medium ${
+                                  editFormData.scriptSettings[selectedScript]?.block?.option
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-green-600 text-white'
+                                }`}
+                              >
+                                {editFormData.scriptSettings[selectedScript]?.block?.option ? 'Yes' : 'No'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Save Button */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                  setEditFormData(null);
+                }}
+                className="flex-1 bg-dark-600 hover:bg-dark-500 text-white py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveUserSettings}
+                disabled={saving}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {saving ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showUserEditModal && selectedUser && (
+        <SuperAdminEditUserModal 
+          user={selectedUser}
+          onClose={() => { setShowUserEditModal(false); setSelectedUser(null); }}
+          onSuccess={() => { setShowUserEditModal(false); setSelectedUser(null); fetchAllUsers(); }}
+          token={admin.token}
+        />
+      )}
+
+      {/* Password Modal */}
+      {showPasswordModal && selectedUser && (
+        <SuperAdminPasswordModal 
+          user={selectedUser}
+          onClose={() => { setShowPasswordModal(false); setSelectedUser(null); }}
+          token={admin.token}
+        />
+      )}
+
+      {/* Wallet Modal */}
+      {showWalletModal && selectedUser && (
+        <SuperAdminWalletModal 
+          user={selectedUser}
+          onClose={() => { setShowWalletModal(false); setSelectedUser(null); }}
+          onSuccess={() => { fetchAllUsers(); }}
+          token={admin.token}
+        />
+      )}
+
+      {/* Send Notification Modal */}
+      {showNotificationModal && (
+        <SendNotificationModal 
+          onClose={() => setShowNotificationModal(false)}
+          token={admin.token}
+          users={users}
+          admins={admins}
+          isSuperAdmin={true}
+        />
+      )}
+    </div>
+  );
+};
+
+// Send Notification Modal Component
+const SendNotificationModal = ({ onClose, token, users, admins, isSuperAdmin }) => {
+  const [formData, setFormData] = useState({
+    title: '',
+    subject: '',
+    description: '',
+    targetType: 'ALL_USERS',
+    targetUserIds: [],
+    targetAdminCode: ''
+  });
+  const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImage(file);
+      setImagePreview(URL.createObjectURL(file));
+    }
+  };
+
+  const toggleUserSelection = (userId) => {
+    setFormData(prev => ({
+      ...prev,
+      targetUserIds: prev.targetUserIds.includes(userId)
+        ? prev.targetUserIds.filter(id => id !== userId)
+        : [...prev.targetUserIds, userId]
+    }));
+  };
+
+  const selectAllFilteredUsers = () => {
+    const filteredIds = filteredUsers.map(u => u._id);
+    setFormData(prev => ({
+      ...prev,
+      targetUserIds: [...new Set([...prev.targetUserIds, ...filteredIds])]
+    }));
+  };
+
+  const clearAllSelections = () => {
+    setFormData(prev => ({ ...prev, targetUserIds: [] }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.title || !formData.subject || !formData.description) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    if (formData.targetType === 'SELECTED_USERS' && formData.targetUserIds.length === 0) {
+      alert('Please select at least one user');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const submitData = new FormData();
+      submitData.append('title', formData.title);
+      submitData.append('subject', formData.subject);
+      submitData.append('description', formData.description);
+      submitData.append('targetType', formData.targetType);
+      if (formData.targetType === 'SELECTED_USERS') {
+        submitData.append('targetUserIds', JSON.stringify(formData.targetUserIds));
+      }
+      if (formData.targetType === 'ADMIN_USERS') {
+        submitData.append('targetAdminCode', formData.targetAdminCode);
+      }
+      if (image) {
+        submitData.append('image', image);
+      }
+
+      await axios.post('/api/notifications', submitData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      alert('Notification sent successfully!');
+      onClose();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error sending notification');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter users based on search
+  const filteredUsers = users.filter(u => 
+    (u.fullName || u.username || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+    (u.email || '').toLowerCase().includes(userSearch.toLowerCase())
+  );
+
+  // Get unique admin codes for dropdown
+  const uniqueAdminCodes = [...new Set(users.map(u => u.adminCode))].filter(Boolean);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto">
+      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-lg mx-4 my-8 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Send Notification</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Title *</label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+              placeholder="Notification title"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Subject *</label>
+            <input
+              type="text"
+              value={formData.subject}
+              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+              placeholder="Notification subject"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Description *</label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 min-h-[100px]"
+              placeholder="Notification description"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Image (Optional)</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-sm"
+            />
+            {imagePreview && (
+              <div className="mt-2 relative">
+                <img src={imagePreview} alt="Preview" className="w-full max-h-40 object-cover rounded-lg" />
+                <button
+                  type="button"
+                  onClick={() => { setImage(null); setImagePreview(null); }}
+                  className="absolute top-2 right-2 bg-red-600 rounded-full p-1"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Send To *</label>
+            <select
+              value={formData.targetType}
+              onChange={(e) => setFormData({ ...formData, targetType: e.target.value, targetUserIds: [], targetAdminCode: '' })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+            >
+              {isSuperAdmin && <option value="ALL_ADMINS_USERS">All Users (All Admins)</option>}
+              <option value="ALL_USERS">All My Users</option>
+              <option value="SELECTED_USERS">Selected Users</option>
+              {isSuperAdmin && <option value="ADMIN_USERS">Specific Admin's Users</option>}
+            </select>
+          </div>
+
+          {formData.targetType === 'SELECTED_USERS' && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                Select Users * ({formData.targetUserIds.length} selected)
+              </label>
+              <input
+                type="text"
+                placeholder="Search users..."
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 mb-2"
+              />
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={selectAllFilteredUsers}
+                  className="text-xs bg-green-600 hover:bg-green-700 px-2 py-1 rounded"
+                >
+                  Select All Filtered
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllSelections}
+                  className="text-xs bg-red-600 hover:bg-red-700 px-2 py-1 rounded"
+                >
+                  Clear All
+                </button>
+              </div>
+              <div className="max-h-48 overflow-y-auto bg-dark-700 border border-dark-600 rounded-lg">
+                {filteredUsers.map(u => (
+                  <label
+                    key={u._id}
+                    className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-dark-600 ${
+                      formData.targetUserIds.includes(u._id) ? 'bg-green-900/30' : ''
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={formData.targetUserIds.includes(u._id)}
+                      onChange={() => toggleUserSelection(u._id)}
+                      className="rounded"
+                    />
+                    <span className="text-sm">
+                      {u.fullName || u.username} <span className="text-gray-500">({u.email})</span>
+                    </span>
+                  </label>
+                ))}
+                {filteredUsers.length === 0 && (
+                  <div className="px-3 py-4 text-center text-gray-500 text-sm">No users found</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {formData.targetType === 'ADMIN_USERS' && isSuperAdmin && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Select Admin *</label>
+              <select
+                value={formData.targetAdminCode}
+                onChange={(e) => setFormData({ ...formData, targetAdminCode: e.target.value })}
+                className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+              >
+                <option value="">Select Admin</option>
+                {admins && admins.map(a => (
+                  <option key={a._id} value={a.adminCode}>
+                    {a.fullName || a.username} ({a.adminCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 bg-dark-600 hover:bg-dark-500 py-2 rounded-lg">
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 py-2 rounded-lg"
+            >
+              {loading ? 'Sending...' : 'Send Notification'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Super Admin Edit User Modal
+const SuperAdminEditUserModal = ({ user, onClose, onSuccess, token }) => {
+  const [formData, setFormData] = useState({
+    fullName: user.fullName || '',
+    phone: user.phone || '',
+    isActive: user.isActive
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await axios.put(`/api/admin/manage/users/${user._id}`, formData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      onSuccess();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating user');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Edit User</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Full Name</label>
+            <input
+              type="text"
+              value={formData.fullName}
+              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Phone</label>
+            <input
+              type="text"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-400">Active Status</span>
+            <button
+              type="button"
+              onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
+              className={`px-4 py-2 rounded-lg ${formData.isActive ? 'bg-green-600' : 'bg-red-600'}`}
+            >
+              {formData.isActive ? 'Active' : 'Inactive'}
+            </button>
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 bg-dark-600 hover:bg-dark-500 py-2 rounded-lg">Cancel</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 py-2 rounded-lg">
+              {loading ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Super Admin Password Modal
+const SuperAdminPasswordModal = ({ user, onClose, token }) => {
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (password.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+    setLoading(true);
+    try {
+      await axios.put(`/api/admin/manage/users/${user._id}/password`, { password }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      alert('Password updated successfully');
+      onClose();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Change Password</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
+        </div>
+        <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+          <div className="text-sm text-gray-400">User</div>
+          <div className="font-medium">{user.fullName || user.username}</div>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="relative">
+            <label className="block text-sm text-gray-400 mb-1">New Password</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 pr-10"
+              placeholder="Enter new password"
+            />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-8 text-gray-400">
+              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 bg-dark-600 hover:bg-dark-500 py-2 rounded-lg">Cancel</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 py-2 rounded-lg">
+              {loading ? 'Updating...' : 'Update Password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Super Admin Wallet Modal
+const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [action, setAction] = useState('add');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!amount || parseFloat(amount) <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+    setLoading(true);
+    try {
+      const endpoint = action === 'add' ? 'add-funds' : 'deduct-funds';
+      await axios.post(`/api/admin/manage/users/${user._id}/${endpoint}`, 
+        { amount: parseFloat(amount), description },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert(`Funds ${action === 'add' ? 'added' : 'deducted'} successfully`);
+      onSuccess();
+      onClose();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error processing request');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Manage Wallet</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
+        </div>
+        <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+          <div className="text-sm text-gray-400">User</div>
+          <div className="font-medium">{user.fullName || user.username}</div>
+          <div className="text-lg font-bold text-green-400 mt-1">₹{user.wallet?.cashBalance?.toLocaleString() || '0'}</div>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setAction('add')}
+              className={`flex-1 py-2 rounded-lg ${action === 'add' ? 'bg-green-600' : 'bg-dark-600'}`}
+            >
+              Add Funds
+            </button>
+            <button
+              type="button"
+              onClick={() => setAction('deduct')}
+              className={`flex-1 py-2 rounded-lg ${action === 'deduct' ? 'bg-red-600' : 'bg-dark-600'}`}
+            >
+              Deduct Funds
+            </button>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Amount (₹)</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+              placeholder="Enter amount"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Description (Optional)</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+              placeholder="Enter description"
+            />
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 bg-dark-600 hover:bg-dark-500 py-2 rounded-lg">Cancel</button>
+            <button 
+              type="submit" 
+              disabled={loading} 
+              className={`flex-1 ${action === 'add' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-50 py-2 rounded-lg`}
+            >
+              {loading ? 'Processing...' : action === 'add' ? 'Add Funds' : 'Deduct Funds'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
@@ -5440,7 +7994,56 @@ const UserManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [targetUserId, setTargetUserId] = useState('');
+  const [expandedSegment, setExpandedSegment] = useState(null);
+  const [selectedScriptSegment, setSelectedScriptSegment] = useState(null);
+  const [selectedScript, setSelectedScript] = useState(null);
+  const [editFormData, setEditFormData] = useState(null);
+  
+  const segmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  
+  const defaultSegmentSettings = {
+    enabled: false,
+    fraction: false,
+    maxExchangeLots: 100,
+    commissionType: 'PER_LOT',
+    commissionLot: 0,
+    maxLots: 50,
+    minLots: 1,
+    orderLots: 10,
+    exposureIntraday: 1,
+    exposureCarryForward: 1,
+    optionBuy: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50,
+      maxExchangeLots: 100
+    },
+    optionSell: {
+      allowed: true,
+      fraction: false,
+      commissionType: 'PER_LOT',
+      commission: 0,
+      strikeSelection: 50,
+      maxExchangeLots: 100
+    }
+  };
+  
+  const segmentSymbols = {
+    MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
+    NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+    BSE: ['SENSEX', 'BANKEX'],
+    EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+  };
 
   const fetchUsers = async () => {
     try {
@@ -5477,17 +8080,103 @@ const UserManagement = () => {
     }
   };
 
+  const openSettingsModal = (user) => {
+    setSelectedUser(user);
+    setEditFormData({
+      segmentPermissions: user.segmentPermissions || segmentOptions.reduce((acc, seg) => {
+        acc[seg] = { ...defaultSegmentSettings };
+        return acc;
+      }, {}),
+      scriptSettings: user.scriptSettings || {}
+    });
+    setExpandedSegment(null);
+    setSelectedScriptSegment(null);
+    setSelectedScript(null);
+    setShowSettingsModal(true);
+  };
+
+  const handleEditSegmentPermissionChange = (segment, field, value) => {
+    setEditFormData(prev => ({
+      ...prev,
+      segmentPermissions: {
+        ...prev.segmentPermissions,
+        [segment]: {
+          ...prev.segmentPermissions[segment],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const handleSaveUserSettings = async () => {
+    if (!selectedUser || !editFormData) return;
+    
+    setSaving(true);
+    try {
+      await axios.put(`/api/admin/users/${selectedUser._id}/settings`, 
+        {
+          segmentPermissions: editFormData.segmentPermissions,
+          scriptSettings: editFormData.scriptSettings
+        },
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert('User settings updated successfully!');
+      setShowSettingsModal(false);
+      setSelectedUser(null);
+      setEditFormData(null);
+      fetchUsers();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating user settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCopySettings = async () => {
+    if (!selectedUser || !targetUserId) return;
+    
+    setCopying(true);
+    try {
+      await axios.post(`/api/admin/users/${targetUserId}/copy-settings`, 
+        {
+          sourceUserId: selectedUser._id,
+          segmentPermissions: selectedUser.segmentPermissions,
+          scriptSettings: selectedUser.scriptSettings
+        },
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert('Settings copied successfully!');
+      setShowCopyModal(false);
+      setSelectedUser(null);
+      setTargetUserId('');
+      fetchUsers();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error copying settings');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <h1 className="text-xl md:text-2xl font-bold">User Management</h1>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition"
-        >
-          <Plus size={20} />
-          <span>Create User</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowNotificationModal(true)}
+            className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition"
+          >
+            <FileText size={20} />
+            <span>Send Notification</span>
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition"
+          >
+            <Plus size={20} />
+            <span>Create User</span>
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -5529,9 +8218,11 @@ const UserManagement = () => {
               <div className="text-sm text-gray-400 mb-3">{user.phone || 'No phone'}</div>
               <div className="flex items-center justify-between">
                 <span className="text-green-400 font-bold">₹{user.wallet?.balance?.toLocaleString() || '0'}</span>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button onClick={() => { setSelectedUser(user); setShowEditModal(true); }} className="p-2 bg-dark-700 rounded text-blue-400"><Edit size={16} /></button>
                   <button onClick={() => { setSelectedUser(user); setShowPasswordModal(true); }} className="p-2 bg-dark-700 rounded text-yellow-400"><Key size={16} /></button>
+                  <button onClick={() => openSettingsModal(user)} className="p-2 bg-dark-700 rounded text-purple-400"><Settings size={16} /></button>
+                  <button onClick={() => { setSelectedUser(user); setShowCopyModal(true); }} className="p-2 bg-dark-700 rounded text-cyan-400"><Copy size={16} /></button>
                   <button onClick={() => { setSelectedUser(user); setShowWalletModal(true); }} className="p-2 bg-dark-700 rounded text-green-400"><Wallet size={16} /></button>
                   <button onClick={() => handleDelete(user._id)} className="p-2 bg-dark-700 rounded text-red-400"><Trash2 size={16} /></button>
                 </div>
@@ -5610,6 +8301,20 @@ const UserManagement = () => {
                         <Key size={16} />
                       </button>
                       <button
+                        onClick={() => openSettingsModal(user)}
+                        className="p-2 hover:bg-dark-600 rounded transition text-purple-400"
+                        title="Edit Settings"
+                      >
+                        <Settings size={16} />
+                      </button>
+                      <button
+                        onClick={() => { setSelectedUser(user); setShowCopyModal(true); }}
+                        className="p-2 hover:bg-dark-600 rounded transition text-cyan-400"
+                        title="Copy Settings"
+                      >
+                        <Copy size={16} />
+                      </button>
+                      <button
                         onClick={() => { setSelectedUser(user); setShowWalletModal(true); }}
                         className="p-2 hover:bg-dark-600 rounded transition text-green-400"
                         title="Manage Wallet"
@@ -5663,13 +8368,779 @@ const UserManagement = () => {
           token={admin.token}
         />
       )}
+
+      {/* Copy Settings Modal */}
+      {showCopyModal && selectedUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h2 className="text-xl font-bold mb-4">Copy User Settings</h2>
+            
+            <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+              <div className="text-sm text-gray-400">Copy From</div>
+              <div className="font-medium">{selectedUser.fullName || selectedUser.username}</div>
+              <div className="text-sm text-gray-400">{selectedUser.email}</div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Copy To User</label>
+              <select
+                value={targetUserId}
+                onChange={(e) => setTargetUserId(e.target.value)}
+                className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
+              >
+                <option value="">Select User</option>
+                {users.filter(u => u._id !== selectedUser._id).map(u => (
+                  <option key={u._id} value={u._id}>
+                    {u.fullName || u.username} ({u.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-600/50 rounded-lg">
+              <div className="text-sm text-yellow-400">
+                <strong>Note:</strong> This will copy segment permissions and script settings from the selected user to the target user.
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowCopyModal(false);
+                  setSelectedUser(null);
+                  setTargetUserId('');
+                }}
+                className="flex-1 bg-dark-600 hover:bg-dark-500 text-white py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCopySettings}
+                disabled={!targetUserId || copying}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {copying ? 'Copying...' : 'Copy Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Settings Modal */}
+      {showSettingsModal && selectedUser && editFormData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-4xl mx-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Edit User Settings</h2>
+              <button
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  setSelectedUser(null);
+                  setEditFormData(null);
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="mb-4 p-3 bg-dark-700 rounded-lg">
+              <div className="text-sm text-gray-400">User</div>
+              <div className="font-medium">{selectedUser.fullName || selectedUser.username}</div>
+              <div className="text-sm text-gray-400">{selectedUser.email}</div>
+            </div>
+
+            {/* Segment Permissions */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-blue-400 mb-3">Segment Permissions</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {segmentOptions.map(segment => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => setExpandedSegment(expandedSegment === segment ? null : segment)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      expandedSegment === segment
+                        ? 'bg-blue-600 text-white'
+                        : editFormData.segmentPermissions?.[segment]?.enabled
+                          ? 'bg-green-600/20 text-green-400 border border-green-600'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                    }`}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+
+              {/* Expanded Segment Settings */}
+              {expandedSegment && editFormData.segmentPermissions?.[expandedSegment] && (
+                <div className="bg-dark-700 rounded-lg p-4 border border-dark-600">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-md font-semibold text-blue-400">{expandedSegment} Settings</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'fraction', !editFormData.segmentPermissions[expandedSegment].fraction)}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          editFormData.segmentPermissions[expandedSegment].fraction
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}
+                      >
+                        {editFormData.segmentPermissions[expandedSegment].fraction ? 'Fraction On' : 'Fraction Off'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'enabled', !editFormData.segmentPermissions[expandedSegment].enabled)}
+                        className={`px-3 py-1 rounded text-xs font-medium ${
+                          editFormData.segmentPermissions[expandedSegment].enabled
+                            ? 'bg-green-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {editFormData.segmentPermissions[expandedSegment].enabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* General Settings */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].maxExchangeLots || 100}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'maxExchangeLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Max Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].maxLots || 50}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'maxLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Min Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].minLots || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'minLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Order Lots</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].orderLots || 10}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'orderLots', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                      <select
+                        value={editFormData.segmentPermissions[expandedSegment].commissionType || 'PER_LOT'}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'commissionType', e.target.value)}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="PER_LOT">Per Lot</option>
+                        <option value="PER_TRADE">Per Trade</option>
+                        <option value="PER_CRORE">Per Crore</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].commissionLot || 0}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'commissionLot', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Exposure Intraday</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].exposureIntraday || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'exposureIntraday', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Exposure Carry Forward</label>
+                      <input
+                        type="number"
+                        value={editFormData.segmentPermissions[expandedSegment].exposureCarryForward || 1}
+                        onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'exposureCarryForward', Number(e.target.value))}
+                        className="w-full bg-dark-800 border border-dark-600 rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Option Buy & Sell Settings */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Option Buy */}
+                    <div className="bg-dark-800 rounded-lg p-3 border border-green-900/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-medium text-green-400">Option Buy</h5>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              fraction: !editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionBuy?.fraction ? 'Fraction On' : 'Fraction Off'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              allowed: !editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed
+                                ? 'bg-green-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionBuy?.allowed ? 'Allowed' : 'Blocked'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                          <select
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.commissionType || 'PER_LOT'}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              commissionType: e.target.value
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          >
+                            <option value="PER_LOT">Per Lot</option>
+                            <option value="PER_TRADE">Per Trade</option>
+                            <option value="PER_CRORE">Per Crore</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.commission || 0}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              commission: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.strikeSelection || 50}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              strikeSelection: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionBuy?.maxExchangeLots || 100}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionBuy', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionBuy,
+                              maxExchangeLots: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Option Sell */}
+                    <div className="bg-dark-800 rounded-lg p-3 border border-red-900/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-medium text-red-400">Option Sell</h5>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              fraction: !editFormData.segmentPermissions[expandedSegment].optionSell?.fraction
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionSell?.fraction
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionSell?.fraction ? 'Fraction On' : 'Fraction Off'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              allowed: !editFormData.segmentPermissions[expandedSegment].optionSell?.allowed
+                            })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              editFormData.segmentPermissions[expandedSegment].optionSell?.allowed
+                                ? 'bg-green-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {editFormData.segmentPermissions[expandedSegment].optionSell?.allowed ? 'Allowed' : 'Blocked'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission Type</label>
+                          <select
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.commissionType || 'PER_LOT'}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              commissionType: e.target.value
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          >
+                            <option value="PER_LOT">Per Lot</option>
+                            <option value="PER_TRADE">Per Trade</option>
+                            <option value="PER_CRORE">Per Crore</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Commission (₹)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.commission || 0}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              commission: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Strike Selection (±)</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.strikeSelection || 50}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              strikeSelection: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Max Exchange Lots</label>
+                          <input
+                            type="number"
+                            value={editFormData.segmentPermissions[expandedSegment].optionSell?.maxExchangeLots || 100}
+                            onChange={(e) => handleEditSegmentPermissionChange(expandedSegment, 'optionSell', {
+                              ...editFormData.segmentPermissions[expandedSegment].optionSell,
+                              maxExchangeLots: Number(e.target.value)
+                            })}
+                            className="w-full bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Script Settings */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-purple-400 mb-3">Script Settings</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {segmentOptions.map(segment => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => {
+                      setSelectedScriptSegment(selectedScriptSegment === segment ? null : segment);
+                      setSelectedScript(null);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      selectedScriptSegment === segment
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                    }`}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+
+              {/* Symbol List */}
+              {selectedScriptSegment && (
+                <div className="bg-dark-700 rounded-lg p-4 border border-dark-600">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-yellow-400">{selectedScriptSegment} Symbols</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const newScriptSettings = { ...editFormData.scriptSettings };
+                          symbols.forEach(symbol => {
+                            if (!newScriptSettings[symbol]) {
+                              newScriptSettings[symbol] = {
+                                segment: selectedScriptSegment,
+                                settingType: 'LOT',
+                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                              };
+                            }
+                          });
+                          setEditFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                        }}
+                        className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const newScriptSettings = { ...editFormData.scriptSettings };
+                          symbols.forEach(symbol => {
+                            delete newScriptSettings[symbol];
+                          });
+                          setEditFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                          setSelectedScript(null);
+                        }}
+                        className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs font-medium"
+                      >
+                        Unselect All
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {(segmentSymbols[selectedScriptSegment] || []).map(symbol => (
+                      <button
+                        key={symbol}
+                        type="button"
+                        onClick={() => {
+                          if (!editFormData.scriptSettings?.[symbol]) {
+                            setEditFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [symbol]: {
+                                  segment: selectedScriptSegment,
+                                  settingType: 'LOT',
+                                  lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                }
+                              }
+                            }));
+                          }
+                          setSelectedScript(symbol);
+                        }}
+                        className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                          selectedScript === symbol
+                            ? 'bg-yellow-600 text-white'
+                            : editFormData.scriptSettings?.[symbol]
+                              ? 'bg-purple-600/30 text-purple-400 border border-purple-600'
+                              : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                        }`}
+                      >
+                        {symbol}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Selected Symbol Settings */}
+                  {selectedScript && editFormData.scriptSettings?.[selectedScript] && (
+                    <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-yellow-400">{selectedScript} Settings</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updatedScripts = { ...editFormData.scriptSettings };
+                            delete updatedScripts[selectedScript];
+                            setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
+                            setSelectedScript(null);
+                          }}
+                          className="text-red-400 hover:text-red-300 text-xs"
+                        >
+                          Reset to Default
+                        </button>
+                      </div>
+                      
+                      {/* Setting Type Selection */}
+                      <div className="mb-4">
+                        <label className="block text-xs text-gray-400 font-medium mb-2">Setting Type</label>
+                        <div className="flex flex-wrap gap-2">
+                          {['LOT', 'QUANTITY', 'FIXED_MARGIN', 'BROKERAGE', 'SPREAD', 'BLOCK'].map(type => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    settingType: type
+                                  }
+                                }
+                              }))}
+                              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                                (editFormData.scriptSettings[selectedScript]?.settingType || 'LOT') === type
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                              }`}
+                            >
+                              {type === 'LOT' ? 'Lot' : type === 'QUANTITY' ? 'Quantity' : type === 'FIXED_MARGIN' ? 'Fixed Margin' : type === 'BROKERAGE' ? 'Brokerage' : type === 'SPREAD' ? 'Spread' : 'Block'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Lot Settings */}
+                      {(editFormData.scriptSettings[selectedScript]?.settingType || 'LOT') === 'LOT' && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Max Lots</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.maxLots || 50}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, maxLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Min Lots</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.minLots || 1}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, minLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Per Order</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.lotSettings?.perOrderLots || 10}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    lotSettings: { ...prev.scriptSettings[selectedScript]?.lotSettings, perOrderLots: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Quantity Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'QUANTITY' && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Max Qty</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.maxQuantity || 1000}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, maxQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Min Qty</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.minQuantity || 1}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, minQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Per Order</label>
+                            <input
+                              type="number"
+                              value={editFormData.scriptSettings[selectedScript]?.quantitySettings?.perOrderQuantity || 100}
+                              onChange={(e) => setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [selectedScript]: {
+                                    ...prev.scriptSettings[selectedScript],
+                                    quantitySettings: { ...prev.scriptSettings[selectedScript]?.quantitySettings, perOrderQuantity: Number(e.target.value) }
+                                  }
+                                }
+                              }))}
+                              className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Block Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BLOCK' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs text-gray-500">Block Future</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      block: { ...prev.scriptSettings[selectedScript]?.block, future: !prev.scriptSettings[selectedScript]?.block?.future }
+                                    }
+                                  }
+                                }))}
+                                className={`px-3 py-1 rounded text-xs font-medium ${
+                                  editFormData.scriptSettings[selectedScript]?.block?.future
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-green-600 text-white'
+                                }`}
+                              >
+                                {editFormData.scriptSettings[selectedScript]?.block?.future ? 'Yes' : 'No'}
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs text-gray-500">Block Option</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      block: { ...prev.scriptSettings[selectedScript]?.block, option: !prev.scriptSettings[selectedScript]?.block?.option }
+                                    }
+                                  }
+                                }))}
+                                className={`px-3 py-1 rounded text-xs font-medium ${
+                                  editFormData.scriptSettings[selectedScript]?.block?.option
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-green-600 text-white'
+                                }`}
+                              >
+                                {editFormData.scriptSettings[selectedScript]?.block?.option ? 'Yes' : 'No'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Save Button */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  setSelectedUser(null);
+                  setEditFormData(null);
+                }}
+                className="flex-1 bg-dark-600 hover:bg-dark-500 text-white py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveUserSettings}
+                disabled={saving}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {saving ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Notification Modal */}
+      {showNotificationModal && (
+        <SendNotificationModal 
+          onClose={() => setShowNotificationModal(false)}
+          token={admin.token}
+          users={users}
+          admins={[]}
+          isSuperAdmin={false}
+        />
+      )}
     </div>
   );
 };
 
 const CreateUserModal = ({ onClose, onSuccess, token }) => {
   const [formData, setFormData] = useState({
-    username: '', email: '', password: '', fullName: '', phone: ''
+    username: '', email: '', password: '', fullName: '', phone: '',
+    isActive: true, isReadOnly: false
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -5766,6 +9237,39 @@ const CreateUserModal = ({ onClose, onSuccess, token }) => {
                 className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 focus:outline-none focus:border-green-500"
               />
             </div>
+
+            {/* Account Controls */}
+            <div className="border-t border-dark-600 pt-4 mt-4">
+              <label className="block text-sm text-gray-400 mb-2">Account Controls</label>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <span className="text-sm font-medium">Account Active</span>
+                    <p className="text-xs text-gray-500">If disabled, user cannot login</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
+                    className={`w-12 h-6 rounded-full transition-colors ${formData.isActive ? 'bg-green-600' : 'bg-dark-600'}`}
+                  >
+                    <div className={`w-5 h-5 bg-white rounded-full transition-transform ${formData.isActive ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <span className="text-sm font-medium">Read Only Mode</span>
+                    <p className="text-xs text-gray-500">User can only view & close trades, cannot open new</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, isReadOnly: !formData.isReadOnly })}
+                    className={`w-12 h-6 rounded-full transition-colors ${formData.isReadOnly ? 'bg-orange-600' : 'bg-dark-600'}`}
+                  >
+                    <div className={`w-5 h-5 bg-white rounded-full transition-transform ${formData.isReadOnly ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-3 mt-6">
@@ -5796,7 +9300,8 @@ const EditUserModal = ({ user, onClose, onSuccess, token }) => {
     email: user.email,
     fullName: user.fullName || '',
     phone: user.phone || '',
-    isActive: user.isActive
+    isActive: user.isActive,
+    isReadOnly: user.isReadOnly || false
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -5873,15 +9378,38 @@ const EditUserModal = ({ user, onClose, onSuccess, token }) => {
                 className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 focus:outline-none focus:border-green-500"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="isActive"
-                checked={formData.isActive}
-                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                className="w-4 h-4"
-              />
-              <label htmlFor="isActive" className="text-sm text-gray-400">Active Account</label>
+
+            {/* Account Controls */}
+            <div className="border-t border-dark-600 pt-4 mt-4">
+              <label className="block text-sm text-gray-400 mb-2">Account Controls</label>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <span className="text-sm font-medium">Account Active</span>
+                    <p className="text-xs text-gray-500">If disabled, user cannot login</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
+                    className={`w-12 h-6 rounded-full transition-colors ${formData.isActive ? 'bg-green-600' : 'bg-dark-600'}`}
+                  >
+                    <div className={`w-5 h-5 bg-white rounded-full transition-transform ${formData.isActive ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <span className="text-sm font-medium">Read Only Mode</span>
+                    <p className="text-xs text-gray-500">User can only view & close trades, cannot open new</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, isReadOnly: !formData.isReadOnly })}
+                    className={`w-12 h-6 rounded-full transition-colors ${formData.isReadOnly ? 'bg-orange-600' : 'bg-dark-600'}`}
+                  >
+                    <div className={`w-5 h-5 bg-white rounded-full transition-transform ${formData.isReadOnly ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </label>
+              </div>
             </div>
           </div>
 

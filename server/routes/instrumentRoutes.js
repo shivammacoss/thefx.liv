@@ -884,4 +884,39 @@ router.post('/websocket/subscribe', protectAdmin, async (req, res) => {
   }
 });
 
+// Get symbols grouped by segment for script settings
+router.get('/by-segment', protectAdmin, async (req, res) => {
+  try {
+    // Map segment names to database segment/category values
+    const segmentMapping = {
+      MCX: { segment: 'MCX' },
+      NSEINDEX: { category: { $in: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'INDICES'] } },
+      NSESTOCK: { category: 'STOCKS' },
+      BSE: { exchange: 'BSE' },
+      EQ: { segment: 'EQUITY', instrumentType: 'STOCK' }
+    };
+    
+    const result = {};
+    
+    for (const [segmentName, query] of Object.entries(segmentMapping)) {
+      const instruments = await Instrument.find({ 
+        isEnabled: true,
+        ...query 
+      })
+        .select('symbol name')
+        .sort({ sortOrder: 1, symbol: 1 })
+        .limit(100);
+      
+      // Get unique symbols
+      const symbols = [...new Set(instruments.map(i => i.symbol))];
+      result[segmentName] = symbols;
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching symbols by segment:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

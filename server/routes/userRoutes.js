@@ -86,7 +86,7 @@ router.post('/login', async (req, res) => {
     }
 
     if (!user.isActive) {
-      return res.status(401).json({ message: 'Account is deactivated' });
+      return res.status(401).json({ message: 'Your account is not active. Please contact your admin.' });
     }
 
     if (await user.comparePassword(password)) {
@@ -98,6 +98,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         wallet: user.wallet,
         marginAvailable: user.marginAvailable,
+        isReadOnly: user.isReadOnly || false,
         token: generateToken(user._id)
       });
     } else {

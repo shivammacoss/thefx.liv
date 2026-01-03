@@ -18,6 +18,7 @@ import binanceRoutes from './routes/binanceRoutes.js';
 import zerodhaRoutes, { setSocketIO } from './routes/zerodhaRoutes.js';
 import { initZerodhaWebSocket } from './services/zerodhaWebSocket.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +76,7 @@ app.use('/api/binance', binanceRoutes);
 app.use('/api/zerodha', zerodhaRoutes);
 app.use('/auth/zerodha', zerodhaRoutes); // Alias for Kite Connect redirect URL
 app.use('/api/upload', uploadRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

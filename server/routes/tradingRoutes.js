@@ -25,6 +25,11 @@ const protect = async (req, res, next) => {
 // Place order
 router.post('/order', protect, async (req, res) => {
   try {
+    // Check if user is in read-only mode
+    if (req.user.isReadOnly) {
+      return res.status(403).json({ message: 'Your account is in read-only mode. You can only view and close existing trades.' });
+    }
+    
     console.log('Order request:', req.body);
     const result = await TradingService.placeOrder(req.user._id, req.body);
     console.log('Order result:', result.success ? 'Success' : 'Failed');

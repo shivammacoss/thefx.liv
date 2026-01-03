@@ -222,7 +222,7 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
       // Toggle settings
       isActivated, isReadOnly, isDemo, intradaySquare, blockLimitAboveBelowHighLow, blockLimitBetweenHighLow,
       // Segment permissions
-      allowedSegments, segmentPermissions
+      allowedSegments, segmentPermissions, scriptSettings
     } = req.body;
     
     if (!username || !email || !password) {
@@ -274,15 +274,16 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
         blockLimitAboveBelowHighLow: blockLimitAboveBelowHighLow || false,
         blockLimitBetweenHighLow: blockLimitBetweenHighLow || false
       },
-      // Segment permissions
+      // Segment permissions with detailed settings
       segmentPermissions: segmentPermissions || {
-        showMCX: true, showMCXOptBuy: true, showMCXOptSell: true, showMCXOpt: true,
-        showNSE: true, showIDXNSE: true, showIDXOptBuy: true, showIDXOptSell: true, showIDXOpt: true,
-        showSTKOptBuy: true, showSTKOptSell: true, showSTKOpt: true, showSTKNSE: true, showSTKEQ: true,
-        showBSEOptBuy: true, showBSEOptSell: true, showBSEOpt: true, showIDXBSE: true,
-        showCRYPTO: false, showFOREX: false, showCOMEX: false, showGLOBALINDEX: false
+        MCX: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+        NSEINDEX: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+        NSESTOCK: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+        BSE: { enabled: false, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+        EQ: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } }
       },
-      allowedSegments: allowedSegments || ['NSE', 'MCX', 'EQ']
+      // Global Script Settings - applies to all segments
+      scriptSettings: scriptSettings || {}
     });
     
     // Update admin stats if assigned to an admin
@@ -301,8 +302,7 @@ router.post('/create-user', protectAdmin, superAdminOnly, async (req, res) => {
         email: user.email,
         adminCode: user.adminCode,
         settings: user.settings,
-        segmentPermissions: user.segmentPermissions,
-        allowedSegments: user.allowedSegments
+        segmentPermissions: user.segmentPermissions
       }
     });
   } catch (error) {
@@ -605,6 +605,88 @@ router.put('/users/:id', protectAdmin, async (req, res) => {
     
     await user.save();
     res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update user segment and script settings (Admin can update their own users)
+router.put('/users/:id/settings', protectAdmin, async (req, res) => {
+  try {
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const { segmentPermissions, scriptSettings } = req.body;
+    
+    if (segmentPermissions) {
+      user.segmentPermissions = segmentPermissions;
+    }
+    
+    if (scriptSettings) {
+      user.scriptSettings = scriptSettings;
+    }
+    
+    await user.save();
+    res.json({ message: 'User settings updated successfully', user });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Copy user segment and script settings to another user (Admin can copy between their own users)
+router.post('/users/:id/copy-settings', protectAdmin, async (req, res) => {
+  try {
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const targetUser = await User.findOne(query);
+    
+    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
+    
+    const { sourceUserId, segmentPermissions, scriptSettings } = req.body;
+    
+    if (!sourceUserId) {
+      return res.status(400).json({ message: 'Source user ID is required' });
+    }
+    
+    const sourceQuery = applyAdminFilter(req, { _id: sourceUserId });
+    const sourceUser = await User.findOne(sourceQuery);
+    if (!sourceUser) return res.status(404).json({ message: 'Source user not found' });
+    
+    // Copy segment permissions
+    if (segmentPermissions) {
+      targetUser.segmentPermissions = segmentPermissions;
+    }
+    
+    // Copy script settings
+    if (scriptSettings) {
+      targetUser.scriptSettings = scriptSettings;
+    }
+    
+    await targetUser.save();
+    res.json({ message: 'Settings copied successfully', user: targetUser });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update user password (Admin/Super Admin)
+router.put('/users/:id/password', protectAdmin, async (req, res) => {
+  try {
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    }
+    
+    user.password = password;
+    await user.save();
+    
+    res.json({ message: 'Password updated successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1512,6 +1594,61 @@ router.get('/user-transactions-summary', protectAdmin, async (req, res) => {
     ]);
     
     res.json({ ledger: userLedger, summary });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update user segment and script settings (Super Admin only)
+router.put('/users/:id/settings', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const { segmentPermissions, scriptSettings } = req.body;
+    
+    if (segmentPermissions) {
+      user.segmentPermissions = segmentPermissions;
+    }
+    
+    if (scriptSettings) {
+      user.scriptSettings = scriptSettings;
+    }
+    
+    await user.save();
+    res.json({ message: 'User settings updated successfully', user });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Copy user segment and script settings to another user (Super Admin only)
+router.post('/users/:id/copy-settings', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
+    
+    const { sourceUserId, segmentPermissions, scriptSettings } = req.body;
+    
+    if (!sourceUserId) {
+      return res.status(400).json({ message: 'Source user ID is required' });
+    }
+    
+    const sourceUser = await User.findById(sourceUserId);
+    if (!sourceUser) return res.status(404).json({ message: 'Source user not found' });
+    
+    // Copy segment permissions
+    if (segmentPermissions) {
+      targetUser.segmentPermissions = segmentPermissions;
+    }
+    
+    // Copy script settings
+    if (scriptSettings) {
+      targetUser.scriptSettings = scriptSettings;
+    }
+    
+    await targetUser.save();
+    res.json({ message: 'Settings copied successfully', user: targetUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

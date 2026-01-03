@@ -3352,7 +3352,7 @@ const MobileProfilePanel = ({ user, walletData, onLogout }) => {
 const NotificationsModal = ({ onClose, user }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'trades', 'funds'
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'trades', 'funds', 'announcements'
 
   useEffect(() => {
     fetchNotifications();
@@ -3364,10 +3364,11 @@ const NotificationsModal = ({ onClose, user }) => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
-      // Fetch trades (closed) and fund requests
-      const [tradesRes, fundsRes] = await Promise.all([
+      // Fetch trades (closed), fund requests, and admin notifications
+      const [tradesRes, fundsRes, announcementsRes] = await Promise.all([
         axios.get('/api/trading/history?limit=20', { headers }),
-        axios.get('/api/user-funds/my-requests', { headers }).catch(() => ({ data: [] }))
+        axios.get('/api/user-funds/my-requests', { headers }).catch(() => ({ data: [] })),
+        axios.get('/api/notifications/user', { headers }).catch(() => ({ data: [] }))
       ]);
       
       // Convert to notifications format
@@ -3392,9 +3393,21 @@ const NotificationsModal = ({ onClose, user }) => {
         icon: fund.type === 'DEPOSIT' ? '💰' : '💸',
         isDeposit: fund.type === 'DEPOSIT'
       }));
+
+      const announcementNotifications = (announcementsRes.data || []).map(notif => ({
+        id: notif._id,
+        type: 'announcement',
+        title: notif.title,
+        subject: notif.subject,
+        message: notif.description,
+        image: notif.image,
+        time: new Date(notif.createdAt),
+        icon: '📢',
+        isRead: notif.isRead
+      }));
       
       // Combine and sort by time
-      const allNotifications = [...tradeNotifications, ...fundNotifications]
+      const allNotifications = [...tradeNotifications, ...fundNotifications, ...announcementNotifications]
         .sort((a, b) => b.time - a.time);
       
       setNotifications(allNotifications);
@@ -3405,10 +3418,24 @@ const NotificationsModal = ({ onClose, user }) => {
     }
   };
 
+  const markAsRead = async (notifId) => {
+    try {
+      await axios.put(`/api/notifications/${notifId}/read`, {}, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      setNotifications(prev => prev.map(n => 
+        n.id === notifId ? { ...n, isRead: true } : n
+      ));
+    } catch (err) {
+      console.error('Error marking notification as read:', err);
+    }
+  };
+
   const filteredNotifications = notifications.filter(n => {
     if (activeFilter === 'all') return true;
     if (activeFilter === 'trades') return n.type === 'trade';
     if (activeFilter === 'funds') return n.type === 'fund';
+    if (activeFilter === 'announcements') return n.type === 'announcement';
     return true;
   });
 
@@ -3455,6 +3482,7 @@ const NotificationsModal = ({ onClose, user }) => {
         <div className="flex border-b border-dark-600">
           {[
             { id: 'all', label: 'All' },
+            { id: 'announcements', label: 'Announcements' },
             { id: 'trades', label: 'Trades' },
             { id: 'funds', label: 'Funds' }
           ].map(filter => (
@@ -3482,25 +3510,39 @@ const NotificationsModal = ({ onClose, user }) => {
           ) : (
             <div className="divide-y divide-dark-700">
               {filteredNotifications.map(notif => (
-                <div key={notif.id} className="p-4 hover:bg-dark-700/50">
+                <div 
+                  key={notif.id} 
+                  className={`p-4 hover:bg-dark-700/50 ${notif.type === 'announcement' && !notif.isRead ? 'bg-orange-900/10 border-l-2 border-orange-500' : ''}`}
+                  onClick={() => notif.type === 'announcement' && !notif.isRead && markAsRead(notif.id)}
+                >
                   <div className="flex items-start gap-3">
                     <span className="text-2xl">{notif.icon}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <p className="font-medium text-sm">{notif.title}</p>
+                        <p className={`font-medium text-sm ${notif.type === 'announcement' && !notif.isRead ? 'text-orange-400' : ''}`}>{notif.title}</p>
                         <span className="text-xs text-gray-500">{formatTime(notif.time)}</span>
                       </div>
+                      {notif.type === 'announcement' && notif.subject && (
+                        <p className="text-sm text-gray-300 mt-0.5 font-medium">{notif.subject}</p>
+                      )}
                       <p className="text-sm text-gray-400 mt-0.5">{notif.message}</p>
+                      {notif.type === 'announcement' && notif.image && (
+                        <img src={notif.image} alt="Notification" className="mt-2 rounded-lg max-h-32 object-cover" />
+                      )}
                       <div className="flex items-center justify-between mt-1">
                         {notif.type === 'trade' ? (
                           <span className={`text-sm font-medium ${notif.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             P&L: {notif.pnl >= 0 ? '+' : ''}₹{notif.pnl.toFixed(2)}
                           </span>
-                        ) : (
+                        ) : notif.type === 'fund' ? (
                           <span className={`text-xs px-2 py-0.5 rounded ${getStatusColor(notif.status)} bg-dark-600`}>
                             {notif.status}
                           </span>
-                        )}
+                        ) : notif.type === 'announcement' ? (
+                          <span className={`text-xs px-2 py-0.5 rounded ${notif.isRead ? 'text-gray-500 bg-dark-600' : 'text-orange-400 bg-orange-900/30'}`}>
+                            {notif.isRead ? 'Read' : 'New'}
+                          </span>
+                        ) : null}
                         {notif.type === 'trade' && (
                           <span className={`text-xs ${getStatusColor(notif.status)}`}>
                             {notif.status}

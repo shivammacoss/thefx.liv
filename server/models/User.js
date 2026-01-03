@@ -244,39 +244,61 @@ const userSchema = new mongoose.Schema({
     }
   },
   
-  // Segment Permissions - Which segments user can trade
+  // Segment Permissions - Detailed settings for each segment
   segmentPermissions: {
-    // MCX
-    showMCX: { type: Boolean, default: true },
-    showMCXOptBuy: { type: Boolean, default: true },
-    showMCXOptSell: { type: Boolean, default: true },
-    showMCXOpt: { type: Boolean, default: true },
-    
-    // NSE
-    showNSE: { type: Boolean, default: true },
-    showIDXNSE: { type: Boolean, default: true },
-    showIDXOptBuy: { type: Boolean, default: true },
-    showIDXOptSell: { type: Boolean, default: true },
-    showIDXOpt: { type: Boolean, default: true },
-    
-    // Stock Options
-    showSTKOptBuy: { type: Boolean, default: true },
-    showSTKOptSell: { type: Boolean, default: true },
-    showSTKOpt: { type: Boolean, default: true },
-    showSTKNSE: { type: Boolean, default: true },
-    showSTKEQ: { type: Boolean, default: true },
-    
-    // BSE
-    showBSEOptBuy: { type: Boolean, default: true },
-    showBSEOptSell: { type: Boolean, default: true },
-    showBSEOpt: { type: Boolean, default: true },
-    showIDXBSE: { type: Boolean, default: true },
-    
-    // Others
-    showCRYPTO: { type: Boolean, default: false },
-    showFOREX: { type: Boolean, default: false },
-    showCOMEX: { type: Boolean, default: false },
-    showGLOBALINDEX: { type: Boolean, default: false }
+    type: Map,
+    of: {
+      enabled: { type: Boolean, default: false },
+      maxExchangeLots: { type: Number, default: 100 },
+      commissionType: { type: String, enum: ['PER_LOT', 'PER_TRADE', 'PER_CRORE'], default: 'PER_LOT' },
+      commissionLot: { type: Number, default: 0 },
+      maxLots: { type: Number, default: 50 },
+      minLots: { type: Number, default: 1 },
+      orderLots: { type: Number, default: 10 },
+      exposureIntraday: { type: Number, default: 1 },
+      exposureCarryForward: { type: Number, default: 1 },
+      // Option Buy Settings
+      optionBuy: {
+        allowed: { type: Boolean, default: true },
+        commissionType: { type: String, enum: ['PER_LOT', 'PER_TRADE', 'PER_CRORE'], default: 'PER_LOT' },
+        commission: { type: Number, default: 0 },
+        strikeSelection: { type: Number, default: 50 }, // Number of strikes up/down from ATM
+        maxExchangeLots: { type: Number, default: 100 }
+      },
+      // Option Sell Settings
+      optionSell: {
+        allowed: { type: Boolean, default: true },
+        commissionType: { type: String, enum: ['PER_LOT', 'PER_TRADE', 'PER_CRORE'], default: 'PER_LOT' },
+        commission: { type: Number, default: 0 },
+        strikeSelection: { type: Number, default: 50 }, // Number of strikes up/down from ATM
+        maxExchangeLots: { type: Number, default: 100 }
+      }
+    },
+    default: {
+      MCX: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+      NSEINDEX: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+      NSESTOCK: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+      BSE: { enabled: false, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } },
+      EQ: { enabled: true, maxExchangeLots: 100, commissionType: 'PER_LOT', commissionLot: 0, maxLots: 50, minLots: 1, orderLots: 10, exposureIntraday: 1, exposureCarryForward: 1, optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }, optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 } }
+    }
+  },
+  
+  // Global Script Settings - Override segment settings for specific scripts (applies to all segments)
+  scriptSettings: {
+    type: Map,
+    of: {
+      lotSettings: {
+        maxLots: { type: Number, default: 50 },
+        minLots: { type: Number, default: 1 },
+        perOrderLots: { type: Number, default: 10 }
+      },
+      quantitySettings: {
+        maxQuantity: { type: Number, default: 1000 },
+        minQuantity: { type: Number, default: 1 },
+        perOrderQuantity: { type: Number, default: 100 }
+      }
+    },
+    default: {}
   },
   
   // Allowed Segments (simplified list)
