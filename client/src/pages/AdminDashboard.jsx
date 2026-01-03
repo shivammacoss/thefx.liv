@@ -51,6 +51,7 @@ const AdminDashboard = () => {
     { path: '/admin/admins', icon: Shield, label: 'Admin Management' },
     { path: '/admin/all-users', icon: Users, label: 'All Users' },
     { path: '/admin/all-trades', icon: FileText, label: 'All User Trades' },
+    { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
     { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
     { path: '/admin/instruments', icon: TrendingUp, label: 'Instruments' },
     { path: '/admin/lot-settings', icon: Settings, label: 'Lot Management' },
@@ -189,6 +190,7 @@ const AdminDashboard = () => {
           {isSuperAdmin && <Route path="admins/*" element={<AdminManagement />} />}
           {isSuperAdmin && <Route path="all-users" element={<AllUsersManagement />} />}
           {isSuperAdmin && <Route path="all-trades" element={<SuperAdminAllTrades />} />}
+          {isSuperAdmin && <Route path="all-fund-requests" element={<SuperAdminAllFundRequests />} />}
           {isSuperAdmin && <Route path="create-user" element={<SuperAdminCreateUser />} />}
           {isSuperAdmin && <Route path="instruments" element={<InstrumentManagement />} />}
           {isSuperAdmin && <Route path="lot-settings" element={<LotManagement />} />}
@@ -5101,6 +5103,285 @@ const SuperAdminAllTrades = () => {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Super Admin All Fund Requests - View and approve/reject all user fund requests
+const SuperAdminAllFundRequests = () => {
+  const { admin } = useAuth();
+  const [requests, setRequests] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('PENDING');
+  const [selectedAdmin, setSelectedAdmin] = useState('');
+  const [actionLoading, setActionLoading] = useState(null);
+
+  useEffect(() => {
+    fetchAdmins();
+  }, []);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [filter, selectedAdmin]);
+
+  const fetchAdmins = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/admins', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setAdmins(data);
+    } catch (error) {
+      console.error('Error fetching admins:', error);
+    }
+  };
+
+  const fetchRequests = async () => {
+    try {
+      setLoading(true);
+      let url = '/api/admin/manage/all-fund-requests';
+      const params = new URLSearchParams();
+      // API expects 'ALL' for no filter, or specific status
+      if (filter) {
+        params.append('status', filter);
+      } else {
+        params.append('status', 'ALL');
+      }
+      if (params.toString()) url += `?${params.toString()}`;
+      
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      // Handle both array response and {requests, stats} object response
+      const requestsData = Array.isArray(data) ? data : (data.requests || []);
+      // Filter by adminCode on frontend if needed (since existing API doesn't support it)
+      const filteredRequests = selectedAdmin 
+        ? requestsData.filter(r => r.adminCode === selectedAdmin)
+        : requestsData;
+      setRequests(filteredRequests);
+    } catch (error) {
+      console.error('Error fetching fund requests:', error);
+      setRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (requestId) => {
+    if (!confirm('Approve this fund request? This will deduct from the admin wallet.')) return;
+    
+    setActionLoading(requestId);
+    try {
+      await axios.post(`/api/admin/manage/all-fund-requests/${requestId}/approve`, {}, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchRequests();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error approving request');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReject = async (requestId) => {
+    const remarks = prompt('Enter rejection reason (optional):');
+    if (remarks === null) return;
+    
+    setActionLoading(requestId);
+    try {
+      await axios.post(`/api/admin/manage/all-fund-requests/${requestId}/reject`, { remarks }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchRequests();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error rejecting request');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    const styles = {
+      PENDING: 'bg-yellow-500/20 text-yellow-400',
+      APPROVED: 'bg-green-500/20 text-green-400',
+      REJECTED: 'bg-red-500/20 text-red-400',
+      CANCELLED: 'bg-gray-500/20 text-gray-400'
+    };
+    return <span className={`px-2 py-0.5 rounded text-xs ${styles[status] || styles.PENDING}`}>{status}</span>;
+  };
+
+  const getTypeBadge = (type) => {
+    return type === 'DEPOSIT' 
+      ? <span className="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400">DEPOSIT</span>
+      : <span className="px-2 py-0.5 rounded text-xs bg-red-500/20 text-red-400">WITHDRAWAL</span>;
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <h1 className="text-xl md:text-2xl font-bold">All User Fund Requests</h1>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 mb-6">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Filter by Admin</label>
+          <select
+            value={selectedAdmin}
+            onChange={(e) => setSelectedAdmin(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+          >
+            <option value="">All Admins</option>
+            {admins.map(adm => (
+              <option key={adm._id} value={adm.adminCode}>
+                {adm.name || adm.username} ({adm.adminCode})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2 items-end">
+          <button onClick={() => setFilter('')} className={`px-4 py-2 rounded ${!filter ? 'bg-purple-600' : 'bg-dark-700'}`}>All</button>
+          <button onClick={() => setFilter('PENDING')} className={`px-4 py-2 rounded ${filter === 'PENDING' ? 'bg-yellow-600' : 'bg-dark-700'}`}>Pending</button>
+          <button onClick={() => setFilter('APPROVED')} className={`px-4 py-2 rounded ${filter === 'APPROVED' ? 'bg-green-600' : 'bg-dark-700'}`}>Approved</button>
+          <button onClick={() => setFilter('REJECTED')} className={`px-4 py-2 rounded ${filter === 'REJECTED' ? 'bg-red-600' : 'bg-dark-700'}`}>Rejected</button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Requests</div>
+          <div className="text-2xl font-bold">{requests.length}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Pending</div>
+          <div className="text-2xl font-bold text-yellow-400">{requests.filter(r => r.status === 'PENDING').length}</div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Deposit Requests</div>
+          <div className="text-2xl font-bold text-green-400">
+            ₹{requests.filter(r => r.type === 'DEPOSIT').reduce((s, r) => s + r.amount, 0).toLocaleString()}
+          </div>
+        </div>
+        <div className="bg-dark-800 rounded-lg p-4">
+          <div className="text-sm text-gray-400">Total Withdrawal Requests</div>
+          <div className="text-2xl font-bold text-red-400">
+            ₹{requests.filter(r => r.type === 'WITHDRAWAL').reduce((s, r) => s + r.amount, 0).toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">No fund requests found</div>
+      ) : (
+        <>
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {requests.map(req => (
+              <div key={req._id} className="bg-dark-800 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <div className="font-bold">{req.user?.fullName || req.user?.username}</div>
+                    <div className="text-xs text-gray-400">{req.user?.email}</div>
+                  </div>
+                  {getStatusBadge(req.status)}
+                </div>
+                <div className="text-xs text-purple-400 mb-2">Admin: {req.adminCode}</div>
+                <div className="flex justify-between items-center mb-2">
+                  {getTypeBadge(req.type)}
+                  <div className="text-xl font-bold">₹{req.amount.toLocaleString()}</div>
+                </div>
+                <div className="text-xs text-gray-500 mb-2">
+                  {new Date(req.createdAt).toLocaleString()}
+                </div>
+                {req.referenceId && (
+                  <div className="text-xs text-gray-400 mb-2">Ref: {req.referenceId}</div>
+                )}
+                {req.status === 'PENDING' && (
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => handleApprove(req._id)}
+                      disabled={actionLoading === req._id}
+                      className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm disabled:opacity-50"
+                    >
+                      {actionLoading === req._id ? 'Processing...' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={() => handleReject(req._id)}
+                      disabled={actionLoading === req._id}
+                      className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-dark-700">
+                <tr>
+                  <th className="text-left px-4 py-3 text-gray-400">Request ID</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Admin</th>
+                  <th className="text-left px-4 py-3 text-gray-400">User</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Type</th>
+                  <th className="text-right px-4 py-3 text-gray-400">Amount</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Reference</th>
+                  <th className="text-left px-4 py-3 text-gray-400">Date</th>
+                  <th className="text-center px-4 py-3 text-gray-400">Status</th>
+                  <th className="text-center px-4 py-3 text-gray-400">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map(req => (
+                  <tr key={req._id} className="border-t border-dark-600">
+                    <td className="px-4 py-3 font-mono text-xs">{req.requestId}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-purple-400 font-mono text-xs">{req.adminCode}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>{req.user?.fullName || req.user?.username}</div>
+                      <div className="text-xs text-gray-500">{req.user?.email}</div>
+                    </td>
+                    <td className="px-4 py-3">{getTypeBadge(req.type)}</td>
+                    <td className="px-4 py-3 text-right font-bold">₹{req.amount.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs">{req.referenceId || '-'}</td>
+                    <td className="px-4 py-3 text-xs">{new Date(req.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center">{getStatusBadge(req.status)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {req.status === 'PENDING' ? (
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            onClick={() => handleApprove(req._id)}
+                            disabled={actionLoading === req._id}
+                            className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs disabled:opacity-50"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => handleReject(req._id)}
+                            disabled={actionLoading === req._id}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs disabled:opacity-50"
+                          >
+                            ✗
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-500">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

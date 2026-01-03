@@ -338,28 +338,37 @@ router.post('/users/:userId/transfer', protectAdmin, superAdminOnly, async (req,
     
     // Get the old admin to update stats
     const oldAdmin = await Admin.findById(user.admin);
-    
-    // Update user's admin reference
     const oldAdminCode = user.adminCode;
-    user.admin = targetAdmin._id;
-    user.adminCode = targetAdmin.adminCode;
-    await user.save();
+    
+    // Update user's admin reference using updateOne to avoid segmentPermissions validation
+    await User.updateOne(
+      { _id: userId },
+      { $set: { admin: targetAdmin._id, adminCode: targetAdmin.adminCode } }
+    );
     
     // Update old admin stats
     if (oldAdmin) {
-      oldAdmin.stats.totalUsers = Math.max(0, (oldAdmin.stats.totalUsers || 1) - 1);
-      if (user.isActive) {
-        oldAdmin.stats.activeUsers = Math.max(0, (oldAdmin.stats.activeUsers || 1) - 1);
-      }
-      await oldAdmin.save();
+      await Admin.updateOne(
+        { _id: oldAdmin._id },
+        { 
+          $set: { 
+            'stats.totalUsers': Math.max(0, (oldAdmin.stats.totalUsers || 1) - 1),
+            'stats.activeUsers': user.isActive ? Math.max(0, (oldAdmin.stats.activeUsers || 1) - 1) : oldAdmin.stats.activeUsers
+          }
+        }
+      );
     }
     
     // Update new admin stats
-    targetAdmin.stats.totalUsers = (targetAdmin.stats.totalUsers || 0) + 1;
-    if (user.isActive) {
-      targetAdmin.stats.activeUsers = (targetAdmin.stats.activeUsers || 0) + 1;
-    }
-    await targetAdmin.save();
+    await Admin.updateOne(
+      { _id: targetAdmin._id },
+      { 
+        $set: { 
+          'stats.totalUsers': (targetAdmin.stats.totalUsers || 0) + 1,
+          'stats.activeUsers': user.isActive ? (targetAdmin.stats.activeUsers || 0) + 1 : targetAdmin.stats.activeUsers
+        }
+      }
+    );
     
     res.json({ 
       message: 'User transferred successfully',
@@ -702,34 +711,56 @@ router.post('/users/:id/add-funds', protectAdmin, async (req, res) => {
     const user = await User.findOne(query);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
-    // For ADMIN role, check if admin has sufficient balance
-    if (req.admin.role === 'ADMIN') {
+    let userAdmin = null;
+    let newAdminBalance = 0;
+    
+    // Determine which admin's wallet to deduct from
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin: deduct from user's admin wallet
+      userAdmin = await Admin.findOne({ adminCode: user.adminCode });
+      if (!userAdmin) {
+        return res.status(404).json({ message: 'User admin not found' });
+      }
+      if (userAdmin.wallet.balance < amount) {
+        return res.status(400).json({ 
+          message: `Insufficient balance in admin ${userAdmin.name || userAdmin.username}'s wallet. Available: ₹${userAdmin.wallet.balance}` 
+        });
+      }
+      newAdminBalance = userAdmin.wallet.balance - amount;
+    } else {
+      // Regular Admin: deduct from their own wallet
       if (req.admin.wallet.balance < amount) {
         return res.status(400).json({ message: 'Insufficient admin wallet balance' });
       }
-      
-      // Deduct from admin wallet
-      req.admin.wallet.balance -= amount;
-      await req.admin.save();
-      
-      // Create admin ledger entry
-      await WalletLedger.create({
-        ownerType: 'ADMIN',
-        ownerId: req.admin._id,
-        adminCode: req.admin.adminCode,
-        type: 'DEBIT',
-        reason: 'FUND_ADD',
-        amount,
-        balanceAfter: req.admin.wallet.balance,
-        description: `Fund added to user ${user.userId}`,
-        performedBy: req.admin._id
-      });
+      userAdmin = req.admin;
+      newAdminBalance = req.admin.wallet.balance - amount;
     }
     
-    // Add to user wallet
-    user.wallet.cashBalance += amount;
-    user.wallet.balance = user.wallet.cashBalance; // Legacy field
-    await user.save();
+    // Deduct from admin wallet using updateOne
+    await Admin.updateOne(
+      { _id: userAdmin._id },
+      { $set: { 'wallet.balance': newAdminBalance } }
+    );
+    
+    // Create admin ledger entry
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: userAdmin._id,
+      adminCode: userAdmin.adminCode,
+      type: 'DEBIT',
+      reason: 'FUND_ADD',
+      amount,
+      balanceAfter: newAdminBalance,
+      description: `Fund added to user ${user.userId}${req.admin.role === 'SUPER_ADMIN' ? ' by Super Admin' : ''}`,
+      performedBy: req.admin._id
+    });
+    
+    // Add to user wallet using updateOne to avoid segmentPermissions validation
+    const newUserCashBalance = user.wallet.cashBalance + amount;
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+    );
     
     // Create user ledger entry
     await WalletLedger.create({
@@ -739,15 +770,16 @@ router.post('/users/:id/add-funds', protectAdmin, async (req, res) => {
       type: 'CREDIT',
       reason: 'FUND_ADD',
       amount,
-      balanceAfter: user.wallet.cashBalance,
+      balanceAfter: newUserCashBalance,
       description: description || 'Fund added by admin',
       performedBy: req.admin._id
     });
     
     res.json({ 
       message: 'Funds added successfully', 
-      userWallet: user.wallet,
-      adminWallet: req.admin.role === 'ADMIN' ? req.admin.wallet : null
+      userWallet: { ...user.wallet, cashBalance: newUserCashBalance, balance: newUserCashBalance },
+      adminWallet: { balance: newAdminBalance },
+      deductedFromAdmin: userAdmin.adminCode
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -768,15 +800,22 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Insufficient user balance' });
     }
     
-    // Deduct from user wallet
-    user.wallet.cashBalance -= amount;
-    user.wallet.balance = user.wallet.cashBalance;
-    await user.save();
+    // Deduct from user wallet using updateOne to avoid segmentPermissions validation
+    const newUserCashBalance = user.wallet.cashBalance - amount;
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+    );
+    
+    let newAdminBalance = req.admin.wallet.balance;
     
     // For ADMIN role, add back to admin wallet
     if (req.admin.role === 'ADMIN') {
-      req.admin.wallet.balance += amount;
-      await req.admin.save();
+      newAdminBalance = req.admin.wallet.balance + amount;
+      await Admin.updateOne(
+        { _id: req.admin._id },
+        { $set: { 'wallet.balance': newAdminBalance } }
+      );
       
       // Create admin ledger entry
       await WalletLedger.create({
@@ -786,7 +825,7 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
         type: 'CREDIT',
         reason: 'FUND_WITHDRAW',
         amount,
-        balanceAfter: req.admin.wallet.balance,
+        balanceAfter: newAdminBalance,
         description: `Fund deducted from user ${user.userId}`,
         performedBy: req.admin._id
       });
@@ -800,15 +839,15 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
       type: 'DEBIT',
       reason: 'FUND_WITHDRAW',
       amount,
-      balanceAfter: user.wallet.cashBalance,
+      balanceAfter: newUserCashBalance,
       description: description || 'Fund deducted by admin',
       performedBy: req.admin._id
     });
     
     res.json({ 
       message: 'Funds deducted successfully', 
-      userWallet: user.wallet,
-      adminWallet: req.admin.role === 'ADMIN' ? req.admin.wallet : null
+      userWallet: { ...user.wallet, cashBalance: newUserCashBalance, balance: newUserCashBalance },
+      adminWallet: req.admin.role === 'ADMIN' ? { ...req.admin.wallet, balance: newAdminBalance } : null
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -968,6 +1007,9 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
     const user = await User.findById(request.user);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
+    let newUserCashBalance = user.wallet.cashBalance;
+    let newAdminBalance = req.admin.wallet.balance;
+    
     if (request.type === 'DEPOSIT') {
       // For deposits, admin wallet is debited, user wallet is credited
       if (req.admin.role === 'ADMIN') {
@@ -975,8 +1017,11 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
           return res.status(400).json({ message: 'Insufficient admin wallet balance' });
         }
         
-        req.admin.wallet.balance -= request.amount;
-        await req.admin.save();
+        newAdminBalance = req.admin.wallet.balance - request.amount;
+        await Admin.updateOne(
+          { _id: req.admin._id },
+          { $set: { 'wallet.balance': newAdminBalance } }
+        );
         
         await WalletLedger.create({
           ownerType: 'ADMIN',
@@ -985,15 +1030,18 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
           type: 'DEBIT',
           reason: 'FUND_ADD',
           amount: request.amount,
-          balanceAfter: req.admin.wallet.balance,
+          balanceAfter: newAdminBalance,
           reference: { type: 'FundRequest', id: request._id },
           performedBy: req.admin._id
         });
       }
       
-      user.wallet.cashBalance += request.amount;
-      user.wallet.balance = user.wallet.cashBalance;
-      await user.save();
+      // Use updateOne to avoid segmentPermissions validation error
+      newUserCashBalance = user.wallet.cashBalance + request.amount;
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+      );
       
       await WalletLedger.create({
         ownerType: 'USER',
@@ -1002,7 +1050,7 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
         type: 'CREDIT',
         reason: 'FUND_ADD',
         amount: request.amount,
-        balanceAfter: user.wallet.cashBalance,
+        balanceAfter: newUserCashBalance,
         reference: { type: 'FundRequest', id: request._id },
         performedBy: req.admin._id
       });
@@ -1012,9 +1060,12 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
         return res.status(400).json({ message: 'Insufficient user balance' });
       }
       
-      user.wallet.cashBalance -= request.amount;
-      user.wallet.balance = user.wallet.cashBalance;
-      await user.save();
+      // Use updateOne to avoid segmentPermissions validation error
+      newUserCashBalance = user.wallet.cashBalance - request.amount;
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+      );
       
       await WalletLedger.create({
         ownerType: 'USER',
@@ -1023,7 +1074,7 @@ router.post('/fund-requests/:id/approve', protectAdmin, async (req, res) => {
         type: 'DEBIT',
         reason: 'FUND_WITHDRAW',
         amount: request.amount,
-        balanceAfter: user.wallet.cashBalance,
+        balanceAfter: newUserCashBalance,
         reference: { type: 'FundRequest', id: request._id },
         performedBy: req.admin._id
       });
@@ -1691,6 +1742,140 @@ router.get('/user-transactions/download', protectAdmin, async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=user-transactions-${Date.now()}.csv`);
     res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== SUPER ADMIN: FUND REQUEST APPROVE/REJECT ====================
+
+// Super Admin approve fund request (deducts from user's admin wallet)
+router.post('/all-fund-requests/:id/approve', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const request = await FundRequest.findOne({ _id: req.params.id, status: 'PENDING' });
+    
+    if (!request) {
+      return res.status(404).json({ message: 'Fund request not found or already processed' });
+    }
+    
+    const user = await User.findById(request.user);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Find the admin who owns this user
+    const userAdmin = await Admin.findOne({ adminCode: request.adminCode });
+    if (!userAdmin) {
+      return res.status(404).json({ message: 'User admin not found' });
+    }
+    
+    let newUserCashBalance = user.wallet.cashBalance;
+    let newAdminBalance = userAdmin.wallet.balance;
+    
+    if (request.type === 'DEPOSIT') {
+      // Check if admin has sufficient balance
+      if (userAdmin.wallet.balance < request.amount) {
+        return res.status(400).json({ 
+          message: `Insufficient balance in admin ${userAdmin.name || userAdmin.username}'s wallet. Available: ₹${userAdmin.wallet.balance}, Required: ₹${request.amount}` 
+        });
+      }
+      
+      // Debit from admin wallet
+      newAdminBalance = userAdmin.wallet.balance - request.amount;
+      await Admin.updateOne(
+        { _id: userAdmin._id },
+        { $set: { 'wallet.balance': newAdminBalance } }
+      );
+      
+      await WalletLedger.create({
+        ownerType: 'ADMIN',
+        ownerId: userAdmin._id,
+        adminCode: userAdmin.adminCode,
+        type: 'DEBIT',
+        reason: 'FUND_ADD',
+        amount: request.amount,
+        balanceAfter: newAdminBalance,
+        reference: { type: 'FundRequest', id: request._id },
+        performedBy: req.admin._id,
+        description: `Fund approved by Super Admin for user ${user.username}`
+      });
+      
+      // Credit to user wallet - use updateOne to avoid segmentPermissions validation
+      newUserCashBalance = user.wallet.cashBalance + request.amount;
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+      );
+      
+      await WalletLedger.create({
+        ownerType: 'USER',
+        ownerId: user._id,
+        adminCode: user.adminCode,
+        type: 'CREDIT',
+        reason: 'FUND_ADD',
+        amount: request.amount,
+        balanceAfter: newUserCashBalance,
+        reference: { type: 'FundRequest', id: request._id },
+        performedBy: req.admin._id
+      });
+    } else {
+      // For withdrawals, user wallet is debited
+      if (user.wallet.cashBalance < request.amount) {
+        return res.status(400).json({ message: 'Insufficient user balance' });
+      }
+      
+      // Use updateOne to avoid segmentPermissions validation
+      newUserCashBalance = user.wallet.cashBalance - request.amount;
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
+      );
+      
+      await WalletLedger.create({
+        ownerType: 'USER',
+        ownerId: user._id,
+        adminCode: user.adminCode,
+        type: 'DEBIT',
+        reason: 'FUND_WITHDRAW',
+        amount: request.amount,
+        balanceAfter: newUserCashBalance,
+        reference: { type: 'FundRequest', id: request._id },
+        performedBy: req.admin._id
+      });
+    }
+    
+    request.status = 'APPROVED';
+    request.processedBy = req.admin._id;
+    request.processedAt = new Date();
+    request.adminRemarks = req.body.remarks || 'Approved by Super Admin';
+    await request.save();
+    
+    res.json({ 
+      message: 'Fund request approved successfully', 
+      request,
+      adminWalletBalance: newAdminBalance 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Super Admin reject fund request
+router.post('/all-fund-requests/:id/reject', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const request = await FundRequest.findOne({ _id: req.params.id, status: 'PENDING' });
+    
+    if (!request) {
+      return res.status(404).json({ message: 'Fund request not found or already processed' });
+    }
+    
+    request.status = 'REJECTED';
+    request.processedBy = req.admin._id;
+    request.processedAt = new Date();
+    request.adminRemarks = req.body.remarks || 'Rejected by Super Admin';
+    await request.save();
+    
+    res.json({ message: 'Fund request rejected', request });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

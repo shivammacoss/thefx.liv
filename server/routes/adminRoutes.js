@@ -127,10 +127,12 @@ router.get('/me', protectAdmin, async (req, res) => {
   }
 });
 
-// Get all users
+// Get all users (filtered by adminCode for regular admins)
 router.get('/users', protectAdmin, async (req, res) => {
   try {
-    const users = await User.find().select('-password').sort({ createdAt: -1 });
+    // Super Admin sees all users, regular Admin sees only their users
+    const query = req.admin.role === 'SUPER_ADMIN' ? {} : { adminCode: req.admin.adminCode };
+    const users = await User.find(query).select('-password').sort({ createdAt: -1 });
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
