@@ -175,8 +175,8 @@ class TradingService {
     const marginCalc = this.calculateMargin(orderData, user, leverage);
     const marginRequired = marginCalc.marginRequired;
 
-    // Use cashBalance (primary) or balance (legacy) for wallet
-    const walletBalance = user.wallet?.cashBalance || user.wallet?.balance || 0;
+    // Use tradingBalance for trading (dual wallet system)
+    const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
     const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
     const availableBalance = walletBalance - blockedMargin;
 
@@ -248,8 +248,14 @@ class TradingService {
       user.adminCode = adminCode;
       await user.save();
     }
+    // If still no adminCode, use SYSTEM as default for crypto trades
     if (!adminCode) {
-      throw new Error('User not linked to any admin. Please contact support.');
+      if (orderData.isCrypto || orderData.segment === 'CRYPTO' || orderData.exchange === 'BINANCE') {
+        adminCode = 'SYSTEM';
+        console.log('Using SYSTEM adminCode for crypto trade');
+      } else {
+        throw new Error('User not linked to any admin. Please contact support.');
+      }
     }
 
     // Determine if crypto trade
@@ -296,11 +302,9 @@ class TradingService {
       trade.marketPrice = orderData.price; // Store original market price
     }
     
-    // Block margin from balance and deduct commission
+    // Block margin from tradingBalance and deduct commission (dual wallet system)
     // Margin is blocked (reserved), commission is deducted permanently
-    // Update both cashBalance (primary) and balance (legacy) for compatibility
-    user.wallet.cashBalance = (user.wallet.cashBalance || 0) - marginRequired - totalCommission;
-    user.wallet.balance = (user.wallet.balance || 0) - marginRequired - totalCommission;
+    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
     user.wallet.usedMargin = (user.wallet.usedMargin || 0) + marginRequired;
     user.wallet.blocked = (user.wallet.blocked || 0) + marginRequired;
     await user.save();
@@ -426,12 +430,10 @@ class TradingService {
 
     await trade.save();
 
-    // Release blocked margin and add/subtract P&L
-    // Update both primary (cashBalance/usedMargin) and legacy (balance/blocked) fields
+    // Release blocked margin and add/subtract P&L to tradingBalance (dual wallet system)
     user.wallet.usedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
     user.wallet.blocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    user.wallet.cashBalance = (user.wallet.cashBalance || 0) + trade.marginUsed + netPnL; // Return margin + P&L
-    user.wallet.balance = (user.wallet.balance || 0) + trade.marginUsed + netPnL; // Return margin + P&L
+    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL; // Return margin + P&L
     user.wallet.realizedPnL = (user.wallet.realizedPnL || 0) + netPnL; // Track realized P&L
     await user.save();
 
@@ -469,7 +471,7 @@ class TradingService {
       // Margin call check
       const user = await User.findById(trade.user);
       if (user && trade.unrealizedPnL < 0) {
-        const walletBalance = user.wallet?.cashBalance || user.wallet?.balance || 0;
+        const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
         const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
         const availableBalance = walletBalance - blockedMargin;
         if (Math.abs(trade.unrealizedPnL) >= availableBalance) {
@@ -485,7 +487,7 @@ class TradingService {
   // Get positions - optimized with lean() for faster response
   static async getPositions(userId, status = 'OPEN') {
     return Trade.find({ user: userId, status })
-      .select('symbol token pair isCrypto exchange segment instrumentType optionType strike expiry side productType quantity lotSize lots entryPrice currentPrice marketPrice unrealizedPnL marginUsed leverage spread commission status openedAt')
+      .select('userId symbol token pair isCrypto exchange segment instrumentType optionType strike expiry side productType quantity lotSize lots entryPrice currentPrice marketPrice unrealizedPnL marginUsed leverage spread commission status openedAt')
       .sort({ openedAt: -1 })
       .lean();
   }
@@ -493,7 +495,7 @@ class TradingService {
   // Get pending orders - optimized
   static async getPendingOrders(userId) {
     return Trade.find({ user: userId, status: 'PENDING' })
-      .select('symbol exchange segment side productType quantity lots entryPrice limitPrice triggerPrice marginUsed status createdAt')
+      .select('userId symbol exchange segment side productType quantity lots entryPrice limitPrice triggerPrice marginUsed status createdAt')
       .sort({ createdAt: -1 })
       .lean();
   }
@@ -501,7 +503,7 @@ class TradingService {
   // Get trade history - optimized
   static async getTradeHistory(userId, limit = 50) {
     return Trade.find({ user: userId, status: 'CLOSED' })
-      .select('symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason')
+      .select('userId symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason')
       .sort({ closedAt: -1 })
       .limit(limit)
       .lean();
@@ -540,13 +542,13 @@ class TradingService {
     const openPositions = openStats[0]?.count || 0;
     const realizedPnL = closedStats[0]?.realizedPnL || 0;
 
-    // Use cashBalance (primary) or balance (legacy)
-    const walletBalance = user.wallet?.cashBalance || user.wallet?.balance || 0;
+    // Use tradingBalance for trading (dual wallet system)
+    const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
     const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
     
     return {
       balance: walletBalance,
-      cashBalance: walletBalance,
+      tradingBalance: walletBalance,
       blocked: blockedMargin,
       usedMargin: blockedMargin,
       available: walletBalance - blockedMargin,
@@ -568,9 +570,8 @@ class TradingService {
     // Release blocked margin - update both primary and legacy fields
     user.wallet.usedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
     user.wallet.blocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    // Return margin to balance (commission was already deducted, so just return margin)
-    user.wallet.cashBalance = (user.wallet.cashBalance || 0) + trade.marginUsed;
-    user.wallet.balance = (user.wallet.balance || 0) + trade.marginUsed;
+    // Return margin to tradingBalance (commission was already deducted, so just return margin)
+    user.wallet.tradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed;
     await user.save();
 
     trade.status = 'CANCELLED';

@@ -252,35 +252,56 @@ router.post('/withdraw-request', protectUser, async (req, res) => {
   }
 });
 
-// Get wallet info (enhanced)
+// Get wallet info (enhanced with dual wallet system)
 router.get('/wallet', protectUser, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('wallet marginSettings rmsSettings');
     
-    // Calculate available margin
-    const availableMargin = user.wallet.cashBalance 
-      + user.wallet.collateralValue 
-      + Math.max(0, user.wallet.unrealizedPnL)
-      - Math.abs(Math.min(0, user.wallet.unrealizedPnL))
-      - user.wallet.usedMargin;
+    // Dual wallet system - Main Wallet (cashBalance) and Trading Account (tradingBalance)
+    // Handle legacy: if cashBalance is 0 but balance has value, use balance as cashBalance
+    let mainWalletBalance = user.wallet.cashBalance || 0;
+    if (mainWalletBalance === 0 && user.wallet.balance > 0) {
+      mainWalletBalance = user.wallet.balance;
+      // Migrate to cashBalance
+      user.wallet.cashBalance = mainWalletBalance;
+      await user.save();
+    }
+    
+    const tradingBalance = user.wallet.tradingBalance || 0;
+    const usedMargin = user.wallet.usedMargin || 0;
+    
+    // Calculate available margin (for trading)
+    const availableMargin = tradingBalance 
+      + (user.wallet.collateralValue || 0)
+      + Math.max(0, user.wallet.unrealizedPnL || 0)
+      - Math.abs(Math.min(0, user.wallet.unrealizedPnL || 0))
+      - usedMargin;
 
     res.json({
-      // Core wallet fields
-      cashBalance: user.wallet.cashBalance,
-      usedMargin: user.wallet.usedMargin,
-      collateralValue: user.wallet.collateralValue,
-      realizedPnL: user.wallet.realizedPnL,
-      unrealizedPnL: user.wallet.unrealizedPnL,
-      todayRealizedPnL: user.wallet.todayRealizedPnL,
-      todayUnrealizedPnL: user.wallet.todayUnrealizedPnL,
+      // Core wallet fields - Dual Wallet System
+      cashBalance: mainWalletBalance,           // Main Wallet (for deposit/withdraw with admin)
+      tradingBalance: tradingBalance,           // Trading Account (for trading)
+      usedMargin: usedMargin,
+      collateralValue: user.wallet.collateralValue || 0,
+      realizedPnL: user.wallet.realizedPnL || 0,
+      unrealizedPnL: user.wallet.unrealizedPnL || 0,
+      todayRealizedPnL: user.wallet.todayRealizedPnL || 0,
+      todayUnrealizedPnL: user.wallet.todayUnrealizedPnL || 0,
       
       // Calculated fields
       availableMargin,
-      totalBalance: user.wallet.cashBalance + user.wallet.realizedPnL,
+      totalBalance: mainWalletBalance + tradingBalance,
       
       // Legacy fields for backward compatibility
       wallet: {
-        balance: user.wallet.cashBalance,
+        balance: mainWalletBalance,
+        cashBalance: mainWalletBalance,
+        tradingBalance: tradingBalance,
+        usedMargin: usedMargin,
+        blocked: usedMargin,
+        totalDeposited: user.wallet.totalDeposited || 0,
+        totalWithdrawn: user.wallet.totalWithdrawn || 0,
+        totalPnL: user.wallet.realizedPnL || 0,
         transactions: user.wallet.transactions
       },
       marginAvailable: availableMargin,

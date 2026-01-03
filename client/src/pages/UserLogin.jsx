@@ -55,7 +55,7 @@ const UserLogin = () => {
       } else {
         await loginUser(formData.email, formData.password);
       }
-      navigate('/dashboard');
+      navigate('/user/home');
     } catch (err) {
       setError(err.response?.data?.message || 'Something went wrong');
     } finally {

@@ -17,6 +17,7 @@ import instrumentRoutes from './routes/instrumentRoutes.js';
 import binanceRoutes from './routes/binanceRoutes.js';
 import zerodhaRoutes, { setSocketIO } from './routes/zerodhaRoutes.js';
 import { initZerodhaWebSocket } from './services/zerodhaWebSocket.js';
+import { initBinanceWebSocket } from './services/binanceWebSocket.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,6 +44,9 @@ const io = new Server(httpServer, {
 // Initialize Zerodha WebSocket service with Socket.IO
 initZerodhaWebSocket(io);
 setSocketIO(io);
+
+// Initialize Binance WebSocket for real-time crypto data
+initBinanceWebSocket(io);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {

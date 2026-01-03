@@ -95,8 +95,13 @@ const userSchema = new mongoose.Schema({
   },
   // Enhanced Wallet System
   wallet: {
-    // Cash Balance (Free Balance) - Actual deposited money
+    // Cash Balance (Free Balance) - Main wallet where admin deposits funds
     cashBalance: {
+      type: Number,
+      default: 0
+    },
+    // Trading Balance - Funds available for trading (transferred from main wallet)
+    tradingBalance: {
       type: Number,
       default: 0
     },

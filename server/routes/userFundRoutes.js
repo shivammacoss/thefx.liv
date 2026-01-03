@@ -198,4 +198,90 @@ router.get('/my-admin', protectUser, async (req, res) => {
   }
 });
 
+// Internal transfer between main wallet and trading account
+router.post('/internal-transfer', protectUser, async (req, res) => {
+  try {
+    const { amount, direction } = req.body;
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+    
+    if (!['toAccount', 'toWallet'].includes(direction)) {
+      return res.status(400).json({ message: 'Invalid transfer direction' });
+    }
+    
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Dual wallet system - handle legacy balance field
+    // If cashBalance is 0 but balance has value, use balance as the source
+    let mainWalletBalance = user.wallet?.cashBalance || 0;
+    if (mainWalletBalance === 0 && user.wallet?.balance > 0) {
+      // Migrate legacy balance to cashBalance
+      mainWalletBalance = user.wallet.balance;
+      user.wallet.cashBalance = mainWalletBalance;
+    }
+    const tradingBalance = user.wallet?.tradingBalance || 0;
+    const usedMargin = user.wallet?.usedMargin || 0;
+    const availableTradingBalance = tradingBalance - usedMargin;
+    
+    if (direction === 'toAccount') {
+      // Transfer from Main Wallet to Trading Account
+      if (amount > mainWalletBalance) {
+        return res.status(400).json({ message: `Insufficient balance in Main Wallet. Available: ₹${mainWalletBalance}` });
+      }
+      
+      // Deduct from main wallet, add to trading account
+      user.wallet.cashBalance -= amount;
+      user.wallet.tradingBalance += amount;
+      user.wallet.balance = user.wallet.cashBalance; // Legacy field
+      
+    } else {
+      // Transfer from Trading Account to Main Wallet
+      if (amount > availableTradingBalance) {
+        return res.status(400).json({ message: 'Insufficient available balance in Trading Account' });
+      }
+      
+      // Deduct from trading account, add to main wallet
+      user.wallet.tradingBalance -= amount;
+      user.wallet.cashBalance += amount;
+      user.wallet.balance = user.wallet.cashBalance; // Legacy field
+    }
+    
+    await user.save();
+    
+    // Create ledger entry for the transfer
+    const description = direction === 'toAccount' 
+      ? 'Internal Transfer: Wallet → Trading Account'
+      : 'Internal Transfer: Trading Account → Wallet';
+    
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: direction === 'toAccount' ? 'DEBIT' : 'CREDIT',
+      reason: 'ADJUSTMENT',
+      amount: amount,
+      balanceAfter: user.wallet.cashBalance,
+      description,
+      reference: {
+        type: 'Manual',
+        id: null
+      }
+    });
+    
+    res.json({ 
+      message: 'Transfer successful',
+      mainWalletBalance: user.wallet.cashBalance,
+      tradingBalance: user.wallet.tradingBalance
+    });
+  } catch (error) {
+    console.error('Internal transfer error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;
