@@ -907,19 +907,341 @@ router.post('/sync-all-instruments', protectAdmin, superAdminOnly, async (req, r
   }
 });
 
+// Sync ALL NSE equity instruments from Zerodha (not just popular ones)
+router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    if (!zerodhaSession.accessToken) {
+      return res.status(401).json({ message: 'Not logged in to Zerodha. Please connect first.' });
+    }
+    
+    const apiKey = process.env.ZERODHA_API_KEY;
+    
+    // Download instruments CSV from Zerodha
+    console.log('Downloading ALL instruments from Zerodha...');
+    const response = await axios.get(
+      'https://api.kite.trade/instruments',
+      {
+        headers: {
+          'X-Kite-Version': '3',
+          'Authorization': `token ${apiKey}:${zerodhaSession.accessToken}`
+        }
+      }
+    );
+    
+    // Parse CSV
+    const lines = response.data.split('\n');
+    const headers = lines[0].split(',');
+    
+    const allInstruments = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      
+      const values = lines[i].split(',');
+      const inst = {};
+      headers.forEach((h, idx) => {
+        inst[h.trim()] = values[idx]?.trim();
+      });
+      allInstruments.push(inst);
+    }
+    
+    console.log(`Total instruments from Zerodha: ${allInstruments.length}`);
+    
+    const Instrument = (await import('../models/Instrument.js')).default;
+    
+    let added = 0;
+    let updated = 0;
+    let errors = 0;
+    
+    // Get ALL NSE Equity stocks
+    const nseEquity = allInstruments.filter(i => 
+      i.exchange === 'NSE' && 
+      i.segment === 'NSE' &&
+      i.instrument_type === 'EQ'
+    );
+    
+    console.log(`Found ${nseEquity.length} NSE equity instruments`);
+    
+    // Sync ALL NSE equity stocks
+    for (const stock of nseEquity) {
+      try {
+        const existing = await Instrument.findOne({ token: stock.instrument_token });
+        const instrumentData = {
+          token: stock.instrument_token,
+          symbol: stock.tradingsymbol,
+          name: stock.name || stock.tradingsymbol,
+          exchange: 'NSE',
+          segment: 'EQUITY',
+          instrumentType: 'STOCK',
+          category: 'STOCKS',
+          lotSize: parseInt(stock.lot_size) || 1,
+          tickSize: parseFloat(stock.tick_size) || 0.05,
+          isEnabled: true,
+          isFeatured: false
+        };
+        
+        if (existing) {
+          await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+          updated++;
+        } else {
+          await Instrument.create(instrumentData);
+          added++;
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    
+    // Also sync ALL NSE indices
+    const indices = allInstruments.filter(i => 
+      i.exchange === 'NSE' && i.segment === 'INDICES'
+    );
+    
+    console.log(`Found ${indices.length} NSE indices`);
+    
+    for (const idx of indices) {
+      try {
+        const existing = await Instrument.findOne({ token: idx.instrument_token });
+        const instrumentData = {
+          token: idx.instrument_token,
+          symbol: idx.tradingsymbol.replace(/ /g, ''),
+          name: idx.tradingsymbol,
+          exchange: 'NSE',
+          segment: 'EQUITY',
+          instrumentType: 'INDEX',
+          category: 'INDICES',
+          lotSize: 1,
+          isEnabled: true,
+          isFeatured: ['NIFTY 50', 'NIFTY BANK'].includes(idx.tradingsymbol)
+        };
+        
+        if (existing) {
+          await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+          updated++;
+        } else {
+          await Instrument.create(instrumentData);
+          added++;
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    
+    // Sync ALL MCX futures (nearest expiry for each commodity)
+    const mcxFutures = allInstruments.filter(i => 
+      i.exchange === 'MCX' && i.instrument_type === 'FUT'
+    );
+    
+    // Group by base symbol and get nearest expiry
+    const mcxBySymbol = {};
+    for (const fut of mcxFutures) {
+      const baseSymbol = fut.name || fut.tradingsymbol.replace(/\d+[A-Z]+FUT$/, '');
+      if (!mcxBySymbol[baseSymbol] || new Date(fut.expiry) < new Date(mcxBySymbol[baseSymbol].expiry)) {
+        mcxBySymbol[baseSymbol] = fut;
+      }
+    }
+    
+    console.log(`Found ${Object.keys(mcxBySymbol).length} unique MCX commodities`);
+    
+    for (const [baseSymbol, contract] of Object.entries(mcxBySymbol)) {
+      try {
+        const existing = await Instrument.findOne({ symbol: baseSymbol, exchange: 'MCX' });
+        const instrumentData = {
+          token: contract.instrument_token,
+          symbol: baseSymbol,
+          name: contract.name || baseSymbol,
+          exchange: 'MCX',
+          segment: 'MCX',
+          instrumentType: 'FUTURES',
+          category: 'MCX',
+          lotSize: parseInt(contract.lot_size) || 1,
+          tickSize: parseFloat(contract.tick_size) || 1,
+          expiry: new Date(contract.expiry),
+          tradingSymbol: contract.tradingsymbol,
+          isEnabled: true,
+          isFeatured: ['GOLD', 'SILVER', 'CRUDEOIL'].includes(baseSymbol)
+        };
+        
+        if (existing) {
+          await Instrument.findByIdAndUpdate(existing._id, instrumentData);
+          updated++;
+        } else {
+          await Instrument.create(instrumentData);
+          added++;
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    
+    // Subscribe to all tokens
+    const allDbInstruments = await Instrument.find({ isEnabled: true }).select('token').lean();
+    const tokens = allDbInstruments.map(i => parseInt(i.token)).filter(t => !isNaN(t));
+    
+    console.log(`Subscribing to ${tokens.length} instruments...`);
+    
+    if (tokens.length > 0) {
+      await subscribeTokens(tokens);
+    }
+    
+    res.json({
+      message: `Synced ALL instruments from Zerodha`,
+      nseEquity: nseEquity.length,
+      indices: indices.length,
+      mcx: Object.keys(mcxBySymbol).length,
+      added,
+      updated,
+      errors,
+      totalInDatabase: await Instrument.countDocuments(),
+      subscribedTokens: tokens.length
+    });
+  } catch (error) {
+    console.error('Sync all NSE error:', error.response?.data || error.message);
+    res.status(500).json({ message: error.response?.data?.message || error.message });
+  }
+});
+
 // Subscribe to all enabled instruments
 router.post('/subscribe-all', protectAdmin, async (req, res) => {
   try {
+    const tickerStatus = getTickerStatus();
+    if (!tickerStatus.connected) {
+      return res.status(400).json({ message: 'WebSocket ticker not connected. Please connect to Zerodha first.' });
+    }
+    
     const Instrument = (await import('../models/Instrument.js')).default;
-    const instruments = await Instrument.find({ isEnabled: true }).select('token exchange').lean();
+    const instruments = await Instrument.find({ isEnabled: true }).select('token symbol exchange').lean();
     const tokens = instruments.map(i => parseInt(i.token)).filter(t => !isNaN(t));
     
-    if (tokens.length > 0) {
-      subscribeTokens(tokens);
-      res.json({ message: `Subscribed to ${tokens.length} instruments`, tokens: tokens.length });
-    } else {
-      res.json({ message: 'No instruments to subscribe', tokens: 0 });
+    if (tokens.length === 0) {
+      return res.json({ message: 'No instruments to subscribe', subscribed: 0, total: 0 });
     }
+    
+    console.log(`Subscribe-all: Found ${tokens.length} enabled instruments`);
+    
+    // subscribeTokens is now async and batches the subscriptions
+    const result = await subscribeTokens(tokens);
+    
+    res.json({ 
+      message: `Subscribed to ${result.subscribed} instruments`, 
+      subscribed: result.subscribed,
+      total: result.total,
+      requested: tokens.length
+    });
+  } catch (error) {
+    console.error('Subscribe-all error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Fetch historical data for multiple instruments
+router.post('/historical-bulk', protectAdmin, async (req, res) => {
+  try {
+    if (!zerodhaSession.accessToken) {
+      return res.status(401).json({ message: 'Not logged in to Zerodha' });
+    }
+    
+    const { tokens, interval = '15minute' } = req.body;
+    const apiKey = process.env.ZERODHA_API_KEY;
+    
+    // If no tokens provided, get all enabled instruments
+    let instrumentTokens = tokens;
+    if (!instrumentTokens || instrumentTokens.length === 0) {
+      const Instrument = (await import('../models/Instrument.js')).default;
+      const instruments = await Instrument.find({ isEnabled: true }).select('token').lean();
+      instrumentTokens = instruments.map(i => i.token).filter(t => t);
+    }
+    
+    // Calculate date range based on interval
+    const now = new Date();
+    const to = now.toISOString().split('T')[0];
+    const fromDate = new Date();
+    
+    if (interval === 'day') {
+      fromDate.setFullYear(fromDate.getFullYear() - 1);
+    } else if (interval === 'minute') {
+      fromDate.setDate(fromDate.getDate() - 5);
+    } else if (interval === '5minute') {
+      fromDate.setDate(fromDate.getDate() - 15);
+    } else if (interval === '15minute') {
+      fromDate.setDate(fromDate.getDate() - 30);
+    } else {
+      fromDate.setDate(fromDate.getDate() - 60);
+    }
+    const from = fromDate.toISOString().split('T')[0];
+    
+    console.log(`Fetching historical data for ${instrumentTokens.length} instruments, interval: ${interval}`);
+    
+    const results = {};
+    const errors = [];
+    
+    // Fetch historical data for each token with rate limiting
+    for (let i = 0; i < instrumentTokens.length; i++) {
+      const token = instrumentTokens[i];
+      
+      try {
+        const response = await axios.get(
+          `https://api.kite.trade/instruments/historical/${token}/${interval}?from=${from}&to=${to}`,
+          {
+            headers: {
+              'X-Kite-Version': '3',
+              'Authorization': `token ${apiKey}:${zerodhaSession.accessToken}`
+            }
+          }
+        );
+        
+        if (response.data.status === 'success' && response.data.data?.candles) {
+          results[token] = response.data.data.candles.map(c => ({
+            time: Math.floor(new Date(c[0]).getTime() / 1000),
+            open: c[1],
+            high: c[2],
+            low: c[3],
+            close: c[4],
+            volume: c[5]
+          }));
+        }
+        
+        // Rate limiting: Zerodha allows ~3 requests per second
+        if (i < instrumentTokens.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 350));
+        }
+        
+        // Log progress every 10 instruments
+        if ((i + 1) % 10 === 0) {
+          console.log(`Historical data progress: ${i + 1}/${instrumentTokens.length}`);
+        }
+      } catch (error) {
+        errors.push({ token, error: error.response?.data?.message || error.message });
+      }
+    }
+    
+    console.log(`Historical data fetched: ${Object.keys(results).length} success, ${errors.length} errors`);
+    
+    res.json({
+      message: `Fetched historical data for ${Object.keys(results).length} instruments`,
+      success: Object.keys(results).length,
+      errors: errors.length,
+      data: results,
+      errorDetails: errors.slice(0, 10) // Only return first 10 errors
+    });
+  } catch (error) {
+    console.error('Historical bulk error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get all subscribed tokens status
+router.get('/subscription-status', protectAdmin, async (req, res) => {
+  try {
+    const status = getTickerStatus();
+    const Instrument = (await import('../models/Instrument.js')).default;
+    const totalEnabled = await Instrument.countDocuments({ isEnabled: true });
+    
+    res.json({
+      connected: status.connected,
+      subscribedTokens: status.subscribedTokens,
+      totalEnabledInstruments: totalEnabled,
+      allSubscribed: status.subscribedTokens >= totalEnabled
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

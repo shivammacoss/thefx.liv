@@ -629,16 +629,19 @@ router.put('/users/:id/settings', protectAdmin, async (req, res) => {
     
     const { segmentPermissions, scriptSettings } = req.body;
     
+    const updateFields = {};
     if (segmentPermissions) {
-      user.segmentPermissions = segmentPermissions;
+      updateFields.segmentPermissions = segmentPermissions;
     }
-    
     if (scriptSettings) {
-      user.scriptSettings = scriptSettings;
+      updateFields.scriptSettings = scriptSettings;
     }
     
-    await user.save();
-    res.json({ message: 'User settings updated successfully', user });
+    // Use updateOne to avoid segmentPermissions validation error
+    await User.updateOne({ _id: user._id }, { $set: updateFields });
+    
+    const updatedUser = await User.findById(user._id).select('-password');
+    res.json({ message: 'User settings updated successfully', user: updatedUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -662,18 +665,21 @@ router.post('/users/:id/copy-settings', protectAdmin, async (req, res) => {
     const sourceUser = await User.findOne(sourceQuery);
     if (!sourceUser) return res.status(404).json({ message: 'Source user not found' });
     
+    const updateFields = {};
     // Copy segment permissions
     if (segmentPermissions) {
-      targetUser.segmentPermissions = segmentPermissions;
+      updateFields.segmentPermissions = segmentPermissions;
     }
-    
     // Copy script settings
     if (scriptSettings) {
-      targetUser.scriptSettings = scriptSettings;
+      updateFields.scriptSettings = scriptSettings;
     }
     
-    await targetUser.save();
-    res.json({ message: 'Settings copied successfully', user: targetUser });
+    // Use updateOne to avoid segmentPermissions validation error
+    await User.updateOne({ _id: targetUser._id }, { $set: updateFields });
+    
+    const updatedUser = await User.findById(targetUser._id).select('-password');
+    res.json({ message: 'Settings copied successfully', user: updatedUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

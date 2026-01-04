@@ -219,6 +219,37 @@ router.put('/users/:id', protectAdmin, async (req, res) => {
   }
 });
 
+// Update user segment and script settings
+router.put('/users/:id/settings', protectAdmin, async (req, res) => {
+  try {
+    // Filter by adminCode for regular admins
+    const query = req.admin.role === 'SUPER_ADMIN' 
+      ? { _id: req.params.id } 
+      : { _id: req.params.id, adminCode: req.admin.adminCode };
+    
+    const user = await User.findOne(query);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const { segmentPermissions, scriptSettings } = req.body;
+    
+    const updateFields = {};
+    if (segmentPermissions) {
+      updateFields.segmentPermissions = segmentPermissions;
+    }
+    if (scriptSettings) {
+      updateFields.scriptSettings = scriptSettings;
+    }
+    
+    // Use updateOne to avoid segmentPermissions validation error
+    await User.updateOne({ _id: user._id }, { $set: updateFields });
+    
+    const updatedUser = await User.findById(user._id).select('-password');
+    res.json({ message: 'User settings updated successfully', user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Change user password
 router.put('/users/:id/password', protectAdmin, async (req, res) => {
   try {

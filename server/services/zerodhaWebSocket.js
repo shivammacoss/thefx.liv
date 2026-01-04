@@ -62,22 +62,56 @@ export const connectTicker = (apiKey, accessToken, tokens = []) => {
   return ticker;
 };
 
-// Subscribe to instrument tokens
-export const subscribeTokens = (tokens) => {
+// Subscribe to instrument tokens in batches
+// Zerodha has limits: ~3000 tokens total, and batching helps avoid issues
+const BATCH_SIZE = 100; // Subscribe in batches of 100 tokens
+const BATCH_DELAY = 100; // 100ms delay between batches
+
+export const subscribeTokens = async (tokens) => {
   if (!ticker || !ticker.connected()) {
     console.log('Ticker not connected, cannot subscribe');
-    return;
+    return { subscribed: 0, total: tokens.length };
   }
 
-  // Convert to numbers if strings
-  const numericTokens = tokens.map(t => parseInt(t));
+  // Convert to numbers if strings and filter out invalid tokens
+  const numericTokens = tokens
+    .map(t => parseInt(t))
+    .filter(t => !isNaN(t) && t > 0);
   
-  // Subscribe to full mode for detailed data
-  ticker.subscribe(numericTokens);
-  ticker.setMode(ticker.modeFull, numericTokens);
+  // Remove already subscribed tokens
+  const newTokens = numericTokens.filter(t => !subscribedTokens.includes(t));
   
-  subscribedTokens = [...new Set([...subscribedTokens, ...numericTokens])];
-  console.log(`Subscribed to ${numericTokens.length} tokens. Total: ${subscribedTokens.length}`);
+  if (newTokens.length === 0) {
+    console.log('All tokens already subscribed');
+    return { subscribed: 0, total: subscribedTokens.length };
+  }
+  
+  console.log(`Subscribing to ${newTokens.length} new tokens in batches of ${BATCH_SIZE}...`);
+  
+  // Subscribe in batches to avoid overwhelming the connection
+  let subscribedCount = 0;
+  for (let i = 0; i < newTokens.length; i += BATCH_SIZE) {
+    const batch = newTokens.slice(i, i + BATCH_SIZE);
+    
+    try {
+      ticker.subscribe(batch);
+      ticker.setMode(ticker.modeFull, batch);
+      subscribedCount += batch.length;
+      console.log(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Subscribed to ${batch.length} tokens (${subscribedCount}/${newTokens.length})`);
+      
+      // Add delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < newTokens.length) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+      }
+    } catch (error) {
+      console.error(`Error subscribing batch ${Math.floor(i / BATCH_SIZE) + 1}:`, error.message);
+    }
+  }
+  
+  subscribedTokens = [...new Set([...subscribedTokens, ...newTokens])];
+  console.log(`Successfully subscribed to ${subscribedCount} tokens. Total subscribed: ${subscribedTokens.length}`);
+  
+  return { subscribed: subscribedCount, total: subscribedTokens.length };
 };
 
 // Unsubscribe from tokens

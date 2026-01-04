@@ -1920,8 +1920,13 @@ const SuperAdminCreateUser = () => {
                         if (!newScriptSettings[symbol]) {
                           newScriptSettings[symbol] = {
                             segment: formData.selectedScriptSegment,
+                            settingType: 'LOT',
                             lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
-                            quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                            quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                            fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                            brokerage: { type: 'PER_LOT', value: 0 },
+                            spread: 0,
+                            block: { future: false, option: false }
                           };
                         }
                       });
@@ -1968,8 +1973,13 @@ const SuperAdminCreateUser = () => {
                               ...prev.scriptSettings,
                               [symbol]: {
                                 segment: formData.selectedScriptSegment,
+                                settingType: 'LOT',
                                 lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
-                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                brokerage: { type: 'PER_LOT', value: 0 },
+                                spread: 0,
+                                block: { future: false, option: false }
                               }
                             }
                           }));
@@ -4262,16 +4272,74 @@ const MarketControl = () => {
                 <div className="flex gap-2 mb-2">
                   <button onClick={async () => {
                     try {
-                      const { data } = await axios.post('/api/zerodha/seed-mcx', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
-                      alert(data.message);
-                    } catch (error) { alert(error.response?.data?.message || 'Error seeding MCX'); }
-                  }} className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm">Seed MCX</button>
+                      const btn = document.activeElement;
+                      btn.disabled = true;
+                      btn.textContent = 'Syncing...';
+                      const { data } = await axios.post('/api/zerodha/sync-all-nse', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(`${data.message}\n\nNSE Stocks: ${data.nseEquity}\nIndices: ${data.indices}\nMCX: ${data.mcx}\n\nAdded: ${data.added}\nUpdated: ${data.updated}\nTotal in DB: ${data.totalInDatabase}\nSubscribed: ${data.subscribedTokens}`);
+                      btn.disabled = false;
+                      btn.textContent = 'Sync ALL';
+                    } catch (error) { 
+                      alert(error.response?.data?.message || 'Error syncing instruments'); 
+                      const btn = document.activeElement;
+                      if (btn) { btn.disabled = false; btn.textContent = 'Sync ALL'; }
+                    }
+                  }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white py-2 rounded text-sm disabled:opacity-50">Sync ALL</button>
                   <button onClick={async () => {
                     try {
+                      const btn = document.activeElement;
+                      btn.disabled = true;
+                      btn.textContent = 'Syncing...';
+                      const { data } = await axios.post('/api/zerodha/sync-all-instruments', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(`${data.message}\n\nAdded: ${data.added}\nUpdated: ${data.updated}\nTotal in DB: ${data.totalInDatabase}\nSubscribed: ${data.subscribedTokens}`);
+                      btn.disabled = false;
+                      btn.textContent = 'Sync Popular';
+                    } catch (error) { 
+                      alert(error.response?.data?.message || 'Error syncing instruments'); 
+                      const btn = document.activeElement;
+                      if (btn) { btn.disabled = false; btn.textContent = 'Sync Popular'; }
+                    }
+                  }} className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm disabled:opacity-50">Sync Popular</button>
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <button onClick={async () => {
+                    try {
+                      const btn = document.activeElement;
+                      btn.disabled = true;
+                      btn.textContent = 'Subscribing...';
                       const { data } = await axios.post('/api/zerodha/subscribe-all', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
-                      alert(data.message);
-                    } catch (error) { alert(error.response?.data?.message || 'Error subscribing'); }
-                  }} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm">Subscribe All</button>
+                      alert(`${data.message}\n\nSubscribed: ${data.subscribed}\nTotal Active: ${data.total}\nRequested: ${data.requested}`);
+                      btn.disabled = false;
+                      btn.textContent = 'Subscribe All';
+                    } catch (error) { 
+                      alert(error.response?.data?.message || 'Error subscribing'); 
+                      const btn = document.activeElement;
+                      if (btn) { btn.disabled = false; btn.textContent = 'Subscribe All'; }
+                    }
+                  }} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm disabled:opacity-50">Subscribe All</button>
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <button onClick={async () => {
+                    try {
+                      const { data } = await axios.get('/api/zerodha/subscription-status', { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(`WebSocket: ${data.connected ? 'Connected' : 'Disconnected'}\nSubscribed Tokens: ${data.subscribedTokens}\nTotal Enabled: ${data.totalEnabledInstruments}\nAll Subscribed: ${data.allSubscribed ? 'Yes' : 'No'}`);
+                    } catch (error) { alert(error.response?.data?.message || 'Error fetching status'); }
+                  }} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm">Check Status</button>
+                  <button onClick={async () => {
+                    try {
+                      const btn = document.activeElement;
+                      btn.disabled = true;
+                      btn.textContent = 'Fetching...';
+                      const { data } = await axios.post('/api/zerodha/historical-bulk', { interval: '15minute' }, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(`${data.message}\n\nSuccess: ${data.success}\nErrors: ${data.errors}`);
+                      btn.disabled = false;
+                      btn.textContent = 'Fetch Historical';
+                    } catch (error) { 
+                      alert(error.response?.data?.message || 'Error fetching historical data'); 
+                      const btn = document.activeElement;
+                      if (btn) { btn.disabled = false; btn.textContent = 'Fetch Historical'; }
+                    }
+                  }} className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white py-2 rounded text-sm disabled:opacity-50">Fetch Historical</button>
                 </div>
                 <button onClick={disconnectZerodha} className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm">Disconnect</button>
               </>
@@ -9575,6 +9643,228 @@ const UserManagement = () => {
                               }))}
                               className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
                             />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Fixed Margin Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'FIXED_MARGIN' && (
+                        <div className="space-y-3">
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-blue-400 font-medium block mb-2">Future Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Intraday Future</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.intradayFuture || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, intradayFuture: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Carry Future</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.carryFuture || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, carryFuture: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-green-400 font-medium block mb-2">Option Buy Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Buy Intraday</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionBuyIntraday || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionBuyIntraday: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Buy Carry</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionBuyCarry || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionBuyCarry: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-dark-700 rounded p-3">
+                            <span className="text-xs text-red-400 font-medium block mb-2">Option Sell Margins</span>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Sell Intraday</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionSellIntraday || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionSellIntraday: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500">Option Sell Carry</label>
+                                <input
+                                  type="number"
+                                  value={editFormData.scriptSettings[selectedScript]?.fixedMargin?.optionSellCarry || 0}
+                                  onChange={(e) => setEditFormData(prev => ({
+                                    ...prev,
+                                    scriptSettings: {
+                                      ...prev.scriptSettings,
+                                      [selectedScript]: {
+                                        ...prev.scriptSettings[selectedScript],
+                                        fixedMargin: { ...prev.scriptSettings[selectedScript]?.fixedMargin, optionSellCarry: Number(e.target.value) }
+                                      }
+                                    }
+                                  }))}
+                                  className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Brokerage Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-500">Brokerage Type</label>
+                              <select
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || 'PER_LOT'}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      brokerage: { ...prev.scriptSettings[selectedScript]?.brokerage, type: e.target.value }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              >
+                                <option value="PER_LOT">Per Lot</option>
+                                <option value="PER_CRORE">Per Crore</option>
+                                <option value="PER_TRADE">Per Trade</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500">Brokerage Value</label>
+                              <input
+                                type="number"
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value || 0}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      brokerage: { ...prev.scriptSettings[selectedScript]?.brokerage, value: Number(e.target.value) }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Spread Settings */}
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'SPREAD' && (
+                        <div className="bg-dark-700 rounded p-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-500">Buy Spread</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={editFormData.scriptSettings[selectedScript]?.spread?.buy || 0}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      spread: { ...prev.scriptSettings[selectedScript]?.spread, buy: Number(e.target.value) }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500">Sell Spread</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={editFormData.scriptSettings[selectedScript]?.spread?.sell || 0}
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [selectedScript]: {
+                                      ...prev.scriptSettings[selectedScript],
+                                      spread: { ...prev.scriptSettings[selectedScript]?.spread, sell: Number(e.target.value) }
+                                    }
+                                  }
+                                }))}
+                                className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                              />
+                            </div>
                           </div>
                         </div>
                       )}

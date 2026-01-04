@@ -301,7 +301,28 @@ const userSchema = new mongoose.Schema({
         maxQuantity: { type: Number, default: 1000 },
         minQuantity: { type: Number, default: 1 },
         perOrderQuantity: { type: Number, default: 100 }
-      }
+      },
+      fixedMargin: {
+        intradayFuture: { type: Number, default: 0 },
+        carryFuture: { type: Number, default: 0 },
+        optionBuyIntraday: { type: Number, default: 0 },
+        optionBuyCarry: { type: Number, default: 0 },
+        optionSellIntraday: { type: Number, default: 0 },
+        optionSellCarry: { type: Number, default: 0 }
+      },
+      brokerage: {
+        intradayFuture: { type: Number, default: 0 },
+        carryFuture: { type: Number, default: 0 },
+        optionBuyIntraday: { type: Number, default: 0 },
+        optionBuyCarry: { type: Number, default: 0 },
+        optionSellIntraday: { type: Number, default: 0 },
+        optionSellCarry: { type: Number, default: 0 }
+      },
+      spread: {
+        buy: { type: Number, default: 0 },
+        sell: { type: Number, default: 0 }
+      },
+      blocked: { type: Boolean, default: false }
     },
     default: {}
   },
