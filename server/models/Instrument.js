@@ -28,11 +28,19 @@ const instrumentSchema = new mongoose.Schema({
     required: true
   },
   
-  // Segment
+  // Segment (internal)
   segment: {
     type: String,
     enum: ['EQUITY', 'FNO', 'COMMODITY', 'CURRENCY', 'MCX', 'CRYPTO'],
     required: true
+  },
+  
+  // Display Segment (for UI tabs) - matches user allowedSegments
+  displaySegment: {
+    type: String,
+    enum: ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'],
+    default: 'NSE',
+    index: true
   },
   
   // Instrument type
@@ -141,8 +149,14 @@ const instrumentSchema = new mongoose.Schema({
   // Category for grouping
   category: {
     type: String,
-    enum: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'CURRENCY', 'CRYPTO', 'OTHER'],
+    enum: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'CURRENCY', 'CRYPTO', 'BSE', 'OTHER'],
     default: 'OTHER'
+  },
+  
+  // Trading symbol from exchange (for Zerodha)
+  tradingSymbol: {
+    type: String,
+    default: null
   },
   
   // Sort order

@@ -4271,20 +4271,22 @@ const MarketControl = () => {
                 <div className="text-xs text-gray-400 mb-3">User ID: {zerodhaStatus.userId}</div>
                 <div className="flex gap-2 mb-2">
                   <button onClick={async () => {
+                    if (!confirm('This will DELETE all instruments and resync from Zerodha. Continue?')) return;
                     try {
                       const btn = document.activeElement;
                       btn.disabled = true;
-                      btn.textContent = 'Syncing...';
-                      const { data } = await axios.post('/api/zerodha/sync-all-nse', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
-                      alert(`${data.message}\n\nNSE Stocks: ${data.nseEquity}\nIndices: ${data.indices}\nMCX: ${data.mcx}\n\nAdded: ${data.added}\nUpdated: ${data.updated}\nTotal in DB: ${data.totalInDatabase}\nSubscribed: ${data.subscribedTokens}`);
+                      btn.textContent = 'Resetting...';
+                      const { data } = await axios.post('/api/zerodha/reset-and-sync', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      const countsStr = Object.entries(data.counts || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+                      alert(`${data.message}\n\nDeleted: ${data.deleted}\n\n${countsStr}\n\nAdded: ${data.added}\nTotal in DB: ${data.totalInDatabase}\nSubscribed: ${data.subscribedTokens}`);
                       btn.disabled = false;
-                      btn.textContent = 'Sync ALL';
+                      btn.textContent = 'Reset & Sync';
                     } catch (error) { 
-                      alert(error.response?.data?.message || 'Error syncing instruments'); 
+                      alert(error.response?.data?.message || 'Error resetting'); 
                       const btn = document.activeElement;
-                      if (btn) { btn.disabled = false; btn.textContent = 'Sync ALL'; }
+                      if (btn) { btn.disabled = false; btn.textContent = 'Reset & Sync'; }
                     }
-                  }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white py-2 rounded text-sm disabled:opacity-50">Sync ALL</button>
+                  }} className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm disabled:opacity-50">Reset & Sync</button>
                   <button onClick={async () => {
                     try {
                       const btn = document.activeElement;

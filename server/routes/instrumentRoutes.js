@@ -919,4 +919,50 @@ router.get('/by-segment', protectAdmin, async (req, res) => {
   }
 });
 
+// Get instruments grouped by displaySegment (for UI tabs)
+router.get('/by-display-segment', async (req, res) => {
+  try {
+    const segments = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'];
+    const result = {};
+    
+    for (const segment of segments) {
+      const instruments = await Instrument.find({ 
+        isEnabled: true,
+        displaySegment: segment 
+      })
+        .select('token symbol name exchange instrumentType category lotSize tickSize expiry strike optionType ltp change changePercent isFeatured sortOrder tradingSymbol')
+        .sort({ isFeatured: -1, sortOrder: 1, symbol: 1 })
+        .limit(500);
+      
+      result[segment] = instruments;
+    }
+    
+    // Also include counts
+    const counts = {};
+    for (const segment of segments) {
+      counts[segment] = await Instrument.countDocuments({ isEnabled: true, displaySegment: segment });
+    }
+    
+    res.json({ instruments: result, counts });
+  } catch (error) {
+    console.error('Error fetching instruments by display segment:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get all available segments with their instrument counts
+router.get('/segments', async (req, res) => {
+  try {
+    const segments = await Instrument.aggregate([
+      { $match: { isEnabled: true } },
+      { $group: { _id: '$displaySegment', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    res.json(segments.map(s => ({ segment: s._id, count: s.count })));
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;
