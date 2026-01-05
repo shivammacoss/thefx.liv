@@ -393,10 +393,21 @@ class TradingService {
     }
     
     // Block margin from tradingBalance and deduct commission (dual wallet system)
-    // Margin is blocked (reserved), commission is deducted permanently
-    const newTradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
-    const newUsedMargin = (user.wallet.usedMargin || 0) + marginRequired;
-    const newBlocked = (user.wallet.blocked || 0) + marginRequired;
+    // For crypto trades, no margin is blocked - only commission is deducted
+    let newTradingBalance, newUsedMargin, newBlocked;
+    
+    if (isCrypto) {
+      // Crypto trades: Only deduct commission, no margin blocking
+      newTradingBalance = (user.wallet.tradingBalance || 0) - totalCommission;
+      newUsedMargin = user.wallet.usedMargin || 0; // No change
+      newBlocked = user.wallet.blocked || 0; // No change
+      console.log('Crypto trade: Only commission deducted, no margin blocked');
+    } else {
+      // Regular trades: Block margin and deduct commission
+      newTradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
+      newUsedMargin = (user.wallet.usedMargin || 0) + marginRequired;
+      newBlocked = (user.wallet.blocked || 0) + marginRequired;
+    }
     
     // Use updateOne to avoid validation issues with segmentPermissions
     await User.updateOne(
@@ -536,9 +547,21 @@ class TradingService {
     await trade.save();
 
     // Release blocked margin and add/subtract P&L to tradingBalance (dual wallet system)
-    const newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
-    const newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    const newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL;
+    // For crypto trades, no margin was blocked, so only add P&L
+    let newUsedMargin, newBlocked, newTradingBalance;
+    
+    if (trade.isCrypto) {
+      // Crypto trades: No margin to release, just add P&L
+      newUsedMargin = user.wallet.usedMargin || 0; // No change
+      newBlocked = user.wallet.blocked || 0; // No change
+      newTradingBalance = (user.wallet.tradingBalance || 0) + netPnL;
+      console.log('Crypto trade closed: No margin to release, only P&L added');
+    } else {
+      // Regular trades: Release margin and add P&L
+      newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
+      newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
+      newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL;
+    }
     const newRealizedPnL = (user.wallet.realizedPnL || 0) + netPnL;
     
     // Use updateOne to avoid validation issues with segmentPermissions
@@ -683,11 +706,22 @@ class TradingService {
 
     const user = await User.findById(userId);
     // Release blocked margin - update both primary and legacy fields
-    const newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
-    const newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
-    const newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed;
+    // For crypto trades, no margin was blocked
+    let newUsedMargin, newBlocked, newTradingBalance;
     
-    // Use updateOne to avoid validation issues with segmentPermissions
+    if (trade.isCrypto) {
+      // Crypto trades: No margin to release
+      newUsedMargin = user.wallet.usedMargin || 0; // No change
+      newBlocked = user.wallet.blocked || 0; // No change
+      newTradingBalance = user.wallet.tradingBalance || 0; // No change
+      console.log('Crypto order cancelled: No margin to release');
+    } else {
+      // Regular trades: Release margin
+      newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
+      newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
+      newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed;
+    }
+    
     await User.updateOne(
       { _id: userId },
       { $set: { 
