@@ -5701,14 +5701,25 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
     u.userId?.toLowerCase().includes(searchUser.toLowerCase())
   ).slice(0, 10);
 
+  const [segmentFilter, setSegmentFilter] = useState('');
+  const instrumentSegments = Array.from(
+    new Set(
+      instruments
+        .map(i => (i.displaySegment || i.segment || i.exchange || '').toUpperCase())
+        .filter(Boolean)
+    )
+  );
+
   const filteredInstruments = instruments.filter(i => {
     const term = searchInstrument.toLowerCase();
-    return (
+    const seg = (i.displaySegment || i.segment || i.exchange || '').toUpperCase();
+    const matchesSegment = segmentFilter ? seg === segmentFilter : true;
+    const matchesSearch =
       i.tradingsymbol?.toLowerCase().includes(term) ||
       i.symbol?.toLowerCase().includes(term) ||
       i.name?.toLowerCase().includes(term) ||
-      i.tradingSymbol?.toLowerCase().includes(term)
-    );
+      i.tradingSymbol?.toLowerCase().includes(term);
+    return matchesSegment && matchesSearch;
   }).slice(0, 20);
 
   const handleSubmit = async (e) => {
@@ -5794,13 +5805,25 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
           {/* Instrument Selection */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">Select Instrument *</label>
-            <input
-              type="text"
-              placeholder="Search instruments..."
-              value={searchInstrument}
-              onChange={(e) => setSearchInstrument(e.target.value)}
-              className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 mb-2"
-            />
+            <div className="flex gap-2 mb-2">
+              <select
+                value={segmentFilter}
+                onChange={(e) => setSegmentFilter(e.target.value)}
+                className="w-40 bg-dark-700 border border-dark-600 rounded px-3 py-2 text-sm"
+              >
+                <option value="">All Segments</option>
+                {instrumentSegments.map(seg => (
+                  <option key={seg} value={seg}>{seg}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Search instruments..."
+                value={searchInstrument}
+                onChange={(e) => setSearchInstrument(e.target.value)}
+                className="flex-1 bg-dark-700 border border-dark-600 rounded px-3 py-2"
+              />
+            </div>
             {searchInstrument && searchInstrument.length >= 1 && filteredInstruments.length > 0 && !formData.symbol && (
               <div className="bg-dark-700 border border-dark-600 rounded max-h-48 overflow-y-auto">
                 {filteredInstruments.map(i => (
@@ -7050,11 +7073,23 @@ const AllUsersManagement = () => {
 
   const openEditModal = (user) => {
     setSelectedUser(user);
+    const userSegmentKeys = Object.keys(user.segmentPermissions || {});
+    const allSegments = Array.from(new Set([
+      ...segmentOptions,
+      ...userSegmentKeys,
+      ...defaultSegmentOptions
+    ]));
+
+    const normalizedSegments = allSegments.reduce((acc, seg) => {
+      acc[seg] = {
+        ...defaultSegmentSettings,
+        ...(user.segmentPermissions?.[seg] || {})
+      };
+      return acc;
+    }, {});
+
     setEditFormData({
-      segmentPermissions: user.segmentPermissions || segmentOptions.reduce((acc, seg) => {
-        acc[seg] = { ...defaultSegmentSettings };
-        return acc;
-      }, {}),
+      segmentPermissions: normalizedSegments,
       scriptSettings: user.scriptSettings || {}
     });
     setExpandedSegment(null);

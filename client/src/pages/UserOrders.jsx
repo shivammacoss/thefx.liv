@@ -100,7 +100,7 @@ const UserOrders = () => {
       const filterByDate = (items) => {
         if (!fromDate) return items;
         return items.filter(item => {
-          const itemDate = new Date(item.createdAt || item.openedAt);
+          const itemDate = new Date(item.closedAt || item.createdAt || item.openedAt);
           return itemDate >= fromDate && itemDate <= toDate;
         });
       };
@@ -112,8 +112,9 @@ const UserOrders = () => {
 
       // Calculate stats
       const closed = allHistory.filter(t => t.status === 'CLOSED');
-      const totalPnL = closed.reduce((sum, t) => sum + (t.realizedPnL || t.pnl || 0), 0);
-      const wins = closed.filter(t => (t.realizedPnL || t.pnl || 0) > 0).length;
+      const getPnL = (t) => t.realizedPnL ?? t.netPnL ?? t.pnl ?? t.unrealizedPnL ?? 0;
+      const totalPnL = closed.reduce((sum, t) => sum + getPnL(t), 0);
+      const wins = closed.filter(t => getPnL(t) > 0).length;
       const winRate = closed.length > 0 ? (wins / closed.length * 100).toFixed(1) : 0;
       
       setStats({
@@ -240,9 +241,9 @@ const UserOrders = () => {
       item.quantity || item.lots,
       item.entryPrice || item.price,
       item.exitPrice || '-',
-      item.realizedPnL || item.pnl || item.unrealizedPnL || 0,
+      item.realizedPnL ?? item.netPnL ?? item.pnl ?? item.unrealizedPnL ?? 0,
       item.status,
-      formatDate(item.createdAt || item.openedAt)
+      formatDate(item.closedAt || item.createdAt || item.openedAt)
     ]);
 
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');

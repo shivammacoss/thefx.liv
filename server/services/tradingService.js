@@ -641,7 +641,7 @@ class TradingService {
   // Get trade history - optimized
   static async getTradeHistory(userId, limit = 50) {
     return Trade.find({ user: userId, status: 'CLOSED' })
-      .select('userId symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason isCrypto')
+      .select('userId symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt createdAt openedAt closeReason isCrypto status')
       .sort({ closedAt: -1 })
       .limit(limit)
       .lean();

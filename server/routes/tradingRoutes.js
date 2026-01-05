@@ -253,6 +253,16 @@ router.get('/pending-orders', protect, async (req, res) => {
   }
 });
 
+// Cancel pending order (DELETE alias for mobile/client compatibility)
+router.delete('/pending-orders/:id', protect, async (req, res) => {
+  try {
+    const result = await TradingService.cancelOrder(req.params.id, req.user._id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
 // Get trade history
 router.get('/history', protect, async (req, res) => {
   try {
