@@ -9009,14 +9009,25 @@ const UserManagement = () => {
 
   const openSettingsModal = (user) => {
     setSelectedUser(user);
+    const userSegmentKeys = Object.keys(user.segmentPermissions || {});
+    const allSegments = Array.from(new Set([
+      ...segmentOptions,
+      ...userSegmentKeys,
+      ...defaultSegmentOptions
+    ]));
+
+    const normalizedSegments = allSegments.reduce((acc, seg) => {
+      acc[seg] = {
+        ...defaultSegmentSettings,
+        ...(user.segmentPermissions?.[seg] || {})
+      };
+      return acc;
+    }, {});
+
     setEditFormData({
-      segmentPermissions: user.segmentPermissions || segmentOptions.reduce((acc, seg) => {
-        acc[seg] = { ...defaultSegmentSettings };
-        return acc;
-      }, {}),
+      segmentPermissions: normalizedSegments,
       scriptSettings: user.scriptSettings || {}
     });
-    setExpandedSegment(null);
     setSelectedScriptSegment(null);
     setSelectedScript(null);
     setShowSettingsModal(true);

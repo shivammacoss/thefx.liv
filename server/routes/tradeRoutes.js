@@ -339,27 +339,43 @@ router.post('/admin/create-trade', protectAdmin, async (req, res) => {
       tradeTimestamp = new Date(year, month - 1, day, hours, minutes);
     }
     
-    // Determine exchange and instrumentType from segment
+    // Normalize segment to valid schema enums
+    const allowedSegments = ['EQUITY', 'FNO', 'MCX', 'COMMODITY', 'CRYPTO', 'CURRENCY'];
+    const segRaw = (segment || 'EQUITY').toUpperCase();
+    const segMap = {
+      'NSE F&O': 'FNO',
+      'NFO': 'FNO',
+      'NSEFO': 'FNO',
+      'NSE_FO': 'FNO',
+      'F&O': 'FNO',
+      'BSE F&O': 'FNO',
+      'BFO': 'FNO',
+      'BSEFO': 'FNO',
+      'BSE_FO': 'FNO',
+      'NSE': 'EQUITY'
+    };
+    const segNormalized = segMap[segRaw] || (allowedSegments.includes(segRaw) ? segRaw : 'EQUITY');
+
+    // Determine exchange and instrumentType from normalized segment
     let exchange = 'NSE';
     let instrumentType = 'STOCK';
-    const seg = segment || 'EQUITY';
     
-    if (seg === 'EQUITY' || seg === 'NSE') {
+    if (segNormalized === 'EQUITY') {
       exchange = 'NSE';
       instrumentType = 'STOCK';
-    } else if (seg === 'FNO' || seg === 'NSE F&O') {
+    } else if (segNormalized === 'FNO') {
       exchange = 'NFO';
       instrumentType = 'FUTURES';
-    } else if (seg === 'MCX') {
+    } else if (segNormalized === 'MCX') {
       exchange = 'MCX';
       instrumentType = 'FUTURES';
-    } else if (seg === 'BSE F&O') {
-      exchange = 'BFO';
+    } else if (segNormalized === 'COMMODITY') {
+      exchange = 'MCX';
       instrumentType = 'FUTURES';
-    } else if (seg === 'CURRENCY' || seg === 'Currency') {
+    } else if (segNormalized === 'CURRENCY') {
       exchange = 'CDS';
       instrumentType = 'CURRENCY';
-    } else if (seg === 'CRYPTO' || seg === 'Crypto') {
+    } else if (segNormalized === 'CRYPTO') {
       exchange = 'CRYPTO';
       instrumentType = 'CRYPTO';
     }
@@ -371,7 +387,7 @@ router.post('/admin/create-trade', protectAdmin, async (req, res) => {
       adminCode: user.adminCode,
       symbol,
       token: instrumentToken || symbol,
-      segment: seg === 'NSE' ? 'EQUITY' : seg,
+      segment: segNormalized,
       exchange,
       instrumentType,
       side,
