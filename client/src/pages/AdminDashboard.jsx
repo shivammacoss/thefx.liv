@@ -1939,17 +1939,26 @@ const SuperAdminCreateUser = () => {
                     type="button"
                     onClick={() => {
                       const symbols = formData.segmentSymbols?.[formData.selectedScriptSegment] || [];
+                      const segmentKey = formData.selectedScriptSegment;
+                      const segmentDefaults = formData.segmentPermissions?.[segmentKey] || {};
                       const newScriptSettings = { ...formData.scriptSettings };
                       symbols.forEach(symbol => {
                         if (!newScriptSettings[symbol]) {
                           newScriptSettings[symbol] = {
-                            segment: formData.selectedScriptSegment,
+                            segment: segmentKey,
                             settingType: 'LOT',
-                            lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                            lotSettings: { 
+                              maxLots: segmentDefaults.maxLots || 50, 
+                              minLots: segmentDefaults.minLots || 1, 
+                              perOrderLots: segmentDefaults.orderLots || 10 
+                            },
                             quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
                             fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
-                            brokerage: { type: 'PER_LOT', value: 0 },
-                            spread: 0,
+                            brokerage: { 
+                              type: segmentDefaults.commissionType || 'PER_LOT', 
+                              value: segmentDefaults.commissionLot || 0 
+                            },
+                            spread: { buy: 0, sell: 0 },
                             block: { future: false, option: false }
                           };
                         }
@@ -1989,20 +1998,30 @@ const SuperAdminCreateUser = () => {
                         if (isCustomized) {
                           setFormData(prev => ({ ...prev, selectedScript: symbol }));
                         } else {
-                          // Add default settings for this symbol
+                          // Add default settings for this symbol - use segment settings as defaults
+                          const segmentKey = formData.selectedScriptSegment;
+                          const segmentDefaults = formData.segmentPermissions?.[segmentKey] || {};
                           setFormData(prev => ({
                             ...prev,
                             selectedScript: symbol,
                             scriptSettings: {
                               ...prev.scriptSettings,
                               [symbol]: {
-                                segment: formData.selectedScriptSegment,
+                                segment: segmentKey,
                                 settingType: 'LOT',
-                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                // Use segment settings as defaults
+                                lotSettings: { 
+                                  maxLots: segmentDefaults.maxLots || 50, 
+                                  minLots: segmentDefaults.minLots || 1, 
+                                  perOrderLots: segmentDefaults.orderLots || 10 
+                                },
                                 quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
                                 fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
-                                brokerage: { type: 'PER_LOT', value: 0 },
-                                spread: 0,
+                                brokerage: { 
+                                  type: segmentDefaults.commissionType || 'PER_LOT', 
+                                  value: segmentDefaults.commissionLot || 0 
+                                },
+                                spread: { buy: 0, sell: 0 },
                                 block: { future: false, option: false }
                               }
                             }
@@ -7734,13 +7753,18 @@ const AllUsersManagement = () => {
                         type="button"
                         onClick={() => {
                           const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
                           const newScriptSettings = { ...editFormData.scriptSettings };
                           symbols.forEach(symbol => {
                             if (!newScriptSettings[symbol]) {
                               newScriptSettings[symbol] = {
                                 segment: selectedScriptSegment,
                                 settingType: 'LOT',
-                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
+                                lotSettings: { 
+                                  maxLots: segmentDefaults.maxLots || 50, 
+                                  minLots: segmentDefaults.minLots || 1, 
+                                  perOrderLots: segmentDefaults.orderLots || 10 
+                                },
                                 quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
                               };
                             }

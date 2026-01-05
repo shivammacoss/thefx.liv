@@ -53,13 +53,38 @@ class TradeService {
       'CRYPTO': 'EQ'
     };
     
-    // Also check by symbol category (NIFTY, BANKNIFTY -> NSEINDEX, stocks -> NSESTOCK)
-    const segmentKey = segmentMap[segment] || 'EQ';
+    const segmentKey = segmentMap[segment?.toUpperCase()] || segment || 'EQ';
     
-    // Get segment permissions from user
-    const segmentPermissions = user.segmentPermissions instanceof Map 
-      ? user.segmentPermissions.get(segmentKey)
-      : user.segmentPermissions?.[segmentKey];
+    // Handle Mongoose Map - convert to plain object first if needed
+    let segmentPerms = user.segmentPermissions;
+    if (segmentPerms && typeof segmentPerms.toObject === 'function') {
+      segmentPerms = segmentPerms.toObject();
+    }
+    
+    // Try to get segment permissions - check if it's a Map or Object
+    let segmentPermissions = null;
+    
+    if (segmentPerms instanceof Map) {
+      segmentPermissions = segmentPerms.get(segmentKey) || segmentPerms.get(segment?.toUpperCase());
+    } else if (segmentPerms && typeof segmentPerms === 'object') {
+      // It's a plain object (most likely from Mongoose)
+      segmentPermissions = segmentPerms[segmentKey] || segmentPerms[segment?.toUpperCase()];
+    }
+    
+    // Convert nested Map/Object if needed
+    if (segmentPermissions && typeof segmentPermissions.toObject === 'function') {
+      segmentPermissions = segmentPermissions.toObject();
+    }
+    
+    console.log('Segment Settings Debug:', {
+      segment, segmentKey,
+      found: !!segmentPermissions,
+      maxLots: segmentPermissions?.maxLots,
+      commissionLot: segmentPermissions?.commissionLot,
+      availableKeys: segmentPerms instanceof Map 
+        ? Array.from(segmentPerms.keys())
+        : Object.keys(segmentPerms || {})
+    });
     
     return segmentPermissions || {
       enabled: true,
@@ -77,16 +102,55 @@ class TradeService {
   }
   
   // Get user's script-specific settings
-  static getUserScriptSettings(user, symbol) {
-    // Extract base symbol (e.g., NIFTY from NIFTY25JANFUT)
-    const baseSymbol = symbol.replace(/\d+[A-Z]+FUT$/, '').replace(/\d+[A-Z]+CE$/, '').replace(/\d+[A-Z]+PE$/, '');
+  static getUserScriptSettings(user, symbol, category) {
+    if (!user.scriptSettings) return null;
     
-    // Get script settings from user
-    const scriptSettings = user.scriptSettings instanceof Map 
-      ? user.scriptSettings.get(baseSymbol)
-      : user.scriptSettings?.[baseSymbol];
+    // Handle Mongoose Map - convert to plain object first if needed
+    let scriptPerms = user.scriptSettings;
+    if (scriptPerms && typeof scriptPerms.toObject === 'function') {
+      scriptPerms = scriptPerms.toObject();
+    }
     
-    return scriptSettings || null;
+    // Try multiple lookup keys in order of priority
+    const lookupKeys = [];
+    
+    // 1. Category (e.g., "COPPER", "GOLD") - most reliable for MCX
+    if (category) {
+      lookupKeys.push(category.toUpperCase());
+      lookupKeys.push(category);
+    }
+    
+    // 2. Symbol as-is (e.g., "COPPER", "NIFTY25JANFUT")
+    if (symbol) {
+      lookupKeys.push(symbol.toUpperCase());
+      lookupKeys.push(symbol);
+      
+      // 3. Extract base symbol from F&O format
+      const baseSymbol = symbol.replace(/\d+[A-Z]{3}\d*FUT$/i, '')
+                               .replace(/\d+[A-Z]{3}\d+[CP]E$/i, '')
+                               .replace(/\d+$/i, '');
+      if (baseSymbol && baseSymbol !== symbol) {
+        lookupKeys.push(baseSymbol.toUpperCase());
+        lookupKeys.push(baseSymbol);
+      }
+    }
+    
+    // Try each key until we find settings
+    const isMap = scriptPerms instanceof Map;
+    for (const key of lookupKeys) {
+      let settings = isMap ? scriptPerms.get(key) : scriptPerms[key];
+      if (settings) {
+        // Convert nested Map/Object if needed
+        if (settings && typeof settings.toObject === 'function') {
+          settings = settings.toObject();
+        }
+        console.log(`Script settings found for key: ${key}`, JSON.stringify(settings));
+        return settings;
+      }
+    }
+    
+    console.log(`No script settings found. Using segment defaults. Tried keys: ${lookupKeys.join(', ')}`);
+    return null;
   }
   
   // Calculate brokerage based on user settings
@@ -153,7 +217,7 @@ class TradeService {
     
     // 3. Get user's segment and script settings
     const segmentSettings = this.getUserSegmentSettings(user, tradeData.segment, tradeData.instrumentType);
-    const scriptSettings = this.getUserScriptSettings(user, tradeData.symbol);
+    const scriptSettings = this.getUserScriptSettings(user, tradeData.symbol, tradeData.category);
     
     // 4. Validate segment is enabled for user
     if (!segmentSettings.enabled) {

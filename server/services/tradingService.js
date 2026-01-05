@@ -1,15 +1,27 @@
 import User from '../models/User.js';
 import Trade from '../models/Trade.js';
 import Admin from '../models/Admin.js';
+import TradeService from './tradeService.js';
 
 // Lot sizes for different instruments
 const LOT_SIZES = {
+  // NSE F&O
   'NIFTY': 25,
   'BANKNIFTY': 15,
   'FINNIFTY': 25,
   'MIDCPNIFTY': 50,
   'SENSEX': 10,
   'BANKEX': 15,
+  // MCX Commodities
+  'GOLD': 100,
+  'SILVER': 30,
+  'CRUDEOIL': 100,
+  'NATURALGAS': 1250,
+  'COPPER': 2500,
+  'ZINC': 5000,
+  'ALUMINIUM': 5000,
+  'LEAD': 5000,
+  'NICKEL': 1500,
 };
 
 // Market hours (IST)
@@ -28,16 +40,35 @@ const USD_TO_INR = 83;
 class TradingService {
   
   // Get lot size for instrument
-  static getLotSize(symbol, category) {
-    if (category) {
-      const cat = category.toUpperCase();
+  static getLotSize(symbol, category, exchange) {
+    const sym = symbol?.toUpperCase() || '';
+    const cat = category?.toUpperCase() || '';
+    const exch = exchange?.toUpperCase() || '';
+    
+    // MCX commodities
+    if (exch === 'MCX' || cat === 'MCX') {
+      if (sym.includes('GOLD') || cat.includes('GOLD')) return 100;
+      if (sym.includes('SILVER') || cat.includes('SILVER')) return 30;
+      if (sym.includes('CRUDEOIL') || cat.includes('CRUDEOIL')) return 100;
+      if (sym.includes('NATURALGAS') || cat.includes('NATURALGAS')) return 1250;
+      if (sym.includes('COPPER') || cat.includes('COPPER')) return 2500;
+      if (sym.includes('ZINC') || cat.includes('ZINC')) return 5000;
+      if (sym.includes('ALUMINIUM') || cat.includes('ALUMINIUM')) return 5000;
+      if (sym.includes('LEAD') || cat.includes('LEAD')) return 5000;
+      if (sym.includes('NICKEL') || cat.includes('NICKEL')) return 1500;
+    }
+    
+    // NSE F&O by category
+    if (cat) {
       if (cat.includes('NIFTY') && !cat.includes('BANK') && !cat.includes('FIN') && !cat.includes('MID')) return 25;
       if (cat.includes('BANKNIFTY')) return 15;
       if (cat.includes('FINNIFTY')) return 25;
       if (cat.includes('MIDCPNIFTY')) return 50;
     }
+    
+    // Check by symbol
     for (const [key, size] of Object.entries(LOT_SIZES)) {
-      if (symbol.toUpperCase().includes(key)) return size;
+      if (sym.includes(key)) return size;
     }
     return 1;
   }
@@ -97,13 +128,14 @@ class TradingService {
 
   // Calculate margin required with leverage
   static calculateMargin(order, user, leverage = 1) {
-    const { segment, productType, side, quantity, price, lotSize = 1 } = order;
-    const effectiveLotSize = lotSize || this.getLotSize(order.symbol, order.category);
+    const { segment, productType, side, quantity, price, lotSize = 1, lots = 1 } = order;
     
     // For crypto, convert USD to INR for margin calculation
     const isCrypto = segment === 'CRYPTO' || order.isCrypto || order.exchange === 'BINANCE';
     const effectivePrice = isCrypto ? price * USD_TO_INR : price;
-    const tradeValue = quantity * effectiveLotSize * effectivePrice;
+    
+    // Trade value: quantity already includes lotSize from frontend (quantity = lots × lotSize)
+    const tradeValue = quantity * effectivePrice;
     
     let baseMargin = 0;
 
@@ -124,7 +156,8 @@ class TradingService {
       if (side === 'BUY') {
         baseMargin = tradeValue;
       } else {
-        const notionalValue = quantity * effectiveLotSize * (order.strikePrice || price * 10);
+        // For option sell, use strike price for notional value
+        const notionalValue = quantity * (order.strikePrice || effectivePrice * 10);
         baseMargin = notionalValue * 0.20;
         if (productType === 'MIS') baseMargin *= 0.5;
       }
@@ -147,7 +180,7 @@ class TradingService {
     };
   }
 
-  // Place order
+  // Place order - Uses user's segment and script settings for all calculations
   static async placeOrder(userId, orderData) {
     const user = await User.findById(userId);
     if (!user) throw new Error('User not found');
@@ -166,78 +199,135 @@ class TradingService {
       throw new Error(marketStatus.reason);
     }
 
-    const leverage = orderData.leverage || 1;
-    const availableLeverages = await this.getAvailableLeverages(user);
-    if (!availableLeverages.includes(leverage)) {
-      throw new Error(`Leverage ${leverage}x not available. Available: ${availableLeverages.join(', ')}x`);
+    // Get user's segment and script settings
+    const segmentSettings = TradeService.getUserSegmentSettings(user, orderData.segment, orderData.instrumentType);
+    const scriptSettings = TradeService.getUserScriptSettings(user, orderData.symbol, orderData.category);
+    
+    // Validate segment is enabled
+    if (!segmentSettings.enabled) {
+      throw new Error(`Trading in ${orderData.segment} segment is not enabled for your account`);
+    }
+    
+    // Check if script is blocked
+    if (scriptSettings?.blocked) {
+      throw new Error(`Trading in ${orderData.symbol} is blocked for your account`);
     }
 
-    const marginCalc = this.calculateMargin(orderData, user, leverage);
-    const marginRequired = marginCalc.marginRequired;
+    const lotSize = orderData.lotSize || this.getLotSize(orderData.symbol, orderData.category, orderData.exchange);
+    const lots = orderData.lots || 1;
+    const totalQuantity = lots * lotSize;
+    
+    // Validate lot limits from user settings
+    // Script settings override segment settings, segment settings are the default
+    const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
+    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
+    
+    console.log('Lot Validation:', {
+      requestedLots: lots,
+      maxLots, minLots,
+      fromScript: !!scriptSettings?.lotSettings?.maxLots,
+      fromSegment: segmentSettings?.maxLots,
+      segment: orderData.segment
+    });
+    
+    if (lots < minLots) {
+      throw new Error(`Minimum ${minLots} lots required for ${orderData.symbol}`);
+    }
+    if (lots > maxLots) {
+      throw new Error(`Maximum ${maxLots} lots allowed for ${orderData.symbol}. Your limit is ${maxLots} lots.`);
+    }
+
+    // Calculate spread from user's script settings
+    const spreadPoints = TradeService.calculateUserSpread(scriptSettings, orderData.side);
+    
+    // Calculate brokerage from user's segment/script settings
+    const totalCommission = TradeService.calculateUserBrokerage(segmentSettings, scriptSettings, orderData, lots);
+    
+    // Calculate margin - check for fixed margin first
+    const isIntraday = orderData.productType === 'MIS' || orderData.productType === 'INTRADAY';
+    const isOption = orderData.instrumentType === 'OPTIONS';
+    const isOptionBuy = isOption && orderData.side === 'BUY';
+    const isOptionSell = isOption && orderData.side === 'SELL';
+    
+    let marginRequired = 0;
+    let usedFixedMargin = false;
+    let marginSource = 'calculated';
+    const leverage = orderData.leverage || 1;
+    const marginCalc = this.calculateMargin({ ...orderData, quantity: totalQuantity }, user, leverage);
+    
+    const price = orderData.price || 0;
+    const tradeValue = price * lotSize * lots;
+    
+    // Priority 1: Check for fixed margin in script settings
+    if (scriptSettings?.fixedMargin) {
+      let fixedMarginPerLot = 0;
+      if (isOptionBuy) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionBuyIntraday : scriptSettings.fixedMargin.optionBuyCarry;
+      } else if (isOptionSell) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionSellIntraday : scriptSettings.fixedMargin.optionSellCarry;
+      } else {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.intradayFuture : scriptSettings.fixedMargin.carryFuture;
+      }
+      
+      if (fixedMarginPerLot > 0) {
+        marginRequired = fixedMarginPerLot * lots;
+        usedFixedMargin = true;
+        marginSource = 'script_fixed';
+      }
+    }
+    
+    // Priority 2: Use segment exposure if no fixed margin
+    // Exposure formula: margin = tradeValue / exposure
+    if (!usedFixedMargin && segmentSettings) {
+      const exposure = isIntraday 
+        ? (segmentSettings.exposureIntraday || 1) 
+        : (segmentSettings.exposureCarryForward || 1);
+      
+      if (exposure > 0) {
+        marginRequired = tradeValue / exposure;
+        marginSource = 'segment_exposure';
+        console.log('Order margin from exposure:', { tradeValue, exposure, marginRequired, isIntraday });
+      }
+    }
+    
+    // Priority 3: Fall back to default calculated margin
+    if (marginRequired === 0) {
+      marginRequired = marginCalc.marginRequired;
+      marginSource = 'default_calculated';
+    }
 
     // Use tradingBalance for trading (dual wallet system)
     const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
     const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
     const availableBalance = walletBalance - blockedMargin;
 
-    if (marginRequired > availableBalance) {
-      throw new Error(`Insufficient funds. Required: ₹${marginRequired.toLocaleString()}, Available: ₹${availableBalance.toLocaleString()}`);
-    }
-
-    const lotSize = orderData.lotSize || this.getLotSize(orderData.symbol, orderData.category);
-    const totalQuantity = (orderData.lots || 1) * lotSize;
-    const lots = orderData.lots || 1;
-
-    // Get charge settings from admin
-    const spreadPoints = admin?.chargeSettings?.spread || 0;
-    const commissionType = admin?.chargeSettings?.commissionType || 'PER_LOT';
-    const perLotCharge = admin?.chargeSettings?.perLotCharge || admin?.chargeSettings?.commission || 0;
-    const perTradeCharge = admin?.chargeSettings?.perTradeCharge || 0;
-    const perCroreCharge = admin?.chargeSettings?.perCroreCharge || 0;
-    
-    // Calculate trade value for per crore calculation
-    const tradeValue = marginCalc.tradeValue;
-    
-    // Calculate commission based on type
-    let totalCommission = 0;
-    if (commissionType === 'PER_LOT') {
-      totalCommission = perLotCharge * lots;
-    } else if (commissionType === 'PER_TRADE') {
-      totalCommission = perTradeCharge;
-    } else if (commissionType === 'PER_CRORE') {
-      totalCommission = (tradeValue / 10000000) * perCroreCharge; // Per crore = per 1,00,00,000
-    }
-    
-    const spreadCost = spreadPoints * totalQuantity; // Spread affects P&L, not deducted upfront
-    const totalCharges = totalCommission; // Only commission is deducted from wallet
-
-    // Indian Net Trading: BUY uses Ask price, SELL uses Bid price
-    // Entry price should be the actual execution price (ask for buy, bid for sell)
-    let baseEntryPrice = orderData.price || 0;
-    if (orderData.orderType === 'MARKET') {
-      if (orderData.side === 'BUY') {
-        // BUY at Ask price (the price sellers are asking)
-        baseEntryPrice = orderData.askPrice || orderData.price || 0;
-      } else {
-        // SELL at Bid price (the price buyers are bidding)
-        baseEntryPrice = orderData.bidPrice || orderData.price || 0;
-      }
-    }
-    
-    // Apply spread on top of bid/ask price
-    let effectiveEntryPrice = baseEntryPrice;
-    if (orderData.orderType === 'MARKET' && spreadPoints > 0) {
-      if (orderData.side === 'BUY') {
-        effectiveEntryPrice = baseEntryPrice + spreadPoints; // Buy at higher price
-      } else {
-        effectiveEntryPrice = baseEntryPrice - spreadPoints; // Sell at lower price
-      }
-    }
-
     // Check if user has enough for margin + commission
     if ((marginRequired + totalCommission) > availableBalance) {
       throw new Error(`Insufficient funds. Required: ₹${(marginRequired + totalCommission).toLocaleString()}, Available: ₹${availableBalance.toLocaleString()}`);
     }
+
+    // Indian Net Trading: BUY uses Ask price, SELL uses Bid price
+    let baseEntryPrice = orderData.price || 0;
+    if (orderData.orderType === 'MARKET') {
+      if (orderData.side === 'BUY') {
+        baseEntryPrice = orderData.askPrice || orderData.price || 0;
+      } else {
+        baseEntryPrice = orderData.bidPrice || orderData.price || 0;
+      }
+    }
+    
+    // Apply spread from user settings on top of bid/ask price
+    let effectiveEntryPrice = baseEntryPrice;
+    if (orderData.orderType === 'MARKET' && spreadPoints > 0) {
+      if (orderData.side === 'BUY') {
+        effectiveEntryPrice = baseEntryPrice + spreadPoints;
+      } else {
+        effectiveEntryPrice = baseEntryPrice - spreadPoints;
+      }
+    }
+    
+    const finalTradeValue = totalQuantity * effectiveEntryPrice;
+    const totalCharges = totalCommission;
 
     // Get adminCode from user or fetch from admin if not set
     let adminCode = user.adminCode;
@@ -520,7 +610,7 @@ class TradingService {
   // Get pending orders - optimized
   static async getPendingOrders(userId) {
     return Trade.find({ user: userId, status: 'PENDING' })
-      .select('userId symbol exchange segment side productType quantity lots entryPrice limitPrice triggerPrice marginUsed status createdAt')
+      .select('userId symbol exchange segment side productType quantity lots entryPrice limitPrice triggerPrice marginUsed status createdAt orderType isCrypto commission')
       .sort({ createdAt: -1 })
       .lean();
   }
@@ -528,7 +618,7 @@ class TradingService {
   // Get trade history - optimized
   static async getTradeHistory(userId, limit = 50) {
     return Trade.find({ user: userId, status: 'CLOSED' })
-      .select('userId symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason')
+      .select('userId symbol exchange segment side productType quantity lots entryPrice exitPrice realizedPnL netPnL marginUsed commission closedAt closeReason isCrypto')
       .sort({ closedAt: -1 })
       .limit(limit)
       .lean();

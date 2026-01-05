@@ -431,7 +431,13 @@ const UserDashboard = () => {
         <div className="flex-shrink-0 w-64">
           <InstrumentsPanel 
             selectedInstrument={selectedInstrument}
-            onSelectInstrument={setSelectedInstrument}
+            onSelectInstrument={(inst) => {
+              setSelectedInstrument(inst);
+              // Also update trading panel when clicking instrument
+              if (tradeInstrument) {
+                setTradeInstrument(inst);
+              }
+            }}
             onBuySell={handleQuickTrade}
             user={user}
             marketData={marketData}
@@ -963,13 +969,13 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                     {/* Action Buttons */}
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={(e) => { e.stopPropagation(); onBuySell(inst, 'SELL'); }}
+                        onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }}
                         className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center text-white text-xs font-bold"
                       >
                         S
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); onBuySell(inst, 'BUY'); }}
+                        onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }}
                         className="w-7 h-7 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white text-xs font-bold"
                       >
                         B
@@ -1929,8 +1935,8 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
               <div className="text-right">{currencySymbol}{trade.entryPrice?.toFixed(2)}</div>
               <div className="text-right">{currencySymbol}{trade.exitPrice?.toFixed(2) || '-'}</div>
               <div className="text-right text-yellow-400">{currencySymbol}{(trade.commission || 0).toFixed(2)}</div>
-              <div className={`text-right font-medium ${(trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {(trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.realizedPnL || 0).toFixed(2)}
+              <div className={`text-right font-medium ${(trade.netPnL || trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {(trade.netPnL || trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.realizedPnL || 0).toFixed(2)}
               </div>
               <div className="text-center text-xs text-gray-400">{trade.closeReason || 'CLOSED'}</div>
             </div>
@@ -2255,16 +2261,34 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const isPut = instrument?.optionType === 'PE';
   const isFnO = isFutures || isOptions;
 
-  // Get lot size from instrument or default based on category
+  // Get lot size from instrument or default based on category/symbol
   const getLotSize = () => {
     if (instrument?.lotSize && instrument.lotSize > 1) return instrument.lotSize;
-    // Default lot sizes based on category
+    
     const category = instrument?.category?.toUpperCase() || '';
+    const symbol = instrument?.symbol?.toUpperCase() || '';
+    const exchange = instrument?.exchange?.toUpperCase() || '';
+    
+    // MCX lot sizes
+    if (exchange === 'MCX' || instrument?.segment === 'MCX' || instrument?.displaySegment === 'MCX') {
+      if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
+      if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
+      if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
+      if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
+      if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
+      if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
+      if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
+      if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
+      if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+    }
+    
+    // NSE F&O lot sizes
     if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
     if (category.includes('BANKNIFTY')) return 15;
     if (category.includes('FINNIFTY')) return 25;
     if (category.includes('MIDCPNIFTY')) return 50;
     if (category.includes('SENSEX')) return 10;
+    
     return 1;
   };
 
@@ -2563,7 +2587,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
               type="number"
               value={lots}
               onChange={(e) => setLots(e.target.value)}
-              className="flex-1 bg-dark-700 border border-dark-600 rounded px-3 py-2 text-center text-lg font-bold focus:outline-none focus:border-green-500"
+              className="w-16 bg-dark-700 border border-dark-600 rounded px-2 py-2 text-center text-lg font-bold focus:outline-none focus:border-green-500"
               min="1"
             />
             <button 
@@ -2662,17 +2686,35 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         {/* Margin Info */}
         <div className="bg-dark-700 rounded p-3 space-y-2">
           <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Available Balance</span>
+            <span className="text-gray-400">Trading Balance</span>
             <span className="text-green-400">
               {isCrypto 
-                ? `$${convertToUsd(marginPreview?.availableBalance || walletData?.availableMargin || 0)}`
-                : `₹${(marginPreview?.availableBalance || walletData?.availableMargin || 0).toLocaleString()}`
+                ? `$${convertToUsd(marginPreview?.tradingBalance || walletData?.tradingBalance || 0)}`
+                : `₹${(marginPreview?.tradingBalance || walletData?.tradingBalance || 0).toLocaleString()}`
+              }
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Used Margin</span>
+            <span className="text-yellow-400">
+              {isCrypto 
+                ? `$${convertToUsd(walletData?.usedMargin || 0)}`
+                : `₹${(walletData?.usedMargin || 0).toLocaleString()}`
+              }
+            </span>
+          </div>
+          <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
+            <span className="text-gray-400">Available</span>
+            <span className="text-green-400 font-medium">
+              {isCrypto 
+                ? `$${convertToUsd(marginPreview?.availableBalance || (walletData?.tradingBalance - walletData?.usedMargin) || 0)}`
+                : `₹${(marginPreview?.availableBalance || ((walletData?.tradingBalance || 0) - (walletData?.usedMargin || 0))).toLocaleString()}`
               }
             </span>
           </div>
           {leverage > 1 && (
             <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Effective Buying Power</span>
+              <span className="text-gray-400">Buying Power ({leverage}x)</span>
               <span className="text-purple-400">
                 {isCrypto 
                   ? `$${convertToUsd((marginPreview?.availableBalance || 0) * leverage)}`
@@ -2690,9 +2732,19 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
               }
             </span>
           </div>
-          {marginPreview && !marginPreview.canPlace && (
+          {marginPreview?.lotsError && (
             <div className="text-xs text-red-400 mt-2">
-              ⚠️ {marginPreview.reason}
+              ⚠️ {marginPreview.lotsError}
+            </div>
+          )}
+          {marginPreview && !marginPreview.canPlace && !marginPreview.lotsError && marginPreview.shortfall > 0 && (
+            <div className="text-xs text-red-400 mt-2">
+              ⚠️ Insufficient funds. Need ₹{marginPreview.shortfall?.toLocaleString()} more
+            </div>
+          )}
+          {marginPreview?.maxLots && (
+            <div className="text-xs text-gray-500 mt-1">
+              Lot limit: {marginPreview.minLots} - {marginPreview.maxLots}
             </div>
           )}
           {isOptions && orderType === 'sell' && (

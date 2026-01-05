@@ -109,25 +109,117 @@ router.get('/wallet', protect, async (req, res) => {
   }
 });
 
-// Calculate margin for order (preview)
+// Calculate margin for order (preview) - Uses user's segment and script settings
 router.post('/margin-preview', protect, async (req, res) => {
   try {
     const leverage = req.body.leverage || 1;
-    const marginCalc = TradingService.calculateMargin(req.body, req.user, leverage);
+    const { symbol, productType, side, lots = 1, instrumentType, category, segment } = req.body;
     
-    // Use cashBalance (primary) or balance (legacy) for wallet - same as trading service
-    const walletBalance = req.user.wallet?.cashBalance || req.user.wallet?.balance || 0;
+    // Import TradeService for user settings helpers
+    const TradeService = (await import('../services/tradeService.js')).default;
+    
+    // Get user's segment and script settings
+    const segmentSettings = TradeService.getUserSegmentSettings(req.user, segment, instrumentType);
+    const scriptSettings = TradeService.getUserScriptSettings(req.user, symbol, category);
+    
+    // Debug logging
+    console.log('Margin Preview Debug:', {
+      symbol, category, segment,
+      hasScriptSettings: !!scriptSettings,
+      fixedMargin: scriptSettings?.fixedMargin,
+      userScriptSettingsKeys: req.user.scriptSettings instanceof Map 
+        ? Array.from(req.user.scriptSettings.keys()) 
+        : Object.keys(req.user.scriptSettings || {})
+    });
+    
+    let marginRequired = 0;
+    let usedFixedMargin = false;
+    let marginSource = 'calculated';
+    
+    // Check for fixed margin in script settings
+    const isIntraday = productType === 'MIS' || productType === 'INTRADAY';
+    const isOption = instrumentType === 'OPTIONS';
+    const isOptionBuy = isOption && side === 'BUY';
+    const isOptionSell = isOption && side === 'SELL';
+    
+    const price = req.body.price || 0;
+    const lotSize = req.body.lotSize || TradingService.getLotSize(symbol, category, req.body.exchange);
+    const tradeValue = price * lotSize * lots;
+    
+    // Priority 1: Check for fixed margin in script settings
+    if (scriptSettings?.fixedMargin) {
+      let fixedMarginPerLot = 0;
+      if (isOptionBuy) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionBuyIntraday : scriptSettings.fixedMargin.optionBuyCarry;
+      } else if (isOptionSell) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionSellIntraday : scriptSettings.fixedMargin.optionSellCarry;
+      } else {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.intradayFuture : scriptSettings.fixedMargin.carryFuture;
+      }
+      
+      if (fixedMarginPerLot > 0) {
+        marginRequired = fixedMarginPerLot * lots;
+        usedFixedMargin = true;
+        marginSource = 'script_fixed';
+      }
+    }
+    
+    // Priority 2: Use segment exposure if no fixed margin
+    // Exposure formula: margin = tradeValue / exposure
+    if (!usedFixedMargin && segmentSettings) {
+      const exposure = isIntraday 
+        ? (segmentSettings.exposureIntraday || 1) 
+        : (segmentSettings.exposureCarryForward || 1);
+      
+      if (exposure > 0) {
+        marginRequired = tradeValue / exposure;
+        marginSource = 'segment_exposure';
+        console.log('Margin from exposure:', { tradeValue, exposure, marginRequired, isIntraday });
+      }
+    }
+    
+    // Priority 3: Fall back to default calculated margin
+    const marginCalc = TradingService.calculateMargin(req.body, req.user, leverage);
+    if (marginRequired === 0) {
+      marginRequired = marginCalc.marginRequired;
+      marginSource = 'default_calculated';
+    }
+    
+    // Calculate brokerage from user settings
+    const brokerage = TradeService.calculateUserBrokerage(segmentSettings, scriptSettings, req.body, lots);
+    
+    // Calculate spread from user settings
+    const spread = TradeService.calculateUserSpread(scriptSettings, side);
+    
+    // Use tradingBalance for trading (not cashBalance which is main wallet)
+    const tradingBalance = req.user.wallet?.tradingBalance || 0;
     const blockedMargin = req.user.wallet?.usedMargin || req.user.wallet?.blocked || 0;
-    const availableBalance = walletBalance - blockedMargin;
+    const availableBalance = tradingBalance - blockedMargin;
+    
+    // Get lot limits from settings
+    const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
+    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
+    
+    // Check if lots exceed limit
+    const lotsValid = lots >= minLots && lots <= maxLots;
     
     res.json({
-      marginRequired: marginCalc.marginRequired,
-      tradeValue: marginCalc.tradeValue,
+      marginRequired: Math.round(marginRequired * 100) / 100,
+      tradeValue: Math.round(tradeValue * 100) / 100,
       effectiveMargin: marginCalc.effectiveMargin,
       leverage: marginCalc.leverage,
-      canPlace: marginCalc.marginRequired <= availableBalance,
+      canPlace: lotsValid && (marginRequired + brokerage) <= availableBalance,
       availableBalance,
-      shortfall: marginCalc.marginRequired > availableBalance ? marginCalc.marginRequired - availableBalance : 0
+      tradingBalance,
+      usedFixedMargin,
+      marginSource,
+      brokerage: Math.round(brokerage * 100) / 100,
+      spread,
+      maxLots,
+      minLots,
+      lotsValid,
+      lotsError: !lotsValid ? `Lots must be between ${minLots} and ${maxLots}` : null,
+      shortfall: (marginRequired + brokerage) > availableBalance ? (marginRequired + brokerage) - availableBalance : 0
     });
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -234,9 +326,9 @@ router.post('/process-pending', protect, async (req, res) => {
 
 // Get lot size for symbol
 router.get('/lot-size/:symbol', (req, res) => {
-  const category = req.query.category;
-  const lotSize = TradingService.getLotSize(req.params.symbol, category);
-  res.json({ symbol: req.params.symbol, lotSize, category });
+  const { category, exchange } = req.query;
+  const lotSize = TradingService.getLotSize(req.params.symbol, category, exchange);
+  res.json({ symbol: req.params.symbol, lotSize, category, exchange });
 });
 
 // ==================== ADMIN CHARGE SETTINGS ====================
