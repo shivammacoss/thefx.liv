@@ -1323,10 +1323,38 @@ const SuperAdminCreateUser = () => {
       const targetAdmin = admins.find(a => a._id === selectedAdmin);
       const adminCode = targetAdmin?.adminCode || 'SUPER';
 
-      const { data } = await axios.post('/api/admin/manage/create-user', {
-        ...formData,
-        adminCode: adminCode
-      }, {
+      // Build a minimal payload to avoid oversized requests
+      const {
+        username, email, password, fullName, phone, initialBalance,
+        marginType, ledgerBalanceClosePercent, profitTradeHoldSeconds, lossTradeHoldSeconds,
+        isActivated, isReadOnly, isDemo, intradaySquare,
+        blockLimitAboveBelowHighLow, blockLimitBetweenHighLow,
+        segmentPermissions, scriptSettings
+      } = formData;
+
+      const payload = {
+        username,
+        email,
+        password,
+        fullName,
+        phone,
+        initialBalance,
+        marginType,
+        ledgerBalanceClosePercent,
+        profitTradeHoldSeconds,
+        lossTradeHoldSeconds,
+        isActivated,
+        isReadOnly,
+        isDemo,
+        intradaySquare,
+        blockLimitAboveBelowHighLow,
+        blockLimitBetweenHighLow,
+        segmentPermissions,
+        scriptSettings,
+        adminCode
+      };
+
+      const { data } = await axios.post('/api/admin/manage/create-user', payload, {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
 
