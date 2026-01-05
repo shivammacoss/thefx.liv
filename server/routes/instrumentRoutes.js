@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import Instrument from '../models/Instrument.js';
+import Watchlist from '../models/Watchlist.js';
 import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import marketDataService from '../services/marketDataService.js';
@@ -64,10 +65,96 @@ router.get('/public', async (req, res) => {
       ];
     }
     
+    // Get total count for stats
+    const totalCount = await Instrument.countDocuments({});
+    const enabledCount = await Instrument.countDocuments({ isEnabled: true });
+    const disabledCount = await Instrument.countDocuments({ isEnabled: false });
+    const featuredCount = await Instrument.countDocuments({ isFeatured: true });
+    
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 100;
+    const skip = (page - 1) * limit;
+    
     const instruments = await Instrument.find(query)
-      .select('token symbol name exchange segment instrumentType optionType strike expiry lotSize ltp open high low close change changePercent volume lastUpdated category isFeatured sortOrder')
+      .select('token symbol name exchange segment displaySegment instrumentType optionType strike expiry lotSize ltp open high low close change changePercent volume lastUpdated category isFeatured sortOrder isEnabled')
       .sort({ isFeatured: -1, category: 1, sortOrder: 1, symbol: 1 })
-      .limit(500);
+      .skip(skip)
+      .limit(limit);
+    
+    // Return with pagination info and stats
+    const queryCount = await Instrument.countDocuments(query);
+    res.json({
+      instruments,
+      pagination: {
+        page,
+        limit,
+        total: queryCount,
+        pages: Math.ceil(queryCount / limit)
+      },
+      stats: {
+        total: totalCount,
+        enabled: enabledCount,
+        disabled: disabledCount,
+        featured: featuredCount
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get instruments by exchange (for on-demand loading by segment)
+router.get('/by-exchange/:exchange', protectUser, async (req, res) => {
+  try {
+    const { exchange } = req.params;
+    const limit = parseInt(req.query.limit) || 500;
+    const adminCode = req.user.adminCode;
+    
+    const query = {
+      isEnabled: true,
+      exchange: exchange,
+      $or: [
+        { visibleToAdmins: { $exists: false } },
+        { visibleToAdmins: null },
+        { visibleToAdmins: { $size: 0 } },
+        { visibleToAdmins: adminCode }
+      ]
+    };
+    
+    const instruments = await Instrument.find(query)
+      .select('token symbol name exchange segment displaySegment instrumentType lotSize ltp change changePercent category isFeatured tradingSymbol expiry strike optionType')
+      .sort({ isFeatured: -1, symbol: 1 })
+      .limit(limit);
+    
+    res.json(instruments);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Search instruments globally (across all exchanges)
+router.get('/search', protectUser, async (req, res) => {
+  try {
+    const { q, limit = 100 } = req.query;
+    if (!q || q.length < 2) {
+      return res.json([]);
+    }
+    
+    const adminCode = req.user.adminCode;
+    const searchRegex = new RegExp(q, 'i');
+    
+    const instruments = await Instrument.find({
+      isEnabled: true,
+      $or: [
+        { symbol: searchRegex },
+        { name: searchRegex },
+        { tradingSymbol: searchRegex }
+      ]
+    })
+      .select('token symbol name exchange segment displaySegment instrumentType lotSize ltp change changePercent category tradingSymbol expiry strike optionType')
+      .sort({ isFeatured: -1, exchange: 1, symbol: 1 })
+      .limit(parseInt(limit));
     
     res.json(instruments);
   } catch (error) {
@@ -78,34 +165,50 @@ router.get('/public', async (req, res) => {
 // Get instruments for a specific user (respects admin visibility settings)
 router.get('/user', protectUser, async (req, res) => {
   try {
-    const { segment, category, search } = req.query;
+    const { segment, category, search, displaySegment } = req.query;
     const adminCode = req.user.adminCode;
     
+    // Build base query - instrument must be enabled and not hidden from this admin
     let query = {
       isEnabled: true,
+      // Visible if: no visibleToAdmins set (null/undefined/empty) OR admin is in the list
       $or: [
+        { visibleToAdmins: { $exists: false } },
+        { visibleToAdmins: null },
         { visibleToAdmins: { $size: 0 } },
         { visibleToAdmins: adminCode }
       ],
-      hiddenFromAdmins: { $ne: adminCode }
+      // Not hidden from this admin
+      $and: [
+        {
+          $or: [
+            { hiddenFromAdmins: { $exists: false } },
+            { hiddenFromAdmins: null },
+            { hiddenFromAdmins: { $size: 0 } },
+            { hiddenFromAdmins: { $ne: adminCode } }
+          ]
+        }
+      ]
     };
     
     if (segment) query.segment = segment;
+    if (displaySegment) query.displaySegment = displaySegment;
     if (category) query.category = category;
     if (search) {
-      query.$and = query.$and || [];
       query.$and.push({
         $or: [
           { symbol: { $regex: search, $options: 'i' } },
-          { name: { $regex: search, $options: 'i' } }
+          { name: { $regex: search, $options: 'i' } },
+          { tradingSymbol: { $regex: search, $options: 'i' } }
         ]
       });
     }
     
+    // Sort to prioritize: featured first, then NSE stocks, then by symbol
+    // No limit - return all instruments for client-side pagination
     const instruments = await Instrument.find(query)
-      .select('token symbol name exchange segment instrumentType lotSize ltp open high low close change changePercent volume lastUpdated category isFeatured')
-      .sort({ isFeatured: -1, category: 1, sortOrder: 1, symbol: 1 })
-      .limit(200);
+      .select('token symbol name exchange segment displaySegment instrumentType lotSize ltp open high low close change changePercent volume lastUpdated category isFeatured tradingSymbol expiry strike optionType')
+      .sort({ isFeatured: -1, exchange: 1, symbol: 1 });
     
     res.json(instruments);
   } catch (error) {
@@ -138,11 +241,39 @@ router.get('/admin', protectAdmin, async (req, res) => {
       ];
     }
     
+    // Get total counts for stats
+    const totalCount = await Instrument.countDocuments({});
+    const enabledCount = await Instrument.countDocuments({ isEnabled: true });
+    const disabledCount = await Instrument.countDocuments({ isEnabled: false });
+    const featuredCount = await Instrument.countDocuments({ isFeatured: true });
+    
+    // Pagination - default 100 per page, max 500
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const skip = (page - 1) * limit;
+    
     const instruments = await Instrument.find(query)
       .sort({ category: 1, optionType: 1, strike: 1, sortOrder: 1, symbol: 1 })
-      .limit(500);
+      .skip(skip)
+      .limit(limit);
     
-    res.json(instruments);
+    const queryCount = await Instrument.countDocuments(query);
+    
+    res.json({
+      instruments,
+      pagination: {
+        page,
+        limit,
+        total: queryCount,
+        pages: Math.ceil(queryCount / limit)
+      },
+      stats: {
+        total: totalCount,
+        enabled: enabledCount,
+        disabled: disabledCount,
+        featured: featuredCount
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -931,8 +1062,7 @@ router.get('/by-display-segment', async (req, res) => {
         displaySegment: segment 
       })
         .select('token symbol name exchange instrumentType category lotSize tickSize expiry strike optionType ltp change changePercent isFeatured sortOrder tradingSymbol')
-        .sort({ isFeatured: -1, sortOrder: 1, symbol: 1 })
-        .limit(500);
+        .sort({ isFeatured: -1, sortOrder: 1, symbol: 1 });
       
       result[segment] = instruments;
     }
@@ -953,13 +1083,74 @@ router.get('/by-display-segment', async (req, res) => {
 // Get all available segments with their instrument counts
 router.get('/segments', async (req, res) => {
   try {
-    const segments = await Instrument.aggregate([
+    // Normalize segment name to standard format
+    const normalizeSegmentName = (seg) => {
+      if (!seg) return null;
+      const upper = seg.toUpperCase().replace(/[•·]/g, '').trim();
+      if (upper.includes('NSE') && (upper.includes('FO') || upper.includes('F&O') || upper.includes('NFO'))) return 'NSE F&O';
+      if (upper.includes('BSE') && (upper.includes('FO') || upper.includes('F&O') || upper.includes('BFO'))) return 'BSE F&O';
+      if (upper.includes('NSE') || upper.includes('SPOT') || upper === 'EQUITY') return 'NSE';
+      if (upper.includes('MCX')) return 'MCX';
+      if (upper.includes('CURRENCY') || upper.includes('CDS')) return 'Currency';
+      if (upper.includes('CRYPTO')) return 'Crypto';
+      return seg; // Return original if no match
+    };
+    
+    // Get all instruments and count by normalized segment
+    const allInstruments = await Instrument.aggregate([
       { $match: { isEnabled: true } },
-      { $group: { _id: '$displaySegment', count: { $sum: 1 } } },
-      { $sort: { _id: 1 } }
+      { $group: { 
+        _id: { displaySegment: '$displaySegment', segment: '$segment', exchange: '$exchange' }, 
+        count: { $sum: 1 } 
+      }}
     ]);
     
-    res.json(segments.map(s => ({ segment: s._id, count: s.count })));
+    // Normalize and merge counts
+    const segmentMap = {};
+    for (const item of allInstruments) {
+      // Try displaySegment first, then segment, then exchange
+      let normalizedName = normalizeSegmentName(item._id.displaySegment);
+      if (!normalizedName) normalizedName = normalizeSegmentName(item._id.segment);
+      if (!normalizedName) {
+        // Use exchange as fallback
+        const ex = item._id.exchange;
+        if (ex === 'NSE') normalizedName = 'NSE';
+        else if (ex === 'NFO') normalizedName = 'NSE F&O';
+        else if (ex === 'MCX') normalizedName = 'MCX';
+        else if (ex === 'BFO') normalizedName = 'BSE F&O';
+        else if (ex === 'CDS') normalizedName = 'Currency';
+        else normalizedName = ex || 'Other';
+      }
+      
+      if (!segmentMap[normalizedName]) segmentMap[normalizedName] = 0;
+      segmentMap[normalizedName] += item.count;
+    }
+    
+    // Always include all standard segments (even if no instruments exist yet)
+    const standardSegments = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'];
+    for (const seg of standardSegments) {
+      if (!segmentMap[seg]) {
+        segmentMap[seg] = 0;
+      }
+    }
+    
+    // Define preferred order
+    const preferredOrder = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'];
+    
+    // Sort by preferred order, then alphabetically
+    const result = Object.entries(segmentMap)
+      .filter(([segment]) => segment && segment !== 'null' && segment !== 'undefined')
+      .map(([segment, count]) => ({ segment, count }))
+      .sort((a, b) => {
+        const aIdx = preferredOrder.indexOf(a.segment);
+        const bIdx = preferredOrder.indexOf(b.segment);
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        if (aIdx !== -1) return -1;
+        if (bIdx !== -1) return 1;
+        return a.segment.localeCompare(b.segment);
+      });
+    
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -968,6 +1159,24 @@ router.get('/segments', async (req, res) => {
 // Get all segments and scripts for user settings page
 router.get('/settings-data', async (req, res) => {
   try {
+    // Normalize segment name to standard format
+    const normalizeSegment = (seg) => {
+      if (!seg) return 'OTHER';
+      // Map various formats to standard segment names
+      const normalized = seg.toUpperCase()
+        .replace(/[•·]/g, '')  // Remove bullet characters
+        .replace(/\s+/g, ' ')   // Normalize spaces
+        .trim();
+      
+      if (normalized.includes('NSE') && (normalized.includes('FO') || normalized.includes('F&O'))) return 'NSE_FO';
+      if (normalized.includes('BSE') && (normalized.includes('FO') || normalized.includes('F&O'))) return 'BSE_FO';
+      if (normalized.includes('NSE') || normalized.includes('SPOT') || normalized.includes('EQUITY')) return 'NSE';
+      if (normalized.includes('MCX')) return 'MCX';
+      if (normalized.includes('CURRENCY') || normalized.includes('CDS')) return 'CURRENCY';
+      if (normalized.includes('CRYPTO')) return 'CRYPTO';
+      return normalized.replace(/\s+/g, '_');
+    };
+    
     // Get all unique segments from instruments
     const segmentAgg = await Instrument.aggregate([
       { $match: { isEnabled: true } },
@@ -979,12 +1188,18 @@ router.get('/settings-data', async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
     
-    const segments = segmentAgg.map(s => ({
-      id: s._id?.replace(/\s+/g, '_').replace(/&/g, '').toUpperCase() || 'OTHER',
-      name: s._id || 'Other',
-      count: s.count,
-      exchanges: s.exchanges
-    }));
+    // Merge segments with same normalized name
+    const segmentMap = {};
+    for (const s of segmentAgg) {
+      const normalizedId = normalizeSegment(s._id);
+      if (!segmentMap[normalizedId]) {
+        segmentMap[normalizedId] = { id: normalizedId, name: s._id || 'Other', count: 0, exchanges: [] };
+      }
+      segmentMap[normalizedId].count += s.count;
+      segmentMap[normalizedId].exchanges = [...new Set([...segmentMap[normalizedId].exchanges, ...s.exchanges])];
+    }
+    
+    const segments = Object.values(segmentMap);
     
     // Get all unique base symbols (scripts) grouped by segment
     const scriptsAgg = await Instrument.aggregate([
@@ -1004,10 +1219,10 @@ router.get('/settings-data', async (req, res) => {
       { $sort: { '_id.segment': 1, '_id.category': 1, '_id.name': 1 } }
     ]);
     
-    // Group scripts by segment
+    // Group scripts by segment using normalized segment names
     const scriptsBySegment = {};
     for (const script of scriptsAgg) {
-      const segmentKey = script._id.segment?.replace(/\s+/g, '_').replace(/&/g, '').toUpperCase() || 'OTHER';
+      const segmentKey = normalizeSegment(script._id.segment);
       if (!scriptsBySegment[segmentKey]) {
         scriptsBySegment[segmentKey] = [];
       }
@@ -1074,6 +1289,159 @@ router.get('/settings-data', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching settings data:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== WATCHLIST API ====================
+
+// Get user's watchlist (all segments)
+router.get('/watchlist', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const watchlists = await Watchlist.find({ userId }).lean();
+    
+    // Convert to object format { 'NSE': [...], 'NSE F&O': [...], ... }
+    const result = {
+      'NSE': [],
+      'NSE F&O': [],
+      'MCX': [],
+      'BSE F&O': [],
+      'Currency': [],
+      'Crypto': []
+    };
+    
+    for (const wl of watchlists) {
+      result[wl.segment] = wl.instruments || [];
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching watchlist:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Add instrument to watchlist
+router.post('/watchlist/add', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { instrument, segment } = req.body;
+    
+    if (!instrument || !segment) {
+      return res.status(400).json({ message: 'Instrument and segment are required' });
+    }
+    
+    // Find or create watchlist for this segment
+    let watchlist = await Watchlist.findOne({ userId, segment });
+    
+    if (!watchlist) {
+      watchlist = new Watchlist({ userId, segment, instruments: [] });
+    }
+    
+    // Check if already exists
+    const exists = watchlist.instruments.some(i => i.token === instrument.token);
+    if (exists) {
+      return res.status(400).json({ message: 'Instrument already in watchlist' });
+    }
+    
+    // Add instrument
+    watchlist.instruments.push({
+      token: instrument.token,
+      symbol: instrument.symbol,
+      name: instrument.name,
+      exchange: instrument.exchange,
+      segment: instrument.segment,
+      displaySegment: instrument.displaySegment,
+      instrumentType: instrument.instrumentType,
+      optionType: instrument.optionType,
+      strike: instrument.strike,
+      expiry: instrument.expiry,
+      lotSize: instrument.lotSize,
+      tradingSymbol: instrument.tradingSymbol,
+      category: instrument.category,
+      pair: instrument.pair,
+      isCrypto: instrument.isCrypto
+    });
+    
+    await watchlist.save();
+    res.json({ message: 'Added to watchlist', segment });
+  } catch (error) {
+    console.error('Error adding to watchlist:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Remove instrument from watchlist
+router.post('/watchlist/remove', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { token, segment } = req.body;
+    
+    if (!token || !segment) {
+      return res.status(400).json({ message: 'Token and segment are required' });
+    }
+    
+    const watchlist = await Watchlist.findOne({ userId, segment });
+    
+    if (!watchlist) {
+      return res.status(404).json({ message: 'Watchlist not found' });
+    }
+    
+    watchlist.instruments = watchlist.instruments.filter(i => i.token !== token);
+    await watchlist.save();
+    
+    res.json({ message: 'Removed from watchlist' });
+  } catch (error) {
+    console.error('Error removing from watchlist:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Sync entire watchlist (for migration from localStorage)
+router.post('/watchlist/sync', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { watchlistBySegment } = req.body;
+    
+    if (!watchlistBySegment) {
+      return res.status(400).json({ message: 'Watchlist data required' });
+    }
+    
+    // Update each segment
+    for (const [segment, instruments] of Object.entries(watchlistBySegment)) {
+      if (!['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'].includes(segment)) continue;
+      
+      await Watchlist.findOneAndUpdate(
+        { userId, segment },
+        { 
+          userId, 
+          segment, 
+          instruments: instruments.map(inst => ({
+            token: inst.token,
+            symbol: inst.symbol,
+            name: inst.name,
+            exchange: inst.exchange,
+            segment: inst.segment,
+            displaySegment: inst.displaySegment,
+            instrumentType: inst.instrumentType,
+            optionType: inst.optionType,
+            strike: inst.strike,
+            expiry: inst.expiry,
+            lotSize: inst.lotSize,
+            tradingSymbol: inst.tradingSymbol,
+            category: inst.category,
+            pair: inst.pair,
+            isCrypto: inst.isCrypto
+          }))
+        },
+        { upsert: true, new: true }
+      );
+    }
+    
+    res.json({ message: 'Watchlist synced successfully' });
+  } catch (error) {
+    console.error('Error syncing watchlist:', error);
     res.status(500).json({ message: error.message });
   }
 });

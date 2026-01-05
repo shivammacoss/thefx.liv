@@ -168,15 +168,11 @@ router.get('/market-data', async (req, res) => {
     
     // If we have WebSocket data, return it
     if (wsDataCount > 0) {
-      console.log(`Returning ${wsDataCount} WebSocket market data entries`);
       return res.json(wsData);
     }
     
-    console.log('No WebSocket data, trying REST API fallback...');
-    
+    // No WebSocket data - check if we have a session
     if (!zerodhaSession.accessToken) {
-      // Return empty data instead of 401 so dashboard doesn't show errors
-      console.log('No Zerodha session, returning empty data');
       return res.json({});
     }
     
@@ -1010,70 +1006,107 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
       } catch (e) { errors++; }
     }
     
-    // 3. NSE F&O (Index Futures)
-    const nfoFutures = allInstruments.filter(i => 
-      i.exchange === 'NFO' && i.instrument_type === 'FUT' && ['NIFTY', 'BANKNIFTY', 'FINNIFTY'].includes(i.name)
+    // 3. NSE F&O - ALL Futures (Index + Stock Futures)
+    // Debug: Check what exchanges exist in the data
+    const exchanges = [...new Set(allInstruments.map(i => i.exchange))];
+    console.log('Available exchanges:', exchanges);
+    
+    // Debug: Check sample NFO instrument
+    const sampleNfo = allInstruments.find(i => i.exchange === 'NFO');
+    if (sampleNfo) {
+      console.log('Sample NFO instrument:', JSON.stringify(sampleNfo).substring(0, 500));
+    } else {
+      console.log('No NFO instruments found in data!');
+    }
+    
+    const allNfoFutures = allInstruments.filter(i => 
+      i.exchange === 'NFO' && i.instrument_type === 'FUT'
     ).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
     
-    const futuresByName = {};
-    for (const fut of nfoFutures) {
-      if (!futuresByName[fut.name]) futuresByName[fut.name] = [];
-      if (futuresByName[fut.name].length < 2) futuresByName[fut.name].push(fut);
-    }
+    console.log(`Found ${allNfoFutures.length} total NFO futures`);
     
-    for (const [name, futures] of Object.entries(futuresByName)) {
-      for (const fut of futures) {
-        try {
-          await Instrument.create({
-            token: fut.instrument_token,
-            symbol: fut.tradingsymbol,
-            name: `${fut.name} FUT`,
-            exchange: 'NFO',
-            segment: 'FNO',
-            displaySegment: 'NSE F&O',
-            instrumentType: 'FUTURES',
-            category: fut.name === 'NIFTY' ? 'NIFTY' : fut.name === 'BANKNIFTY' ? 'BANKNIFTY' : 'FINNIFTY',
-            tradingSymbol: fut.tradingsymbol,
-            lotSize: parseInt(fut.lot_size) || 25,
-            tickSize: parseFloat(fut.tick_size) || 0.05,
-            expiry: new Date(fut.expiry),
-            isEnabled: true,
-            isFeatured: true,
-            sortOrder: 0
-          });
-          added++;
-          counts.nsefo++;
-        } catch (e) { errors++; }
+    // Helper to format expiry month
+    const getExpiryMonth = (expiry) => {
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const d = new Date(expiry);
+      return months[d.getMonth()];
+    };
+    
+    const indexNames = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+    
+    // Save ALL NFO futures directly (not grouped)
+    console.log(`Saving ${allNfoFutures.length} NFO futures...`);
+    let nfoErrors = [];
+    let nfoSaved = 0;
+    
+    // Only save first 3 expiries per underlying
+    const savedByName = {};
+    for (const fut of allNfoFutures) {
+      const baseName = fut.name || 'UNKNOWN';
+      if (!savedByName[baseName]) savedByName[baseName] = 0;
+      if (savedByName[baseName] >= 3) continue; // Skip if already have 3 expiries
+      
+      try {
+        const expiryMonth = getExpiryMonth(fut.expiry);
+        const isIndex = indexNames.includes(baseName);
+        await Instrument.create({
+          token: String(fut.instrument_token),
+          symbol: fut.tradingsymbol,
+          name: `${baseName} ${expiryMonth} FUT`,
+          exchange: 'NFO',
+          segment: 'FNO',
+          displaySegment: 'NSE F&O',
+          instrumentType: 'FUTURES',
+          category: isIndex ? baseName : 'STOCKS',
+          tradingSymbol: fut.tradingsymbol,
+          lotSize: parseInt(fut.lot_size) || 25,
+          tickSize: parseFloat(fut.tick_size) || 0.05,
+          expiry: new Date(fut.expiry),
+          isEnabled: true,
+          isFeatured: isIndex,
+          sortOrder: isIndex ? 0 : 50
+        });
+        savedByName[baseName]++;
+        nfoSaved++;
+        added++;
+        counts.nsefo++;
+      } catch (e) { 
+        errors++; 
+        if (nfoErrors.length < 5) nfoErrors.push(`${baseName}: ${e.message}`);
       }
     }
+    console.log(`NFO Futures: Saved ${nfoSaved}, Errors: ${nfoErrors.length}`);
+    if (nfoErrors.length > 0) console.log('NFO Futures errors:', nfoErrors);
     
-    // 3b. NSE F&O Options (CE/PE) - Get nearest expiry options around ATM
-    const nfoOptions = allInstruments.filter(i => 
-      i.exchange === 'NFO' && 
-      (i.instrument_type === 'CE' || i.instrument_type === 'PE') && 
-      ['NIFTY', 'BANKNIFTY', 'FINNIFTY'].includes(i.name)
+    // 3b. NSE F&O Options (CE/PE) - ALL Options (Index + Stock)
+    const allNfoOptions = allInstruments.filter(i => 
+      i.exchange === 'NFO' && (i.instrument_type === 'CE' || i.instrument_type === 'PE')
     );
     
-    // Group by name and expiry, get nearest expiry
+    // Group ALL options by name and expiry
     const optionsByNameExpiry = {};
-    for (const opt of nfoOptions) {
-      const key = `${opt.name}_${opt.expiry}`;
+    for (const opt of allNfoOptions) {
       if (!optionsByNameExpiry[opt.name]) optionsByNameExpiry[opt.name] = {};
       if (!optionsByNameExpiry[opt.name][opt.expiry]) optionsByNameExpiry[opt.name][opt.expiry] = [];
       optionsByNameExpiry[opt.name][opt.expiry].push(opt);
     }
     
-    // Get nearest 2 expiries for each index and add ~10 strikes around ATM
+    // Get nearest 2 expiries for each underlying and add strikes around ATM
     for (const [name, expiries] of Object.entries(optionsByNameExpiry)) {
+      const isIndex = indexNames.includes(name);
       const sortedExpiries = Object.keys(expiries).sort((a, b) => new Date(a) - new Date(b));
       const nearestExpiries = sortedExpiries.slice(0, 2); // Get 2 nearest expiries
       
       for (const expiry of nearestExpiries) {
         const options = expiries[expiry];
-        // Sort by strike and get middle ~20 options (10 CE + 10 PE around ATM)
+        const expiryMonth = getExpiryMonth(expiry);
+        
+        // Sort by strike and get strikes around ATM
         const strikes = [...new Set(options.map(o => parseFloat(o.strike)))].sort((a, b) => a - b);
         const midIndex = Math.floor(strikes.length / 2);
-        const selectedStrikes = strikes.slice(Math.max(0, midIndex - 5), midIndex + 5);
+        // For indices get 10 strikes, for stocks get 5 strikes around ATM
+        const strikeRange = isIndex ? 5 : 3;
+        const selectedStrikes = strikes.slice(Math.max(0, midIndex - strikeRange), midIndex + strikeRange);
         
         for (const opt of options) {
           if (!selectedStrikes.includes(parseFloat(opt.strike))) continue;
@@ -1082,14 +1115,14 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
             await Instrument.create({
               token: opt.instrument_token,
               symbol: opt.tradingsymbol,
-              name: `${opt.name} ${opt.strike} ${opt.instrument_type}`,
+              name: `${opt.name} ${expiryMonth} ${opt.strike} ${opt.instrument_type}`,
               exchange: 'NFO',
               segment: 'FNO',
               displaySegment: 'NSE F&O',
               instrumentType: 'OPTIONS',
               optionType: opt.instrument_type,
               strike: parseFloat(opt.strike),
-              category: opt.name === 'NIFTY' ? 'NIFTY' : opt.name === 'BANKNIFTY' ? 'BANKNIFTY' : 'FINNIFTY',
+              category: isIndex ? opt.name : 'STOCKS',
               tradingSymbol: opt.tradingsymbol,
               lotSize: parseInt(opt.lot_size) || 25,
               tickSize: parseFloat(opt.tick_size) || 0.05,
@@ -1143,9 +1176,17 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     }
     
     // 5. BSE F&O Futures
-    const bseFutures = allInstruments.filter(i => 
-      i.exchange === 'BFO' && i.instrument_type === 'FUT' && ['SENSEX', 'BANKEX'].includes(i.name)
-    ).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+    const bseIndexNames = ['SENSEX', 'BANKEX'];
+    const bseFutures = allInstruments.filter(i => {
+      if (i.exchange !== 'BFO' || i.instrument_type !== 'FUT') return false;
+      return bseIndexNames.some(idx => 
+        i.name === idx || 
+        i.tradingsymbol?.startsWith(idx) ||
+        i.name?.toUpperCase() === idx
+      );
+    }).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+    
+    console.log(`Found ${bseFutures.length} BFO futures`);
     
     const bseFuturesByName = {};
     for (const fut of bseFutures) {
@@ -1180,11 +1221,17 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     }
     
     // 5b. BSE F&O Options
-    const bseOptions = allInstruments.filter(i => 
-      i.exchange === 'BFO' && 
-      (i.instrument_type === 'CE' || i.instrument_type === 'PE') && 
-      ['SENSEX', 'BANKEX'].includes(i.name)
-    );
+    const bseOptions = allInstruments.filter(i => {
+      if (i.exchange !== 'BFO') return false;
+      if (i.instrument_type !== 'CE' && i.instrument_type !== 'PE') return false;
+      return bseIndexNames.some(idx => 
+        i.name === idx || 
+        i.tradingsymbol?.startsWith(idx) ||
+        i.name?.toUpperCase() === idx
+      );
+    });
+    
+    console.log(`Found ${bseOptions.length} BFO options`);
     
     const bseOptionsByNameExpiry = {};
     for (const opt of bseOptions) {
@@ -1236,37 +1283,50 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     // 6. CURRENCY (CDS)
     const currencyPairs = ['USDINR', 'EURINR', 'GBPINR', 'JPYINR'];
     const cdsFutures = allInstruments.filter(i => i.exchange === 'CDS' && i.instrument_type === 'FUT');
+    console.log(`Found ${cdsFutures.length} CDS futures`);
+    
     const cdsBySymbol = {};
     for (const fut of cdsFutures) {
-      if (currencyPairs.includes(fut.name)) {
-        if (!cdsBySymbol[fut.name] || new Date(fut.expiry) < new Date(cdsBySymbol[fut.name].expiry)) {
-          cdsBySymbol[fut.name] = fut;
-        }
+      // Check both name and tradingsymbol for currency pairs
+      const matchedPair = currencyPairs.find(pair => 
+        fut.name === pair || 
+        fut.tradingsymbol?.startsWith(pair) ||
+        fut.name?.toUpperCase() === pair
+      );
+      if (matchedPair) {
+        if (!cdsBySymbol[matchedPair]) cdsBySymbol[matchedPair] = [];
+        cdsBySymbol[matchedPair].push(fut);
       }
     }
     
-    for (const [baseSymbol, contract] of Object.entries(cdsBySymbol)) {
-      try {
-        await Instrument.create({
-          token: contract.instrument_token,
-          symbol: baseSymbol,
-          name: baseSymbol,
-          exchange: 'CDS',
-          segment: 'CURRENCY',
-          displaySegment: 'Currency',
-          instrumentType: 'FUTURES',
-          category: 'CURRENCY',
-          tradingSymbol: contract.tradingsymbol,
-          lotSize: parseInt(contract.lot_size) || 1,
-          tickSize: parseFloat(contract.tick_size) || 0.0025,
-          expiry: new Date(contract.expiry),
-          isEnabled: true,
-          isFeatured: baseSymbol === 'USDINR',
-          sortOrder: currencyPairs.indexOf(baseSymbol)
-        });
-        added++;
-        counts.currency++;
-      } catch (e) { errors++; }
+    // Get nearest 2 expiries for each currency pair
+    for (const [baseSymbol, contracts] of Object.entries(cdsBySymbol)) {
+      const sorted = contracts.sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+      const nearest = sorted.slice(0, 2); // Get 2 nearest expiries
+      
+      for (const contract of nearest) {
+        try {
+          await Instrument.create({
+            token: contract.instrument_token,
+            symbol: contract.tradingsymbol,
+            name: baseSymbol,
+            exchange: 'CDS',
+            segment: 'CURRENCY',
+            displaySegment: 'Currency',
+            instrumentType: 'FUTURES',
+            category: 'CURRENCY',
+            tradingSymbol: contract.tradingsymbol,
+            lotSize: parseInt(contract.lot_size) || 1,
+            tickSize: parseFloat(contract.tick_size) || 0.0025,
+            expiry: new Date(contract.expiry),
+            isEnabled: true,
+            isFeatured: baseSymbol === 'USDINR',
+            sortOrder: currencyPairs.indexOf(baseSymbol)
+          });
+          added++;
+          counts.currency++;
+        } catch (e) { errors++; }
+      }
     }
     
     // Subscribe to all tokens

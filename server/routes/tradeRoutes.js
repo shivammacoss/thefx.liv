@@ -212,6 +212,20 @@ router.get('/summary', protectUser, async (req, res) => {
   }
 });
 
+// Get trade history (all trades - open and closed)
+router.get('/history', protectUser, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const trades = await Trade.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    res.json(trades);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get margin preview
 router.post('/margin-preview', protectUser, async (req, res) => {
   try {

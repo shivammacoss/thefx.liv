@@ -3833,6 +3833,8 @@ const InstrumentManagement = () => {
   const [seeding, setSeeding] = useState(false);
   const [marketData, setMarketData] = useState({});
   const [zerodhaStatus, setZerodhaStatus] = useState({ connected: false });
+  const [pagination, setPagination] = useState({ page: 1, limit: 100, total: 0, pages: 0 });
+  const [stats, setStats] = useState({ total: 0, enabled: 0, disabled: 0, featured: 0 });
 
   useEffect(() => {
     fetchInstruments();
@@ -3842,7 +3844,7 @@ const InstrumentManagement = () => {
     // Refresh market data every 2 seconds
     const interval = setInterval(fetchMarketData, 2000);
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, pagination.page]);
 
   const fetchZerodhaStatus = async () => {
     try {
@@ -3871,11 +3873,21 @@ const InstrumentManagement = () => {
       if (filter.category) url += `category=${filter.category}&`;
       if (filter.enabled) url += `enabled=${filter.enabled}&`;
       if (search) url += `search=${search}&`;
+      url += `page=${pagination.page}&limit=${pagination.limit}`;
       
       const { data } = await axios.get(url, {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
-      setInstruments(data);
+      
+      // Handle new paginated response format
+      if (data.instruments) {
+        setInstruments(data.instruments);
+        setPagination(prev => ({ ...prev, ...data.pagination }));
+        setStats(data.stats);
+      } else {
+        // Fallback for old format
+        setInstruments(Array.isArray(data) ? data : []);
+      }
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -3911,10 +3923,19 @@ const InstrumentManagement = () => {
   const handleSeedDefaults = async () => {
     setSeeding(true);
     try {
-      const { data } = await axios.post('/api/instruments/admin/seed-defaults', {}, {
-        headers: { Authorization: `Bearer ${admin.token}` }
-      });
-      alert(data.message);
+      // If Zerodha is connected, use reset-and-sync to get all instruments
+      if (zerodhaStatus?.connected) {
+        const { data } = await axios.post('/api/zerodha/reset-and-sync', {}, {
+          headers: { Authorization: `Bearer ${admin.token}` }
+        });
+        alert(`Synced ${data.added} instruments from Zerodha!\n\nNSE: ${data.counts?.nse || 0}\nIndices: ${data.counts?.indices || 0}\nNSE F&O: ${data.counts?.nsefo || 0}\nMCX: ${data.counts?.mcx || 0}\nBSE F&O: ${data.counts?.bsefo || 0}\nCurrency: ${data.counts?.currency || 0}`);
+      } else {
+        // Fallback to basic seed if not connected
+        const { data } = await axios.post('/api/instruments/admin/seed-defaults', {}, {
+          headers: { Authorization: `Bearer ${admin.token}` }
+        });
+        alert(data.message + '\n\nNote: Connect to Zerodha to sync all 9000+ instruments.');
+      }
       fetchInstruments();
     } catch (error) {
       alert(error.response?.data?.message || 'Error seeding instruments');
@@ -4013,19 +4034,19 @@ const InstrumentManagement = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total</div>
-          <div className="text-2xl font-bold">{instruments.length}</div>
+          <div className="text-2xl font-bold">{stats.total || instruments.length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Enabled</div>
-          <div className="text-2xl font-bold text-green-400">{instruments.filter(i => i.isEnabled).length}</div>
+          <div className="text-2xl font-bold text-green-400">{stats.enabled || instruments.filter(i => i.isEnabled).length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Disabled</div>
-          <div className="text-2xl font-bold text-red-400">{instruments.filter(i => !i.isEnabled).length}</div>
+          <div className="text-2xl font-bold text-red-400">{stats.disabled || instruments.filter(i => !i.isEnabled).length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Featured</div>
-          <div className="text-2xl font-bold text-yellow-400">{instruments.filter(i => i.isFeatured).length}</div>
+          <div className="text-2xl font-bold text-yellow-400">{stats.featured || instruments.filter(i => i.isFeatured).length}</div>
         </div>
       </div>
 
@@ -4121,6 +4142,48 @@ const InstrumentManagement = () => {
               })}
             </tbody>
           </table>
+          
+          {/* Pagination Controls */}
+          {pagination.pages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-dark-600">
+              <div className="text-sm text-gray-400">
+                Showing {((pagination.page - 1) * pagination.limit) + 1} - {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPagination(p => ({ ...p, page: 1 }))}
+                  disabled={pagination.page === 1}
+                  className="px-3 py-1 bg-dark-600 hover:bg-dark-500 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))}
+                  disabled={pagination.page === 1}
+                  className="px-3 py-1 bg-dark-600 hover:bg-dark-500 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-3 py-1 text-sm">
+                  Page {pagination.page} of {pagination.pages}
+                </span>
+                <button
+                  onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}
+                  disabled={pagination.page >= pagination.pages}
+                  className="px-3 py-1 bg-dark-600 hover:bg-dark-500 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  onClick={() => setPagination(p => ({ ...p, page: pagination.pages }))}
+                  disabled={pagination.page >= pagination.pages}
+                  className="px-3 py-1 bg-dark-600 hover:bg-dark-500 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -4967,6 +5030,7 @@ const SuperAdminAllTrades = () => {
   const [filter, setFilter] = useState('');
   const [selectedAdmin, setSelectedAdmin] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Filter trades by search term
   const filteredTrades = trades.filter(t => {
@@ -5040,7 +5104,22 @@ const SuperAdminAllTrades = () => {
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <h1 className="text-xl md:text-2xl font-bold">All Trade Management</h1>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"
+        >
+          <Plus size={18} /> Create Trade
+        </button>
       </div>
+      
+      {/* Create Trade Modal */}
+      {showCreateModal && (
+        <CreateTradeModal
+          token={admin.token}
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => { setShowCreateModal(false); fetchTrades(); }}
+        />
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-4 mb-6">
@@ -5552,11 +5631,13 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
 
   const fetchInstruments = async () => {
     try {
-      const { data } = await axios.get('/api/instruments/admin', {
+      const { data } = await axios.get('/api/instruments/admin?limit=500', {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // API returns { instruments, pagination, stats } - extract instruments array
+      const instrumentsArray = data?.instruments || data || [];
       // Map to include tradingsymbol field for compatibility
-      const mapped = (data || []).map(i => ({
+      const mapped = (Array.isArray(instrumentsArray) ? instrumentsArray : []).map(i => ({
         ...i,
         tradingsymbol: i.tradingSymbol || i.symbol,
         instrument_token: i.token
@@ -5573,10 +5654,15 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
     u.userId?.toLowerCase().includes(searchUser.toLowerCase())
   ).slice(0, 10);
 
-  const filteredInstruments = instruments.filter(i =>
-    i.tradingsymbol?.toLowerCase().includes(searchInstrument.toLowerCase()) ||
-    i.name?.toLowerCase().includes(searchInstrument.toLowerCase())
-  ).slice(0, 10);
+  const filteredInstruments = instruments.filter(i => {
+    const term = searchInstrument.toLowerCase();
+    return (
+      i.tradingsymbol?.toLowerCase().includes(term) ||
+      i.symbol?.toLowerCase().includes(term) ||
+      i.name?.toLowerCase().includes(term) ||
+      i.tradingSymbol?.toLowerCase().includes(term)
+    );
+  }).slice(0, 20);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -5668,24 +5754,25 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
               onChange={(e) => setSearchInstrument(e.target.value)}
               className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 mb-2"
             />
-            {searchInstrument && filteredInstruments.length > 0 && !formData.symbol && (
-              <div className="bg-dark-700 border border-dark-600 rounded max-h-40 overflow-y-auto">
+            {searchInstrument && searchInstrument.length >= 1 && filteredInstruments.length > 0 && !formData.symbol && (
+              <div className="bg-dark-700 border border-dark-600 rounded max-h-48 overflow-y-auto">
                 {filteredInstruments.map(i => (
                   <div
-                    key={i._id || i.instrument_token}
+                    key={i._id || i.token || i.instrument_token}
                     onClick={() => {
+                      const symbolName = i.tradingsymbol || i.tradingSymbol || i.symbol;
                       setFormData({ 
                         ...formData, 
-                        symbol: i.tradingsymbol, 
-                        instrumentToken: i.instrument_token,
-                        segment: i.segment || i.exchange || 'NSE'
+                        symbol: symbolName, 
+                        instrumentToken: i.token || i.instrument_token,
+                        segment: i.displaySegment || i.segment || i.exchange || 'NSE'
                       });
-                      setSearchInstrument(i.tradingsymbol);
+                      setSearchInstrument(symbolName);
                     }}
                     className="px-3 py-2 hover:bg-dark-600 cursor-pointer"
                   >
-                    <div className="font-medium">{i.tradingsymbol}</div>
-                    <div className="text-xs text-gray-400">{i.name} • {i.segment || i.exchange}</div>
+                    <div className="font-medium">{i.tradingsymbol || i.tradingSymbol || i.symbol}</div>
+                    <div className="text-xs text-gray-400">{i.name} • {i.displaySegment || i.segment || i.exchange}</div>
                   </div>
                 ))}
               </div>

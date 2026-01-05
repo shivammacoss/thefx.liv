@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { createChart } from 'lightweight-charts';
@@ -600,33 +600,67 @@ const UserDashboard = () => {
 const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs
+  const [activeSegment, setActiveSegment] = useState('NSE');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [addingToSegment, setAddingToSegment] = useState(null); // Which instrument is being added
+  
+  // Watchlist stored by segment: { 'NSE': [{...}], 'NSE F&O': [{...}], ... }
+  const [watchlistBySegment, setWatchlistBySegment] = useState({
+    'NSE': [],
+    'NSE F&O': [],
+    'MCX': [],
+    'BSE F&O': [],
+    'Currency': [],
+    'Crypto': []
+  });
+  const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   
   // Notify parent when segment changes
   const handleSegmentChange = (segment) => {
     setActiveSegment(segment);
+    setSearchTerm('');
+    setShowSearchResults(false);
     if (onSegmentChange) onSegmentChange(segment);
   };
-  const [watchlist, setWatchlist] = useState(() => {
-    const saved = localStorage.getItem('ntrader_watchlist');
-    return saved ? JSON.parse(saved) : ['NIFTY 50', 'NIFTY BANK', 'SBIN', 'RELIANCE'];
-  });
+  
   const [cryptoData, setCryptoData] = useState({});
-  const [dbInstruments, setDbInstruments] = useState([]);
-  const [loadingInstruments, setLoadingInstruments] = useState(true);
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchInputRef = useRef(null);
+  const [segmentTabs, setSegmentTabs] = useState([])
   
-  // Segment tabs configuration
-  const segmentTabs = [
-    { id: 'NSE', label: 'NSE', color: 'bg-green-600' },
-    { id: 'NSE_FO', label: 'NSE F&O', color: 'bg-dark-600' },
-    { id: 'MCX', label: 'MCX', color: 'bg-dark-600' },
-    { id: 'BSE_FO', label: 'BSE F&O', color: 'bg-dark-600' },
-    { id: 'Currency', label: 'Currency', color: 'bg-dark-600' },
-    { id: 'Crypto', label: 'Crypto', color: 'bg-dark-600' }
-  ];
+  // Load watchlist from server on mount
+  useEffect(() => {
+    const loadWatchlist = async () => {
+      if (!user?.token) return;
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const { data } = await axios.get('/api/instruments/watchlist', { headers });
+        setWatchlistBySegment(data);
+        setWatchlistLoaded(true);
+      } catch (error) {
+        console.error('Error loading watchlist:', error);
+        // Fallback to localStorage if server fails
+        const saved = localStorage.getItem('ntrader_watchlist_v2');
+        if (saved) setWatchlistBySegment(JSON.parse(saved));
+        setWatchlistLoaded(true);
+      }
+    };
+    loadWatchlist();
+  }, [user?.token]);
+  
+  // Set default segment tabs
+  useEffect(() => {
+    const defaultTabs = [
+      { id: 'NSE', label: 'NSE' },
+      { id: 'NSE F&O', label: 'NSE F&O' },
+      { id: 'MCX', label: 'MCX' },
+      { id: 'BSE F&O', label: 'BSE F&O' },
+      { id: 'Currency', label: 'Currency' },
+      { id: 'Crypto', label: 'Crypto' }
+    ];
+    setSegmentTabs(defaultTabs);
+  }, []);
   
   // Market status derived from marketData
   const marketStatus = {
@@ -642,54 +676,33 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Fast search when typing
+  // Global search using API when typing
   useEffect(() => {
-    if (debouncedSearch.length >= 1) {
-      setIsSearching(true);
-      const term = debouncedSearch.toLowerCase();
-      const results = dbInstruments.filter(inst => 
-        inst.symbol?.toLowerCase().includes(term) ||
-        inst.name?.toLowerCase().includes(term) ||
-        inst.category?.toLowerCase().includes(term)
-      ).slice(0, 50); // Limit to 50 results for speed
-      setSearchResults(results);
-      setIsSearching(false);
-    } else {
-      setSearchResults([]);
-    }
-  }, [debouncedSearch, dbInstruments]);
-
-  // Fetch instruments from database
-  useEffect(() => {
-    fetchInstruments();
-  }, [user?.token]);
-
-  const fetchInstruments = async () => {
-    try {
-      setLoadingInstruments(true);
-      // Try user-specific endpoint first, fallback to public
-      const endpoint = user?.token ? '/api/instruments/user' : '/api/instruments/public';
-      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-      const { data } = await axios.get(endpoint, { headers });
-      setDbInstruments(data || []);
-    } catch (error) {
-      console.error('Error fetching instruments:', error);
-      // Fallback to public endpoint
-      try {
-        const { data } = await axios.get('/api/instruments/public');
-        setDbInstruments(data || []);
-      } catch (err) {
-        console.error('Fallback also failed:', err);
+    const doSearch = async () => {
+      if (debouncedSearch.length >= 2) {
+        setIsSearching(true);
+        setShowSearchResults(true);
+        try {
+          const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+          const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=100`, { headers });
+          setSearchResults(data || []);
+        } catch (error) {
+          console.error('Search error:', error);
+          setSearchResults([]);
+        }
+        setIsSearching(false);
+      } else {
+        setSearchResults([]);
+        setShowSearchResults(false);
       }
-    } finally {
-      setLoadingInstruments(false);
-    }
-  };
+    };
+    doSearch();
+  }, [debouncedSearch, user?.token]);
 
   // Fetch crypto data (separate from Zerodha)
   useEffect(() => {
     fetchCryptoData();
-    const interval = setInterval(fetchCryptoData, 5000);
+    const interval = setInterval(fetchCryptoData, 30000); // Every 30 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -698,138 +711,100 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
       const { data } = await axios.get('/api/binance/prices');
       setCryptoData(data);
     } catch (error) {
-      // Silent fail - crypto data may not be available
+      // Silent fail
     }
   };
 
-  // Save watchlist to localStorage
-  useEffect(() => {
-    localStorage.setItem('ntrader_watchlist', JSON.stringify(watchlist));
-  }, [watchlist]);
-
-  // Get price for an instrument by token, pair, or demo mock data
+  // Get price for an instrument
   const getPrice = (token, pair, instrument) => {
-    // Check if it's a demo instrument with mock data
-    if (instrument?.isDemo) {
-      // Add small random fluctuation to mock price for realism
-      const fluctuation = (Math.random() - 0.5) * 0.02 * instrument.mockPrice;
-      return {
-        ltp: instrument.mockPrice + fluctuation,
-        change: instrument.mockChange,
-        changePercent: instrument.mockChange
-      };
-    }
-    // Check crypto data first (by pair like BTCUSDT)
-    if (pair && cryptoData[pair]) {
-      return cryptoData[pair];
-    }
-    // Then check Angel One market data (by token)
-    if (token && marketData[token]) {
-      return marketData[token];
-    }
+    if (pair && cryptoData[pair]) return cryptoData[pair];
+    if (token && marketData[token]) return marketData[token];
     return { ltp: 0, change: 0, changePercent: 0 };
   };
 
-  const addToWatchlist = (symbol) => {
-    if (!watchlist.includes(symbol)) {
-      setWatchlist([...watchlist, symbol]);
-    }
+  // Get segment from exchange automatically
+  const getSegmentFromExchange = (exchange) => {
+    const exchangeToSegment = {
+      'NSE': 'NSE',
+      'NFO': 'NSE F&O',
+      'MCX': 'MCX',
+      'BFO': 'BSE F&O',
+      'CDS': 'Currency',
+      'BINANCE': 'Crypto'
+    };
+    return exchangeToSegment[exchange] || 'NSE';
   };
 
-  const removeFromWatchlist = (symbol) => {
-    setWatchlist(watchlist.filter(s => s !== symbol));
-  };
-
-  const isInWatchlist = (symbol) => watchlist.includes(symbol);
-
-  // Get all instruments from database
-  const getAllInstruments = () => {
-    if (dbInstruments.length > 0) {
-      return dbInstruments.map(inst => ({
-        ...inst,
-        symbol: inst.symbol,
-        name: inst.name,
-        exchange: inst.exchange,
-        token: inst.token,
-        segment: inst.segment,
-        instrumentType: inst.instrumentType,
-        category: inst.category,
-        lotSize: inst.lotSize || 1
-      }));
-    }
-    return [];
-  };
-
-  // Filter instruments by active segment
-  const getFilteredInstruments = () => {
-    const allInstruments = getAllInstruments();
-    const term = searchTerm.toLowerCase();
+  // Add instrument to watchlist - auto-detect segment from exchange
+  const addToWatchlist = async (instrument) => {
+    const segment = getSegmentFromExchange(instrument.exchange);
+    const currentList = watchlistBySegment[segment] || [];
+    // Check if already exists
+    if (currentList.some(i => i.token === instrument.token)) return;
     
-    // First filter by search term if present
-    let filtered = allInstruments;
-    if (term) {
-      filtered = allInstruments.filter(inst => 
-        inst.symbol?.toLowerCase().includes(term) ||
-        inst.name?.toLowerCase().includes(term)
-      );
-    }
+    // Update local state immediately
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [segment]: [...(prev[segment] || []), instrument]
+    }));
+    setAddingToSegment(null);
+    setSearchTerm('');
+    setShowSearchResults(false);
     
-    // Then filter by segment
-    switch (activeSegment) {
-      case 'NSE':
-        return filtered.filter(inst => 
-          (inst.exchange === 'NSE' && (inst.instrumentType === 'INDEX' || inst.instrumentType === 'STOCK' || inst.segment === 'EQUITY')) ||
-          inst.category === 'INDICES' || inst.category === 'STOCKS'
-        );
-      case 'NSE_FO':
-        return filtered.filter(inst => 
-          (inst.exchange === 'NFO' || inst.segment === 'FNO' || inst.segment === 'NFO') &&
-          (inst.instrumentType === 'FUTURES' || inst.instrumentType === 'OPTIONS')
-        );
-      case 'MCX':
-        return filtered.filter(inst => 
-          inst.exchange === 'MCX' || inst.segment === 'MCX' || inst.category === 'MCX'
-        );
-      case 'BSE_FO':
-        return filtered.filter(inst => 
-          inst.exchange === 'BFO' || inst.segment === 'BFO' || inst.exchange === 'BSE'
-        );
-      case 'Currency':
-        return filtered.filter(inst => 
-          inst.exchange === 'CDS' || inst.segment === 'CURRENCY' || inst.category === 'CURRENCY'
-        );
-      case 'Crypto':
-        // Return crypto instruments from database + live Binance data
-        const cryptoInsts = filtered.filter(inst => 
-          inst.isCrypto || inst.segment === 'CRYPTO' || inst.category === 'CRYPTO'
-        );
-        // Add Binance crypto if available
-        if (Object.keys(cryptoData).length > 0) {
-          const binanceCryptos = Object.values(cryptoData).map(c => ({
-            symbol: c.symbol,
-            name: c.pair,
-            exchange: 'BINANCE',
-            token: c.pair,
-            pair: c.pair,
-            segment: 'CRYPTO',
-            category: 'CRYPTO',
-            instrumentType: 'CRYPTO',
-            isCrypto: true,
-            ltp: c.ltp,
-            change: c.change,
-            changePercent: c.changePercent
-          }));
-          return [...cryptoInsts, ...binanceCryptos.filter(bc => 
-            !term || bc.symbol.toLowerCase().includes(term) || bc.name.toLowerCase().includes(term)
-          )];
-        }
-        return cryptoInsts;
-      default:
-        return filtered;
+    // Save to server
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/add', { instrument, segment }, { headers });
+      } catch (error) {
+        console.error('Error saving to watchlist:', error);
+      }
     }
   };
 
-  const filteredInstruments = getFilteredInstruments();
+  // Remove instrument from watchlist
+  const removeFromWatchlist = async (instrument, segment) => {
+    // Update local state immediately
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [segment]: (prev[segment] || []).filter(i => i.token !== instrument.token)
+    }));
+    
+    // Save to server
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, segment }, { headers });
+      } catch (error) {
+        console.error('Error removing from watchlist:', error);
+      }
+    }
+  };
+
+  // Check if instrument is in any watchlist
+  const isInWatchlist = (token) => {
+    return Object.values(watchlistBySegment).some(list => 
+      list.some(i => i.token === token)
+    );
+  };
+
+  // Get watchlist for current segment
+  const getWatchlistForSegment = () => {
+    if (activeSegment === 'Crypto') {
+      // For crypto, show watchlist items with live prices
+      const cryptoWatchlist = watchlistBySegment['Crypto'] || [];
+      return cryptoWatchlist.map(inst => {
+        const liveData = cryptoData[inst.pair] || {};
+        return { ...inst, ltp: liveData.ltp || 0, change: liveData.change || 0, changePercent: liveData.changePercent || 0 };
+      });
+    }
+    return watchlistBySegment[activeSegment] || [];
+  };
+
+  // Get count for segment tab
+  const getSegmentCount = (segmentId) => {
+    return (watchlistBySegment[segmentId] || []).length;
+  };
 
   return (
     <aside className="w-full h-full bg-dark-800 border-r border-dark-600 flex flex-col">
@@ -888,43 +863,130 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
         </div>
       </div>
 
-      {/* Instruments List */}
+      {/* Search Results or Watchlist */}
       <div className="flex-1 overflow-y-auto">
-        {loadingInstruments ? (
-          <div className="p-4 text-center text-gray-400">
-            <RefreshCw className="animate-spin inline mr-2" size={16} />
-            Loading instruments...
-          </div>
-        ) : filteredInstruments.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 text-sm">
-            <p>No instruments found</p>
-            <p className="mt-2 text-xs">
-              {activeSegment === 'Crypto' ? 'Loading crypto from Binance...' : 'Try a different segment or search'}
-            </p>
+        {/* Search Results - Show when searching */}
+        {showSearchResults && searchTerm.length >= 2 ? (
+          <div>
+            <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0 z-10 flex justify-between items-center">
+              <span>Search Results ({searchResults.length})</span>
+              <button 
+                onClick={() => { setSearchTerm(''); setShowSearchResults(false); }}
+                className="text-green-400 hover:text-green-300"
+              >
+                Back to Watchlist
+              </button>
+            </div>
+            
+            {isSearching ? (
+              <div className="p-4 text-center text-gray-400">
+                <RefreshCw className="animate-spin inline mr-2" size={16} />
+                Searching...
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                No instruments found for "{searchTerm}"
+              </div>
+            ) : (
+              searchResults.map(inst => (
+                <div
+                  key={inst._id || inst.token}
+                  className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
+                >
+                  <div className="flex-1 min-w-0 mr-2">
+                    <div className="font-bold text-sm text-white uppercase">{inst.symbol}</div>
+                    <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                    <div className="text-xs text-gray-600">{inst.exchange}</div>
+                  </div>
+                  
+                  {/* Add to Watchlist Button - Auto adds to correct segment */}
+                  {isInWatchlist(inst.token) ? (
+                    <span className="text-xs text-green-400 px-2 py-1">✓ Added</span>
+                  ) : (
+                    <button
+                      onClick={() => addToWatchlist(inst)}
+                      className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+                    >
+                      <Plus size={12} /> Add
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         ) : (
-          filteredInstruments.map(inst => {
-            const priceData = inst.isCrypto ? inst : getPrice(inst.token, inst.pair, inst);
-            return (
-              <InstrumentRow
-                key={inst._id || inst.pair || `${inst.exchange}-${inst.symbol}`}
-                instrument={{
-                  ...inst, 
-                  ltp: priceData.ltp || inst.ltp || 0, 
-                  change: priceData.change || inst.change || 0, 
-                  changePercent: priceData.changePercent || inst.changePercent || 0
-                }}
-                isSelected={selectedInstrument?.symbol === inst.symbol}
-                onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                onBuySell={onBuySell}
-                inWatchlist={isInWatchlist(inst.symbol)}
-                onAddToWatchlist={() => addToWatchlist(inst.symbol)}
-                onRemoveFromWatchlist={() => removeFromWatchlist(inst.symbol)}
-                isCrypto={inst.isCrypto}
-                isDemo={inst.isDemo}
-              />
-            );
-          })
+          /* Watchlist for Current Segment */
+          <div>
+            <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0 z-10">
+              {activeSegment} Watchlist ({getSegmentCount(activeSegment)})
+            </div>
+            
+            {getWatchlistForSegment().length === 0 ? (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                <p>No instruments in {activeSegment} watchlist</p>
+                <p className="mt-2 text-xs text-gray-600">
+                  Search for instruments and add them to your watchlist
+                </p>
+              </div>
+            ) : (
+              getWatchlistForSegment().map(inst => {
+                const priceData = getPrice(inst.token, inst.pair, inst);
+                return (
+                  <div
+                    key={inst.token}
+                    onClick={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
+                    className={`flex items-center justify-between px-3 py-2.5 cursor-pointer border-b border-dark-700 hover:bg-dark-750 ${
+                      selectedInstrument?.token === inst.token ? 'bg-green-600/20 border-l-2 border-l-green-500' : ''
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0 mr-2">
+                      <div className={`font-bold text-sm uppercase ${
+                        inst.instrumentType === 'FUTURES' ? 'text-yellow-400' :
+                        inst.optionType === 'CE' ? 'text-green-400' :
+                        inst.optionType === 'PE' ? 'text-red-400' :
+                        inst.isCrypto ? 'text-orange-400' : 'text-white'
+                      }`}>
+                        {inst.symbol}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                    </div>
+                    
+                    <div className="text-right flex-shrink-0 mr-2">
+                      <div className="text-sm font-medium text-gray-300">
+                        {(priceData.ltp || inst.ltp || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                      </div>
+                    </div>
+                    
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onBuySell(inst, 'SELL'); }}
+                        className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center text-white text-xs font-bold"
+                      >
+                        S
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onBuySell(inst, 'BUY'); }}
+                        className="w-7 h-7 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white text-xs font-bold"
+                      >
+                        B
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst, activeSegment); }}
+                        className="w-7 h-7 rounded-full bg-dark-600 hover:bg-red-600 flex items-center justify-center text-gray-400 hover:text-white"
+                        title="Remove from watchlist"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         )}
       </div>
     </aside>
@@ -1331,8 +1393,8 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     loadData();
     fetchLivePrice();
     
-    // Refresh live price every 5 seconds
-    const interval = setInterval(fetchLivePrice, 5000);
+    // Refresh live price every 10 seconds
+    const interval = setInterval(fetchLivePrice, 10000);
     return () => clearInterval(interval);
   }, [selectedInstrument, chartInterval]);
 
@@ -2662,78 +2724,156 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   );
 };
 
-// Mobile Components - Uses same database instruments as desktop
+// Mobile Components - Uses watchlist like desktop
 const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
-  const [expandedSegments, setExpandedSegments] = useState([]); // Start with all collapsed
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [dbInstruments, setDbInstruments] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchResults, setSearchResults] = useState([]);
-  const [activeSegment, setActiveSegment] = useState('NSE'); // Segment tabs like desktop
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [activeSegment, setActiveSegment] = useState('NSE');
   const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
+  const [addingToSegment, setAddingToSegment] = useState(null);
+  
+  // Watchlist stored by segment (synced with server)
+  const [watchlistBySegment, setWatchlistBySegment] = useState({
+    'NSE': [],
+    'NSE F&O': [],
+    'MCX': [],
+    'BSE F&O': [],
+    'Currency': [],
+    'Crypto': []
+  });
+  
+  const segmentTabs = [
+    { id: 'NSE', label: 'NSE' },
+    { id: 'NSE F&O', label: 'F&O' },
+    { id: 'MCX', label: 'MCX' },
+    { id: 'BSE F&O', label: 'BSE' },
+    { id: 'Currency', label: 'CUR' },
+    { id: 'Crypto', label: 'Crypto' }
+  ];
+  
+  // Load watchlist from server
+  useEffect(() => {
+    const loadWatchlist = async () => {
+      if (!user?.token) return;
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const { data } = await axios.get('/api/instruments/watchlist', { headers });
+        setWatchlistBySegment(data);
+      } catch (error) {
+        console.error('Error loading watchlist:', error);
+      }
+    };
+    loadWatchlist();
+  }, [user?.token]);
   
   // Notify parent when segment changes
   const handleSegmentChange = (segment) => {
     setActiveSegment(segment);
+    setSearchTerm('');
+    setShowSearchResults(false);
     if (onSegmentChange) onSegmentChange(segment);
   };
-  
-  // Segment tabs configuration (same as desktop)
-  const segmentTabs = [
-    { id: 'NSE', label: 'NSE' },
-    { id: 'NSE_FO', label: 'F&O' },
-    { id: 'MCX', label: 'MCX' },
-    { id: 'Crypto', label: 'Crypto' }
-  ];
 
-  // Debounce search for performance
+  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
-    }, 150);
+    }, 200);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Fast search
+  // Global search using API
   useEffect(() => {
-    if (debouncedSearch.length >= 1) {
-      const term = debouncedSearch.toLowerCase();
-      const results = dbInstruments.filter(inst => 
-        inst.symbol?.toLowerCase().includes(term) ||
-        inst.name?.toLowerCase().includes(term) ||
-        inst.category?.toLowerCase().includes(term)
-      ).slice(0, 50);
-      setSearchResults(results);
-    } else {
-      setSearchResults([]);
-    }
-  }, [debouncedSearch, dbInstruments]);
-
-  // Fetch instruments from database (same as desktop)
-  useEffect(() => {
-    fetchInstruments();
-  }, [user?.token]);
-
-  const fetchInstruments = async () => {
-    try {
-      setLoading(true);
-      const endpoint = user?.token ? '/api/instruments/user' : '/api/instruments/public';
-      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-      const { data } = await axios.get(endpoint, { headers });
-      setDbInstruments(data || []);
-    } catch (error) {
-      try {
-        const { data } = await axios.get('/api/instruments/public');
-        setDbInstruments(data || []);
-      } catch (err) {
-        console.error('Error fetching instruments:', err);
+    const doSearch = async () => {
+      if (debouncedSearch.length >= 2) {
+        setIsSearching(true);
+        setShowSearchResults(true);
+        try {
+          const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+          const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=50`, { headers });
+          setSearchResults(data || []);
+        } catch (error) {
+          setSearchResults([]);
+        }
+        setIsSearching(false);
+      } else {
+        setSearchResults([]);
+        setShowSearchResults(false);
       }
-    } finally {
-      setLoading(false);
+    };
+    doSearch();
+  }, [debouncedSearch, user?.token]);
+  
+  // Get segment from exchange automatically
+  const getSegmentFromExchange = (exchange) => {
+    const exchangeToSegment = {
+      'NSE': 'NSE',
+      'NFO': 'NSE F&O',
+      'MCX': 'MCX',
+      'BFO': 'BSE F&O',
+      'CDS': 'Currency',
+      'BINANCE': 'Crypto'
+    };
+    return exchangeToSegment[exchange] || 'NSE';
+  };
+
+  // Add to watchlist - auto-detect segment and sync to server
+  const addToWatchlist = async (instrument) => {
+    const segment = getSegmentFromExchange(instrument.exchange);
+    const currentList = watchlistBySegment[segment] || [];
+    if (currentList.some(i => i.token === instrument.token)) return;
+    
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [segment]: [...(prev[segment] || []), instrument]
+    }));
+    setAddingToSegment(null);
+    setSearchTerm('');
+    setShowSearchResults(false);
+    
+    // Save to server
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/add', { instrument, segment }, { headers });
+      } catch (error) {
+        console.error('Error saving to watchlist:', error);
+      }
     }
   };
+  
+  // Remove from watchlist and sync to server
+  const removeFromWatchlist = async (instrument) => {
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [activeSegment]: (prev[activeSegment] || []).filter(i => i.token !== instrument.token)
+    }));
+    
+    // Save to server
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, segment: activeSegment }, { headers });
+      } catch (error) {
+        console.error('Error removing from watchlist:', error);
+      }
+    }
+  };
+  
+  // Check if in watchlist
+  const isInWatchlist = (token) => {
+    return Object.values(watchlistBySegment).some(list => list.some(i => i.token === token));
+  };
+  
+  // Get watchlist for current segment
+  const getWatchlist = () => watchlistBySegment[activeSegment] || [];
+  
+  // Get price
+  const getPrice = (token) => marketData[token] || { ltp: 0, change: 0, changePercent: 0 };
   
   // Fetch crypto data from Binance
   useEffect(() => {
@@ -2746,95 +2886,13 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
       }
     };
     fetchCryptoData();
-    const interval = setInterval(fetchCryptoData, 5000);
+    const interval = setInterval(fetchCryptoData, 30000); // Every 30 seconds
     return () => clearInterval(interval);
   }, []);
 
-  const toggleSegment = (segment) => {
-    setExpandedSegments(prev => 
-      prev.includes(segment) ? prev.filter(s => s !== segment) : [...prev, segment]
-    );
-  };
-
-  // Filter instruments by active segment (same logic as desktop)
-  const getFilteredInstruments = () => {
-    const term = searchTerm.toLowerCase();
-    let filtered = dbInstruments;
-    
-    if (term) {
-      filtered = dbInstruments.filter(inst => 
-        inst.symbol?.toLowerCase().includes(term) ||
-        inst.name?.toLowerCase().includes(term)
-      );
-    }
-    
-    switch (activeSegment) {
-      case 'NSE':
-        return filtered.filter(inst => 
-          (inst.exchange === 'NSE' && (inst.instrumentType === 'INDEX' || inst.instrumentType === 'STOCK' || inst.segment === 'EQUITY')) ||
-          inst.category === 'INDICES' || inst.category === 'STOCKS'
-        );
-      case 'NSE_FO':
-        return filtered.filter(inst => 
-          (inst.exchange === 'NFO' || inst.segment === 'FNO' || inst.segment === 'NFO') &&
-          (inst.instrumentType === 'FUTURES' || inst.instrumentType === 'OPTIONS')
-        );
-      case 'MCX':
-        return filtered.filter(inst => 
-          inst.exchange === 'MCX' || inst.segment === 'MCX' || inst.category === 'MCX'
-        );
-      case 'Crypto':
-        const cryptoInsts = filtered.filter(inst => 
-          inst.isCrypto || inst.segment === 'CRYPTO' || inst.category === 'CRYPTO'
-        );
-        // Add Binance crypto if available
-        if (Object.keys(cryptoData).length > 0) {
-          const binanceCryptos = Object.values(cryptoData).map(c => ({
-            _id: c.pair,
-            symbol: c.symbol,
-            name: c.pair,
-            exchange: 'BINANCE',
-            token: c.pair,
-            pair: c.pair,
-            segment: 'CRYPTO',
-            category: 'CRYPTO',
-            instrumentType: 'CRYPTO',
-            isCrypto: true,
-            ltp: c.ltp,
-            change: c.change,
-            changePercent: c.changePercent
-          }));
-          return [...cryptoInsts, ...binanceCryptos.filter(bc => 
-            !term || bc.symbol.toLowerCase().includes(term) || bc.name.toLowerCase().includes(term)
-          )];
-        }
-        return cryptoInsts;
-      default:
-        return filtered;
-    }
-  };
-  
-  const filteredInstruments = getFilteredInstruments();
-
-  // Group instruments by category
-  const instrumentsByCategory = filteredInstruments.reduce((acc, inst) => {
-    const cat = inst.category || 'OTHER';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(inst);
-    return acc;
-  }, {});
-
-  const categories = Object.keys(instrumentsByCategory).sort();
-
-  // Get price from market data
-  const getPrice = (token) => {
-    const data = marketData[token];
-    return data ? { ltp: data.ltp, change: data.change, changePercent: data.changePercent } : { ltp: 0, change: 0, changePercent: 0 };
-  };
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Segment Tabs - Like desktop */}
+      {/* Segment Tabs */}
       <div className="flex gap-1 p-2 bg-dark-800 border-b border-dark-600 overflow-x-auto">
         {segmentTabs.map(tab => (
           <button
@@ -2846,7 +2904,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
                 : 'bg-dark-700 text-gray-400 hover:bg-dark-600 hover:text-white'
             }`}
           >
-            {tab.label}
+            {tab.label} ({(watchlistBySegment[tab.id] || []).length})
           </button>
         ))}
       </div>
@@ -2858,14 +2916,14 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Search NIFTY, BANKNIFTY..."
+            placeholder="Search to add instruments..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-10 py-2 text-sm focus:outline-none focus:border-green-500"
           />
           {searchTerm && (
             <button 
-              onClick={() => { setSearchTerm(''); searchInputRef.current?.focus(); }}
+              onClick={() => { setSearchTerm(''); setShowSearchResults(false); }}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
             >
               <X size={16} />
@@ -2874,76 +2932,88 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
         </div>
       </div>
 
-      {/* Search Results - Show when searching */}
-      {searchTerm.length >= 1 && (
+      {/* Search Results with Add button */}
+      {showSearchResults && searchTerm.length >= 2 ? (
         <div className="flex-1 overflow-y-auto">
-          {searchResults.length === 0 ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              No instruments found for "{searchTerm}"
+          <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0 flex justify-between">
+            <span>Search Results ({searchResults.length})</span>
+            <button onClick={() => { setSearchTerm(''); setShowSearchResults(false); }} className="text-green-400">
+              Back
+            </button>
+          </div>
+          {isSearching ? (
+            <div className="p-4 text-center text-gray-400">
+              <RefreshCw className="animate-spin inline mr-2" size={16} />
+              Searching...
             </div>
+          ) : searchResults.length === 0 ? (
+            <div className="p-4 text-center text-gray-500 text-sm">No results for "{searchTerm}"</div>
           ) : (
-            <>
-              <div className="px-4 py-2 text-xs text-gray-500 bg-dark-700 sticky top-0">
-                {searchResults.length} results
+            searchResults.map(inst => (
+              <div key={inst._id || inst.token} className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700">
+                <div className="flex-1 min-w-0 mr-2">
+                  <div className="font-bold text-sm text-white">{inst.symbol}</div>
+                  <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                  <div className="text-xs text-gray-600">{inst.exchange}</div>
+                </div>
+                {isInWatchlist(inst.token) ? (
+                  <span className="text-xs text-green-400">✓ Added</span>
+                ) : (
+                  <button
+                    onClick={() => addToWatchlist(inst)}
+                    className="bg-green-600 text-white text-xs px-2 py-1 rounded"
+                  >
+                    + Add
+                  </button>
+                )}
               </div>
-              {searchResults.map(inst => {
-                const priceData = getPrice(inst.token);
-                return (
-                  <MobileInstrumentRow
-                    key={inst._id}
-                    instrument={{...inst, ...priceData}}
-                    isCall={inst.optionType === 'CE'}
-                    isPut={inst.optionType === 'PE'}
-                    isFuture={inst.instrumentType === 'FUTURES'}
-                    isCrypto={inst.isCrypto || inst.segment === 'CRYPTO' || inst.exchange === 'BINANCE'}
-                    onSelect={() => { onSelectInstrument({...inst, ...priceData}); setSearchTerm(''); }}
-                    onBuy={() => onBuySell('buy', {...inst, ...priceData})}
-                    onSell={() => onBuySell('sell', {...inst, ...priceData})}
-                  />
-                );
-              })}
-            </>
+            ))
           )}
         </div>
-      )}
-
-      {/* Instruments List - Flat list like web view */}
-      {!searchTerm && (
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="p-4 text-center text-gray-400">
-            <RefreshCw className="animate-spin inline mr-2" size={16} />
-            Loading...
+      ) : (
+        /* Watchlist for current segment */
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0">
+            {activeSegment} Watchlist ({getWatchlist().length})
           </div>
-        ) : filteredInstruments.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 text-sm">
-            <p>No instruments found</p>
-            <p className="mt-2 text-xs">
-              {activeSegment === 'Crypto' ? 'Loading crypto from Binance...' : 'Try a different segment or search'}
-            </p>
-          </div>
-        ) : (
-          filteredInstruments.map(inst => {
-            const priceData = inst.isCrypto ? inst : getPrice(inst.token);
-            return (
-              <MobileInstrumentRow
-                key={inst._id || inst.pair || `${inst.exchange}-${inst.symbol}`}
-                instrument={{
-                  ...inst, 
-                  ltp: priceData.ltp || inst.ltp || 0, 
-                  change: priceData.change || inst.change || 0, 
-                  changePercent: priceData.changePercent || inst.changePercent || 0
-                }}
-                isCall={inst.optionType === 'CE'}
-                isPut={inst.optionType === 'PE'}
-                isFuture={inst.instrumentType === 'FUTURES'}
-                isCrypto={inst.isCrypto || inst.segment === 'CRYPTO' || inst.exchange === 'BINANCE'}
-                onSelect={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                onBuy={() => onBuySell('buy', {...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                onSell={() => onBuySell('sell', {...inst, ltp: priceData.ltp || inst.ltp || 0})}
-              />
-            );
-          })
+          {getWatchlist().length === 0 ? (
+            <div className="p-4 text-center text-gray-500 text-sm">
+              <p>No instruments in {activeSegment} watchlist</p>
+              <p className="mt-2 text-xs text-gray-600">Search to add instruments</p>
+            </div>
+          ) : (
+            getWatchlist().map(inst => {
+              const priceData = getPrice(inst.token);
+              return (
+                <div
+                  key={inst.token}
+                  onClick={() => onSelectInstrument({...inst, ltp: priceData.ltp || 0})}
+                  className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
+                >
+                  <div className="flex-1 min-w-0 mr-2">
+                    <div className={`font-bold text-sm ${
+                      inst.instrumentType === 'FUTURES' ? 'text-yellow-400' :
+                      inst.optionType === 'CE' ? 'text-green-400' :
+                      inst.optionType === 'PE' ? 'text-red-400' : 'text-white'
+                    }`}>{inst.symbol}</div>
+                    <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                  </div>
+                  <div className="text-right mr-2">
+                    <div className="text-sm text-gray-300">{parseFloat(priceData.ltp || 0).toFixed(2)}</div>
+                    <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold">S</button>
+                    <button onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }} className="w-6 h-6 rounded-full bg-green-500 text-white text-xs font-bold">B</button>
+                    <button onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst); }} className="w-6 h-6 rounded-full bg-dark-600 text-gray-400 hover:bg-red-600 hover:text-white">
+                      <X size={12} className="mx-auto" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
         )}
       </div>
       )}
@@ -3201,7 +3271,7 @@ const MobilePositionsPanel = ({ activeTab, user, marketData }) => {
   useEffect(() => {
     if (user?.token) {
       fetchData();
-      const interval = setInterval(fetchData, 5000);
+      const interval = setInterval(fetchData, 15000); // Every 15 seconds
       return () => clearInterval(interval);
     }
   }, [user?.token, tab]);
