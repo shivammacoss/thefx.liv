@@ -50,13 +50,12 @@ const AdminDashboard = () => {
     { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
     { path: '/admin/admins', icon: Shield, label: 'Admin Management' },
     { path: '/admin/all-users', icon: Users, label: 'All Users' },
-    { path: '/admin/all-trades', icon: FileText, label: 'All User Trades' },
+    { path: '/admin/all-trades', icon: FileText, label: 'All Trade Management' },
     { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
     { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
     { path: '/admin/instruments', icon: TrendingUp, label: 'Instruments' },
     { path: '/admin/lot-settings', icon: Settings, label: 'Lot Management' },
     { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
-    { path: '/admin/charges', icon: CreditCard, label: 'Charge Management' },
     { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
     { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
     { path: '/admin/profile', icon: Settings, label: 'Profile' },
@@ -65,7 +64,6 @@ const AdminDashboard = () => {
     { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
     { path: '/admin/users', icon: Users, label: 'User Management' },
     { path: '/admin/trades', icon: FileText, label: 'Trade Management' },
-    { path: '/admin/charges', icon: CreditCard, label: 'Charge Management' },
     { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
     { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
     { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
@@ -206,7 +204,6 @@ const AdminDashboard = () => {
           {!isSuperAdmin && <Route path="bank-accounts" element={<BankAccounts />} />}
           {!isSuperAdmin && <Route path="ledger" element={<LedgerView />} />}
           {/* Common Routes - Both Super Admin and Admin */}
-          <Route path="charges" element={<ChargeManagement />} />
           <Route path="profile" element={<ProfileSettings />} />
           <Route path="*" element={isSuperAdmin ? <SuperAdminDashboard /> : <AdminDashboardHome />} />
         </Routes>
@@ -1240,13 +1237,34 @@ const SuperAdminCreateUser = () => {
     fetchSegmentSymbols();
   }, []);
 
-  // Fetch symbols for all segments
+  // Fetch segments and symbols from market data
   const fetchSegmentSymbols = async () => {
     try {
-      const { data } = await axios.get('/api/instruments/by-segment', {
+      const { data } = await axios.get('/api/instruments/settings-data', {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
-      setFormData(prev => ({ ...prev, segmentSymbols: data }));
+      
+      // Build segment symbols from scripts data
+      const segmentSymbols = {};
+      for (const [segKey, scripts] of Object.entries(data.scripts || {})) {
+        segmentSymbols[segKey] = scripts.map(s => s.baseSymbol);
+      }
+      
+      // Also update segmentPermissions with new segments from market data
+      const newSegmentPermissions = { ...formData.segmentPermissions };
+      for (const seg of data.segments || []) {
+        if (!newSegmentPermissions[seg.id]) {
+          newSegmentPermissions[seg.id] = { ...defaultSegmentSettings, enabled: false };
+        }
+      }
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        segmentSymbols,
+        marketSegments: data.segments || [],
+        marketScripts: data.scripts || {},
+        segmentPermissions: newSegmentPermissions
+      }));
     } catch (error) {
       console.error('Error fetching segment symbols:', error);
       // Fallback with sample symbols if API fails
@@ -1555,9 +1573,12 @@ const SuperAdminCreateUser = () => {
           <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Settings</h2>
           <p className="text-gray-400 text-sm mb-4">Click on a segment to configure its settings. Green = Enabled, Gray = Disabled</p>
           
-          {/* Segment Buttons */}
+          {/* Segment Buttons - Dynamic from market data */}
           <div className="flex flex-wrap gap-3 mb-4">
-            {['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'].map(segment => (
+            {(formData.marketSegments?.length > 0 
+              ? formData.marketSegments.map(s => s.id)
+              : ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ']
+            ).map(segment => (
               <button
                 key={segment}
                 type="button"
@@ -1570,7 +1591,10 @@ const SuperAdminCreateUser = () => {
                       : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
                 }`}
               >
-                {segment}
+                {formData.marketSegments?.find(s => s.id === segment)?.name || segment}
+                {formData.marketSegments?.find(s => s.id === segment)?.count && (
+                  <span className="ml-1 text-xs opacity-70">({formData.marketSegments.find(s => s.id === segment).count})</span>
+                )}
               </button>
             ))}
           </div>
@@ -4942,6 +4966,20 @@ const SuperAdminAllTrades = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [selectedAdmin, setSelectedAdmin] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Filter trades by search term
+  const filteredTrades = trades.filter(t => {
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      t.symbol?.toLowerCase().includes(term) ||
+      t.userId?.toLowerCase().includes(term) ||
+      t.tradeId?.toLowerCase().includes(term) ||
+      t.adminCode?.toLowerCase().includes(term) ||
+      t.segment?.toLowerCase().includes(term)
+    );
+  });
 
   useEffect(() => {
     fetchAdmins();
@@ -5001,10 +5039,10 @@ const SuperAdminAllTrades = () => {
   return (
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <h1 className="text-xl md:text-2xl font-bold">All User Trades</h1>
+        <h1 className="text-xl md:text-2xl font-bold">All Trade Management</h1>
       </div>
 
-      {/* Admin Filter */}
+      {/* Filters */}
       <div className="flex flex-wrap gap-4 mb-6">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm text-gray-400 mb-1">Filter by Admin</label>
@@ -5021,6 +5059,19 @@ const SuperAdminAllTrades = () => {
             ))}
           </select>
         </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Search</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search by symbol, user ID, trade ID..."
+              value={searchTerm || ''}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2"
+            />
+          </div>
+        </div>
         <div className="flex gap-2 items-end">
           <button onClick={() => setFilter('')} className={`px-4 py-2 rounded ${!filter ? 'bg-purple-600' : 'bg-dark-700'}`}>All</button>
           <button onClick={() => setFilter('OPEN')} className={`px-4 py-2 rounded ${filter === 'OPEN' ? 'bg-green-600' : 'bg-dark-700'}`}>Open</button>
@@ -5032,39 +5083,39 @@ const SuperAdminAllTrades = () => {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Trades</div>
-          <div className="text-2xl font-bold">{trades.length}</div>
+          <div className="text-2xl font-bold">{filteredTrades.length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Open</div>
-          <div className="text-2xl font-bold text-green-400">{trades.filter(t => t.status === 'OPEN').length}</div>
+          <div className="text-2xl font-bold text-green-400">{filteredTrades.filter(t => t.status === 'OPEN').length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Closed</div>
-          <div className="text-2xl font-bold text-gray-400">{trades.filter(t => t.status === 'CLOSED').length}</div>
+          <div className="text-2xl font-bold text-gray-400">{filteredTrades.filter(t => t.status === 'CLOSED').length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total P&L</div>
-          <div className={`text-2xl font-bold ${trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            ₹{trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
+          <div className={`text-2xl font-bold ${filteredTrades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            ₹{filteredTrades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
           </div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Brokerage</div>
           <div className="text-2xl font-bold text-purple-400">
-            ₹{trades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
+            ₹{filteredTrades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
           </div>
         </div>
       </div>
 
       {loading ? (
         <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : trades.length === 0 ? (
+      ) : filteredTrades.length === 0 ? (
         <div className="text-center py-8 text-gray-400">No trades found</div>
       ) : (
         <>
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {trades.map(trade => {
+            {filteredTrades.map(trade => {
               const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
               const currencySymbol = isCrypto ? '$' : '₹';
               return (
@@ -5127,7 +5178,7 @@ const SuperAdminAllTrades = () => {
                 </tr>
               </thead>
               <tbody>
-                {trades.map(trade => {
+                {filteredTrades.map(trade => {
                   const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
                   const currencySymbol = isCrypto ? '$' : '₹';
                   return (
@@ -5501,10 +5552,16 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
 
   const fetchInstruments = async () => {
     try {
-      const { data } = await axios.get('/api/instruments?status=ACTIVE&limit=500', {
+      const { data } = await axios.get('/api/instruments/admin', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setInstruments(data.instruments || data || []);
+      // Map to include tradingsymbol field for compatibility
+      const mapped = (data || []).map(i => ({
+        ...i,
+        tradingsymbol: i.tradingSymbol || i.symbol,
+        instrument_token: i.token
+      }));
+      setInstruments(mapped);
     } catch (err) {
       console.error('Error fetching instruments:', err);
     }
@@ -6718,6 +6775,7 @@ const AllUsersManagement = () => {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [selectedAdminFilter, setSelectedAdminFilter] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -6736,7 +6794,7 @@ const AllUsersManagement = () => {
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   
-  const segmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
   
   const defaultSegmentSettings = {
     enabled: false,
@@ -6767,18 +6825,49 @@ const AllUsersManagement = () => {
     }
   };
   
-  const segmentSymbols = {
+  const [marketSegments, setMarketSegments] = useState([]);
+  
+  // Dynamic segment options from market data
+  const segmentOptions = marketSegments.length > 0 
+    ? marketSegments.map(s => s.id) 
+    : defaultSegmentOptions;
+  const [marketScripts, setMarketScripts] = useState({});
+  const [segmentSymbols, setSegmentSymbols] = useState({
     MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
     NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
     NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
     BSE: ['SENSEX', 'BANKEX'],
     EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
-  };
+  });
 
   useEffect(() => {
     fetchAllUsers();
     fetchAdmins();
+    fetchMarketData();
   }, []);
+  
+  // Fetch segments and scripts from market data
+  const fetchMarketData = async () => {
+    try {
+      const { data } = await axios.get('/api/instruments/settings-data', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      
+      setMarketSegments(data.segments || []);
+      setMarketScripts(data.scripts || {});
+      
+      // Build segment symbols from scripts data
+      const newSegmentSymbols = {};
+      for (const [segKey, scripts] of Object.entries(data.scripts || {})) {
+        newSegmentSymbols[segKey] = scripts.map(s => s.baseSymbol);
+      }
+      if (Object.keys(newSegmentSymbols).length > 0) {
+        setSegmentSymbols(newSegmentSymbols);
+      }
+    } catch (error) {
+      console.error('Error fetching market data:', error);
+    }
+  };
 
   const fetchAllUsers = async () => {
     try {
@@ -6902,12 +6991,18 @@ const AllUsersManagement = () => {
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.username?.toLowerCase().includes(filter.toLowerCase()) ||
-    u.email?.toLowerCase().includes(filter.toLowerCase()) ||
-    u.fullName?.toLowerCase().includes(filter.toLowerCase()) ||
-    u.adminCode?.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filteredUsers = users.filter(u => {
+    // First filter by admin if selected
+    if (selectedAdminFilter && u.adminCode !== selectedAdminFilter) return false;
+    // Then filter by search term
+    if (!filter) return true;
+    return (
+      u.username?.toLowerCase().includes(filter.toLowerCase()) ||
+      u.email?.toLowerCase().includes(filter.toLowerCase()) ||
+      u.fullName?.toLowerCase().includes(filter.toLowerCase()) ||
+      u.adminCode?.toLowerCase().includes(filter.toLowerCase())
+    );
+  });
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><RefreshCw className="animate-spin" size={32} /></div>;
@@ -6931,15 +7026,33 @@ const AllUsersManagement = () => {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search by username, email, name, or admin code..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-full md:w-96 bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
-        />
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 mb-4">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Filter by Admin</label>
+          <select
+            value={selectedAdminFilter}
+            onChange={(e) => setSelectedAdminFilter(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+          >
+            <option value="">All Admins</option>
+            {admins.map(adm => (
+              <option key={adm._id} value={adm.adminCode}>
+                {adm.name || adm.username} ({adm.adminCode})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Search</label>
+          <input
+            type="text"
+            placeholder="Search by username, email, name..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
+          />
+        </div>
       </div>
 
       {/* Users Table */}
@@ -8615,7 +8728,14 @@ const UserManagement = () => {
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   
-  const segmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  const [marketSegments, setMarketSegments] = useState([]);
+  const [marketScripts, setMarketScripts] = useState({});
+  
+  // Dynamic segment options from market data
+  const segmentOptions = marketSegments.length > 0 
+    ? marketSegments.map(s => s.id) 
+    : defaultSegmentOptions;
   
   const defaultSegmentSettings = {
     enabled: false,
@@ -8646,12 +8766,35 @@ const UserManagement = () => {
     }
   };
   
-  const segmentSymbols = {
+  const [segmentSymbols, setSegmentSymbols] = useState({
     MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
     NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
     NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
     BSE: ['SENSEX', 'BANKEX'],
     EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+  });
+  
+  // Fetch segments and scripts from market data
+  const fetchMarketData = async () => {
+    try {
+      const { data } = await axios.get('/api/instruments/settings-data', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      
+      setMarketSegments(data.segments || []);
+      setMarketScripts(data.scripts || {});
+      
+      // Build segment symbols from scripts data
+      const newSegmentSymbols = {};
+      for (const [segKey, scripts] of Object.entries(data.scripts || {})) {
+        newSegmentSymbols[segKey] = scripts.map(s => s.baseSymbol);
+      }
+      if (Object.keys(newSegmentSymbols).length > 0) {
+        setSegmentSymbols(newSegmentSymbols);
+      }
+    } catch (error) {
+      console.error('Error fetching market data:', error);
+    }
   };
 
   const fetchUsers = async () => {
@@ -8669,6 +8812,7 @@ const UserManagement = () => {
 
   useEffect(() => {
     fetchUsers();
+    fetchMarketData();
   }, []);
 
   const filteredUsers = users.filter(user => 
@@ -8746,7 +8890,7 @@ const UserManagement = () => {
     
     setCopying(true);
     try {
-      await axios.post(`/api/admin/users/${targetUserId}/copy-settings`, 
+      await axios.post(`/api/admin/manage/users/${targetUserId}/copy-settings`, 
         {
           sourceUserId: selectedUser._id,
           segmentPermissions: selectedUser.segmentPermissions,

@@ -965,4 +965,117 @@ router.get('/segments', async (req, res) => {
   }
 });
 
+// Get all segments and scripts for user settings page
+router.get('/settings-data', async (req, res) => {
+  try {
+    // Get all unique segments from instruments
+    const segmentAgg = await Instrument.aggregate([
+      { $match: { isEnabled: true } },
+      { $group: { 
+        _id: '$displaySegment', 
+        count: { $sum: 1 },
+        exchanges: { $addToSet: '$exchange' }
+      }},
+      { $sort: { _id: 1 } }
+    ]);
+    
+    const segments = segmentAgg.map(s => ({
+      id: s._id?.replace(/\s+/g, '_').replace(/&/g, '').toUpperCase() || 'OTHER',
+      name: s._id || 'Other',
+      count: s.count,
+      exchanges: s.exchanges
+    }));
+    
+    // Get all unique base symbols (scripts) grouped by segment
+    const scriptsAgg = await Instrument.aggregate([
+      { $match: { isEnabled: true } },
+      { $group: { 
+        _id: { 
+          segment: '$displaySegment',
+          category: '$category',
+          name: '$name'
+        },
+        symbol: { $first: '$symbol' },
+        exchange: { $first: '$exchange' },
+        instrumentType: { $first: '$instrumentType' },
+        lotSize: { $first: '$lotSize' },
+        count: { $sum: 1 }
+      }},
+      { $sort: { '_id.segment': 1, '_id.category': 1, '_id.name': 1 } }
+    ]);
+    
+    // Group scripts by segment
+    const scriptsBySegment = {};
+    for (const script of scriptsAgg) {
+      const segmentKey = script._id.segment?.replace(/\s+/g, '_').replace(/&/g, '').toUpperCase() || 'OTHER';
+      if (!scriptsBySegment[segmentKey]) {
+        scriptsBySegment[segmentKey] = [];
+      }
+      
+      // Extract base symbol name
+      let baseSymbol = script._id.name || script.symbol;
+      // Remove FUT, CE, PE suffixes and dates
+      baseSymbol = baseSymbol.replace(/\s+(FUT|CE|PE).*$/i, '').replace(/\d+\s*(CE|PE)$/i, '').trim();
+      
+      // Check if already added
+      const existing = scriptsBySegment[segmentKey].find(s => s.baseSymbol === baseSymbol);
+      if (!existing) {
+        scriptsBySegment[segmentKey].push({
+          baseSymbol,
+          name: script._id.name || baseSymbol,
+          category: script._id.category,
+          exchange: script.exchange,
+          instrumentType: script.instrumentType,
+          lotSize: script.lotSize,
+          instrumentCount: script.count
+        });
+      }
+    }
+    
+    // Also get unique base symbols for F&O (NIFTY, BANKNIFTY, etc.)
+    const fnoSymbols = await Instrument.aggregate([
+      { $match: { isEnabled: true, exchange: { $in: ['NFO', 'BFO', 'MCX'] } } },
+      { $group: { 
+        _id: '$category',
+        exchange: { $first: '$exchange' },
+        lotSize: { $first: '$lotSize' },
+        count: { $sum: 1 }
+      }},
+      { $match: { _id: { $ne: null } } },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    // Add F&O symbols to their respective segments
+    for (const sym of fnoSymbols) {
+      let segmentKey = 'NSE_FO';
+      if (sym.exchange === 'BFO') segmentKey = 'BSE_FO';
+      else if (sym.exchange === 'MCX') segmentKey = 'MCX';
+      
+      if (!scriptsBySegment[segmentKey]) {
+        scriptsBySegment[segmentKey] = [];
+      }
+      
+      const existing = scriptsBySegment[segmentKey].find(s => s.baseSymbol === sym._id);
+      if (!existing && sym._id) {
+        scriptsBySegment[segmentKey].push({
+          baseSymbol: sym._id,
+          name: sym._id,
+          category: sym._id,
+          exchange: sym.exchange,
+          lotSize: sym.lotSize,
+          instrumentCount: sym.count
+        });
+      }
+    }
+    
+    res.json({ 
+      segments,
+      scripts: scriptsBySegment
+    });
+  } catch (error) {
+    console.error('Error fetching settings data:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

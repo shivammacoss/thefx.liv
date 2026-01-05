@@ -1218,13 +1218,16 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     }
   };
 
-  // Initialize chart
+  // Initialize chart when instrument is selected
   useEffect(() => {
-    if (!chartContainerRef.current) return;
+    if (!selectedInstrument || !chartContainerRef.current) return;
+    
+    // If chart already exists, don't recreate
+    if (chartRef.current) return;
     
     // Small delay to ensure container has dimensions
     const initTimer = setTimeout(() => {
-      if (!chartContainerRef.current) return;
+      if (!chartContainerRef.current || chartRef.current) return;
       
       const containerWidth = chartContainerRef.current.clientWidth || 800;
       const containerHeight = chartContainerRef.current.clientHeight || 400;
@@ -1287,12 +1290,17 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
       
       // Initial resize after a brief delay
       setTimeout(handleResize, 100);
-    }, 50);
+    }, 100);
 
     return () => {
       clearTimeout(initTimer);
+    };
+  }, [selectedInstrument]);
+  
+  // Cleanup chart on unmount
+  useEffect(() => {
+    return () => {
       if (chartRef.current) {
-        window.removeEventListener('resize', () => {});
         chartRef.current.remove();
         chartRef.current = null;
       }

@@ -41,6 +41,104 @@ class TradeService {
     return { user, availableMargin };
   }
   
+  // Get user's segment settings for a trade
+  static getUserSegmentSettings(user, segment, instrumentType) {
+    // Map trade segment to user segment permission key
+    const segmentMap = {
+      'EQUITY': 'EQ',
+      'FNO': instrumentType === 'OPTIONS' ? 'NSEINDEX' : 'NSEINDEX',
+      'MCX': 'MCX',
+      'COMMODITY': 'MCX',
+      'CURRENCY': 'NSEINDEX',
+      'CRYPTO': 'EQ'
+    };
+    
+    // Also check by symbol category (NIFTY, BANKNIFTY -> NSEINDEX, stocks -> NSESTOCK)
+    const segmentKey = segmentMap[segment] || 'EQ';
+    
+    // Get segment permissions from user
+    const segmentPermissions = user.segmentPermissions instanceof Map 
+      ? user.segmentPermissions.get(segmentKey)
+      : user.segmentPermissions?.[segmentKey];
+    
+    return segmentPermissions || {
+      enabled: true,
+      maxExchangeLots: 100,
+      commissionType: 'PER_LOT',
+      commissionLot: 0,
+      maxLots: 50,
+      minLots: 1,
+      orderLots: 10,
+      exposureIntraday: 1,
+      exposureCarryForward: 1,
+      optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 },
+      optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }
+    };
+  }
+  
+  // Get user's script-specific settings
+  static getUserScriptSettings(user, symbol) {
+    // Extract base symbol (e.g., NIFTY from NIFTY25JANFUT)
+    const baseSymbol = symbol.replace(/\d+[A-Z]+FUT$/, '').replace(/\d+[A-Z]+CE$/, '').replace(/\d+[A-Z]+PE$/, '');
+    
+    // Get script settings from user
+    const scriptSettings = user.scriptSettings instanceof Map 
+      ? user.scriptSettings.get(baseSymbol)
+      : user.scriptSettings?.[baseSymbol];
+    
+    return scriptSettings || null;
+  }
+  
+  // Calculate brokerage based on user settings
+  static calculateUserBrokerage(segmentSettings, scriptSettings, tradeData, lots) {
+    let brokerage = 0;
+    const isIntraday = tradeData.productType === 'MIS' || tradeData.productType === 'INTRADAY';
+    const isOption = tradeData.instrumentType === 'OPTIONS';
+    const isOptionBuy = isOption && tradeData.side === 'BUY';
+    const isOptionSell = isOption && tradeData.side === 'SELL';
+    
+    // First check script-specific settings
+    if (scriptSettings?.brokerage) {
+      if (isOptionBuy) {
+        brokerage = isIntraday ? scriptSettings.brokerage.optionBuyIntraday : scriptSettings.brokerage.optionBuyCarry;
+      } else if (isOptionSell) {
+        brokerage = isIntraday ? scriptSettings.brokerage.optionSellIntraday : scriptSettings.brokerage.optionSellCarry;
+      } else {
+        brokerage = isIntraday ? scriptSettings.brokerage.intradayFuture : scriptSettings.brokerage.carryFuture;
+      }
+      return brokerage * lots;
+    }
+    
+    // Fall back to segment settings
+    if (isOptionBuy && segmentSettings?.optionBuy) {
+      const commType = segmentSettings.optionBuy.commissionType || 'PER_LOT';
+      const commission = segmentSettings.optionBuy.commission || 0;
+      if (commType === 'PER_LOT') brokerage = commission * lots;
+      else if (commType === 'PER_TRADE') brokerage = commission;
+      else brokerage = commission; // PER_CRORE handled differently
+    } else if (isOptionSell && segmentSettings?.optionSell) {
+      const commType = segmentSettings.optionSell.commissionType || 'PER_LOT';
+      const commission = segmentSettings.optionSell.commission || 0;
+      if (commType === 'PER_LOT') brokerage = commission * lots;
+      else if (commType === 'PER_TRADE') brokerage = commission;
+      else brokerage = commission;
+    } else {
+      const commType = segmentSettings?.commissionType || 'PER_LOT';
+      const commission = segmentSettings?.commissionLot || 0;
+      if (commType === 'PER_LOT') brokerage = commission * lots;
+      else if (commType === 'PER_TRADE') brokerage = commission;
+      else brokerage = commission;
+    }
+    
+    return brokerage;
+  }
+  
+  // Calculate spread based on user settings
+  static calculateUserSpread(scriptSettings, side) {
+    if (!scriptSettings?.spread) return 0;
+    return side === 'BUY' ? (scriptSettings.spread.buy || 0) : (scriptSettings.spread.sell || 0);
+  }
+  
   // Open a new trade
   static async openTrade(tradeData, userId) {
     // 1. Check market status (CRYPTO is always open)
@@ -53,11 +151,25 @@ class TradeService {
     const admin = await Admin.findOne({ adminCode: user.adminCode });
     if (!admin) throw new Error('Admin not found');
     
-    // 3. Get leverage from admin charges
+    // 3. Get user's segment and script settings
+    const segmentSettings = this.getUserSegmentSettings(user, tradeData.segment, tradeData.instrumentType);
+    const scriptSettings = this.getUserScriptSettings(user, tradeData.symbol);
+    
+    // 4. Validate segment is enabled for user
+    if (!segmentSettings.enabled) {
+      throw new Error(`Trading in ${tradeData.segment} segment is not enabled for your account`);
+    }
+    
+    // 5. Check if script is blocked
+    if (scriptSettings?.blocked) {
+      throw new Error(`Trading in ${tradeData.symbol} is blocked for your account`);
+    }
+    
+    // 6. Get leverage from admin charges
     let leverage = 1;
     const isCrypto = tradeData.segment === 'CRYPTO' || tradeData.isCrypto;
     
-    if (tradeData.productType === 'MIS') {
+    if (tradeData.productType === 'MIS' || tradeData.productType === 'INTRADAY') {
       if (tradeData.segment === 'EQUITY') {
         leverage = admin.charges?.intradayLeverage || 5;
       } else if (tradeData.instrumentType === 'FUTURES') {
@@ -67,42 +179,87 @@ class TradeService {
           ? admin.charges?.optionBuyLeverage || 1
           : admin.charges?.optionSellLeverage || 1;
       } else if (isCrypto) {
-        // Crypto leverage (default 1x for spot, can be configured)
         leverage = admin.charges?.cryptoLeverage || 1;
       }
     }
     
-    // 4. Calculate required margin
+    // 7. Calculate lot size and validate lots
     const lotSize = tradeData.lotSize || 1;
     const lots = tradeData.lots || Math.ceil(tradeData.quantity / lotSize);
     
-    // For crypto, price is in USD - convert to INR for margin calculation
-    let entryPrice = tradeData.entryPrice;
-    const usdToInr = 83; // Approximate USD to INR rate
+    // Validate lot limits from user settings
+    const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings.maxLots || 50;
+    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings.minLots || 1;
     
-    if (isCrypto) {
-      // Crypto prices are in USD, convert to INR for margin
-      entryPrice = tradeData.entryPrice * usdToInr;
+    if (lots < minLots) {
+      throw new Error(`Minimum ${minLots} lots required for ${tradeData.symbol}`);
+    }
+    if (lots > maxLots) {
+      throw new Error(`Maximum ${maxLots} lots allowed for ${tradeData.symbol}`);
     }
     
-    const requiredMargin = this.calculateMargin(
-      entryPrice,
-      tradeData.quantity,
-      lotSize,
-      leverage,
-      tradeData.productType
-    );
+    // 8. Calculate spread from user settings
+    const spread = this.calculateUserSpread(scriptSettings, tradeData.side);
     
-    // 5. Validate margin
+    // Apply spread to entry price
+    let effectiveEntryPrice = tradeData.entryPrice;
+    if (spread > 0) {
+      if (tradeData.side === 'BUY') {
+        effectiveEntryPrice = tradeData.entryPrice + spread;
+      } else {
+        effectiveEntryPrice = tradeData.entryPrice - spread;
+      }
+    }
+    
+    // 9. Calculate brokerage from user settings
+    const brokerage = this.calculateUserBrokerage(segmentSettings, scriptSettings, tradeData, lots);
+    
+    // 10. Calculate required margin
+    // For crypto, price is in USD - convert to INR for margin calculation
+    let marginPrice = effectiveEntryPrice;
+    const usdToInr = 83;
+    
+    if (isCrypto) {
+      marginPrice = effectiveEntryPrice * usdToInr;
+    }
+    
+    // Check for fixed margin from script settings
+    let requiredMargin;
+    const isIntraday = tradeData.productType === 'MIS' || tradeData.productType === 'INTRADAY';
+    
+    if (scriptSettings?.fixedMargin) {
+      const isOption = tradeData.instrumentType === 'OPTIONS';
+      const isOptionBuy = isOption && tradeData.side === 'BUY';
+      const isOptionSell = isOption && tradeData.side === 'SELL';
+      
+      let fixedMarginPerLot = 0;
+      if (isOptionBuy) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionBuyIntraday : scriptSettings.fixedMargin.optionBuyCarry;
+      } else if (isOptionSell) {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.optionSellIntraday : scriptSettings.fixedMargin.optionSellCarry;
+      } else {
+        fixedMarginPerLot = isIntraday ? scriptSettings.fixedMargin.intradayFuture : scriptSettings.fixedMargin.carryFuture;
+      }
+      
+      if (fixedMarginPerLot > 0) {
+        requiredMargin = fixedMarginPerLot * lots;
+      } else {
+        requiredMargin = this.calculateMargin(marginPrice, tradeData.quantity, lotSize, leverage, tradeData.productType);
+      }
+    } else {
+      requiredMargin = this.calculateMargin(marginPrice, tradeData.quantity, lotSize, leverage, tradeData.productType);
+    }
+    
+    // 11. Validate margin
     await this.validateMargin(userId, requiredMargin);
     
-    // 6. Block margin - use updateOne to avoid validation issues
+    // 12. Block margin - use updateOne to avoid validation issues
     await User.updateOne(
       { _id: userId },
       { $inc: { 'wallet.usedMargin': requiredMargin } }
     );
     
-    // 7. Create trade
+    // 13. Create trade with user's settings applied
     const trade = await Trade.create({
       user: userId,
       userId: user.userId,
@@ -111,23 +268,37 @@ class TradeService {
       instrumentType: tradeData.instrumentType,
       symbol: tradeData.symbol,
       token: tradeData.token,
-      pair: tradeData.pair, // For crypto
+      pair: tradeData.pair,
       isCrypto: isCrypto,
       exchange: tradeData.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
       expiry: tradeData.expiry,
       strike: tradeData.strike,
       optionType: tradeData.optionType,
       side: tradeData.side,
-      productType: tradeData.productType || (isCrypto ? 'MIS' : 'MIS'),
+      productType: tradeData.productType || 'MIS',
       quantity: tradeData.quantity,
       lotSize,
       lots,
-      entryPrice: tradeData.entryPrice, // Store original price (USD for crypto)
-      currentPrice: tradeData.entryPrice,
+      entryPrice: effectiveEntryPrice, // Entry price with spread applied
+      currentPrice: tradeData.entryPrice, // Current market price without spread
+      marketPrice: tradeData.entryPrice, // Original market price
+      spread: spread, // Store spread applied
       marginUsed: requiredMargin,
       leverage,
       status: 'OPEN',
-      bookType: admin.bookType || 'B_BOOK'
+      bookType: admin.bookType || 'B_BOOK',
+      // Store charges upfront
+      charges: {
+        brokerage: brokerage,
+        exchange: 0,
+        gst: brokerage * 0.18, // 18% GST on brokerage
+        sebi: 0,
+        stamp: 0,
+        stt: 0,
+        total: brokerage + (brokerage * 0.18)
+      },
+      commission: brokerage,
+      totalCharges: brokerage + (brokerage * 0.18)
     });
     
     return trade;

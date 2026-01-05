@@ -325,15 +325,41 @@ router.post('/admin/create-trade', protectAdmin, async (req, res) => {
       tradeTimestamp = new Date(year, month - 1, day, hours, minutes);
     }
     
+    // Determine exchange and instrumentType from segment
+    let exchange = 'NSE';
+    let instrumentType = 'STOCK';
+    const seg = segment || 'EQUITY';
+    
+    if (seg === 'EQUITY' || seg === 'NSE') {
+      exchange = 'NSE';
+      instrumentType = 'STOCK';
+    } else if (seg === 'FNO' || seg === 'NSE F&O') {
+      exchange = 'NFO';
+      instrumentType = 'FUTURES';
+    } else if (seg === 'MCX') {
+      exchange = 'MCX';
+      instrumentType = 'FUTURES';
+    } else if (seg === 'BSE F&O') {
+      exchange = 'BFO';
+      instrumentType = 'FUTURES';
+    } else if (seg === 'CURRENCY' || seg === 'Currency') {
+      exchange = 'CDS';
+      instrumentType = 'CURRENCY';
+    } else if (seg === 'CRYPTO' || seg === 'Crypto') {
+      exchange = 'CRYPTO';
+      instrumentType = 'CRYPTO';
+    }
+    
     // Create the trade
     const trade = await Trade.create({
       user: user._id,
       userId: user.userId,
       adminCode: user.adminCode,
       symbol,
-      instrumentToken: instrumentToken || symbol,
-      segment: segment || 'NSE',
-      exchange: segment || 'NSE',
+      token: instrumentToken || symbol,
+      segment: seg === 'NSE' ? 'EQUITY' : seg,
+      exchange,
+      instrumentType,
       side,
       productType: productType || 'INTRADAY',
       orderType: 'MARKET',
@@ -341,7 +367,6 @@ router.post('/admin/create-trade', protectAdmin, async (req, res) => {
       lotSize,
       entryPrice,
       currentPrice: entryPrice,
-      tradeValue,
       status: 'OPEN',
       charges: {
         brokerage,
@@ -350,10 +375,9 @@ router.post('/admin/create-trade', protectAdmin, async (req, res) => {
         gst: 0,
         sebiCharges: 0,
         stampDuty: 0,
-        totalCharges: brokerage
+        total: brokerage
       },
       unrealizedPnL: 0,
-      createdAt: tradeTimestamp,
       openedAt: tradeTimestamp,
       createdBy: 'ADMIN',
       adminCreated: true

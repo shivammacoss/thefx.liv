@@ -60,7 +60,7 @@ const tradeSchema = new mongoose.Schema({
   },
   exchange: {
     type: String,
-    enum: ['NSE', 'BSE', 'NFO', 'MCX', 'BINANCE', 'CDS'],
+    enum: ['NSE', 'BSE', 'NFO', 'MCX', 'BINANCE', 'CDS', 'BFO', 'CRYPTO'],
     default: 'NSE'
   },
   
@@ -87,8 +87,8 @@ const tradeSchema = new mongoose.Schema({
   },
   productType: {
     type: String,
-    enum: ['CNC', 'MIS', 'NRML'],
-    default: 'MIS'
+    enum: ['CNC', 'MIS', 'NRML', 'INTRADAY', 'DELIVERY', 'CARRYFORWARD'],
+    default: 'INTRADAY'
   },
   orderType: {
     type: String,

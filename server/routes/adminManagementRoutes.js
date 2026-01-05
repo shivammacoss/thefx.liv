@@ -666,13 +666,27 @@ router.post('/users/:id/copy-settings', protectAdmin, async (req, res) => {
     if (!sourceUser) return res.status(404).json({ message: 'Source user not found' });
     
     const updateFields = {};
-    // Copy segment permissions
+    
+    // Copy segment permissions - convert to plain object if it's a Map
     if (segmentPermissions) {
-      updateFields.segmentPermissions = segmentPermissions;
+      if (segmentPermissions instanceof Map) {
+        updateFields.segmentPermissions = Object.fromEntries(segmentPermissions);
+      } else if (typeof segmentPermissions === 'object') {
+        updateFields.segmentPermissions = segmentPermissions;
+      }
     }
-    // Copy script settings
+    
+    // Copy script settings - convert to plain object if it's a Map
     if (scriptSettings) {
-      updateFields.scriptSettings = scriptSettings;
+      if (scriptSettings instanceof Map) {
+        updateFields.scriptSettings = Object.fromEntries(scriptSettings);
+      } else if (typeof scriptSettings === 'object') {
+        updateFields.scriptSettings = scriptSettings;
+      }
+    }
+    
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({ message: 'No settings to copy' });
     }
     
     // Use updateOne to avoid segmentPermissions validation error
@@ -681,6 +695,7 @@ router.post('/users/:id/copy-settings', protectAdmin, async (req, res) => {
     const updatedUser = await User.findById(targetUser._id).select('-password');
     res.json({ message: 'Settings copied successfully', user: updatedUser });
   } catch (error) {
+    console.error('Copy settings error:', error);
     res.status(500).json({ message: error.message });
   }
 });
@@ -1679,37 +1694,7 @@ router.put('/users/:id/settings', protectAdmin, superAdminOnly, async (req, res)
   }
 });
 
-// Copy user segment and script settings to another user (Super Admin only)
-router.post('/users/:id/copy-settings', protectAdmin, superAdminOnly, async (req, res) => {
-  try {
-    const targetUser = await User.findById(req.params.id);
-    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
-    
-    const { sourceUserId, segmentPermissions, scriptSettings } = req.body;
-    
-    if (!sourceUserId) {
-      return res.status(400).json({ message: 'Source user ID is required' });
-    }
-    
-    const sourceUser = await User.findById(sourceUserId);
-    if (!sourceUser) return res.status(404).json({ message: 'Source user not found' });
-    
-    // Copy segment permissions
-    if (segmentPermissions) {
-      targetUser.segmentPermissions = segmentPermissions;
-    }
-    
-    // Copy script settings
-    if (scriptSettings) {
-      targetUser.scriptSettings = scriptSettings;
-    }
-    
-    await targetUser.save();
-    res.json({ message: 'Settings copied successfully', user: targetUser });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
+// Note: copy-settings route is defined earlier in the file (line ~651) for all admins
 
 // Download user transactions as CSV
 router.get('/user-transactions/download', protectAdmin, async (req, res) => {

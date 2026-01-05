@@ -1047,6 +1047,64 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
       }
     }
     
+    // 3b. NSE F&O Options (CE/PE) - Get nearest expiry options around ATM
+    const nfoOptions = allInstruments.filter(i => 
+      i.exchange === 'NFO' && 
+      (i.instrument_type === 'CE' || i.instrument_type === 'PE') && 
+      ['NIFTY', 'BANKNIFTY', 'FINNIFTY'].includes(i.name)
+    );
+    
+    // Group by name and expiry, get nearest expiry
+    const optionsByNameExpiry = {};
+    for (const opt of nfoOptions) {
+      const key = `${opt.name}_${opt.expiry}`;
+      if (!optionsByNameExpiry[opt.name]) optionsByNameExpiry[opt.name] = {};
+      if (!optionsByNameExpiry[opt.name][opt.expiry]) optionsByNameExpiry[opt.name][opt.expiry] = [];
+      optionsByNameExpiry[opt.name][opt.expiry].push(opt);
+    }
+    
+    // Get nearest 2 expiries for each index and add ~10 strikes around ATM
+    for (const [name, expiries] of Object.entries(optionsByNameExpiry)) {
+      const sortedExpiries = Object.keys(expiries).sort((a, b) => new Date(a) - new Date(b));
+      const nearestExpiries = sortedExpiries.slice(0, 2); // Get 2 nearest expiries
+      
+      for (const expiry of nearestExpiries) {
+        const options = expiries[expiry];
+        // Sort by strike and get middle ~20 options (10 CE + 10 PE around ATM)
+        const strikes = [...new Set(options.map(o => parseFloat(o.strike)))].sort((a, b) => a - b);
+        const midIndex = Math.floor(strikes.length / 2);
+        const selectedStrikes = strikes.slice(Math.max(0, midIndex - 5), midIndex + 5);
+        
+        for (const opt of options) {
+          if (!selectedStrikes.includes(parseFloat(opt.strike))) continue;
+          
+          try {
+            await Instrument.create({
+              token: opt.instrument_token,
+              symbol: opt.tradingsymbol,
+              name: `${opt.name} ${opt.strike} ${opt.instrument_type}`,
+              exchange: 'NFO',
+              segment: 'FNO',
+              displaySegment: 'NSE F&O',
+              instrumentType: 'OPTIONS',
+              optionType: opt.instrument_type,
+              strike: parseFloat(opt.strike),
+              category: opt.name === 'NIFTY' ? 'NIFTY' : opt.name === 'BANKNIFTY' ? 'BANKNIFTY' : 'FINNIFTY',
+              tradingSymbol: opt.tradingsymbol,
+              lotSize: parseInt(opt.lot_size) || 25,
+              tickSize: parseFloat(opt.tick_size) || 0.05,
+              expiry: new Date(opt.expiry),
+              isEnabled: true,
+              isFeatured: false,
+              sortOrder: opt.instrument_type === 'CE' ? 10 : 20
+            });
+            added++;
+            counts.nsefo++;
+          } catch (e) { errors++; }
+        }
+      }
+    }
+    
     // 4. MCX COMMODITIES
     const mcxFutures = allInstruments.filter(i => i.exchange === 'MCX' && i.instrument_type === 'FUT');
     const mcxBySymbol = {};
@@ -1084,7 +1142,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
       } catch (e) { errors++; }
     }
     
-    // 5. BSE F&O
+    // 5. BSE F&O Futures
     const bseFutures = allInstruments.filter(i => 
       i.exchange === 'BFO' && i.instrument_type === 'FUT' && ['SENSEX', 'BANKEX'].includes(i.name)
     ).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
@@ -1118,6 +1176,60 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           added++;
           counts.bsefo++;
         } catch (e) { errors++; }
+      }
+    }
+    
+    // 5b. BSE F&O Options
+    const bseOptions = allInstruments.filter(i => 
+      i.exchange === 'BFO' && 
+      (i.instrument_type === 'CE' || i.instrument_type === 'PE') && 
+      ['SENSEX', 'BANKEX'].includes(i.name)
+    );
+    
+    const bseOptionsByNameExpiry = {};
+    for (const opt of bseOptions) {
+      if (!bseOptionsByNameExpiry[opt.name]) bseOptionsByNameExpiry[opt.name] = {};
+      if (!bseOptionsByNameExpiry[opt.name][opt.expiry]) bseOptionsByNameExpiry[opt.name][opt.expiry] = [];
+      bseOptionsByNameExpiry[opt.name][opt.expiry].push(opt);
+    }
+    
+    for (const [name, expiries] of Object.entries(bseOptionsByNameExpiry)) {
+      const sortedExpiries = Object.keys(expiries).sort((a, b) => new Date(a) - new Date(b));
+      const nearestExpiries = sortedExpiries.slice(0, 2);
+      
+      for (const expiry of nearestExpiries) {
+        const options = expiries[expiry];
+        const strikes = [...new Set(options.map(o => parseFloat(o.strike)))].sort((a, b) => a - b);
+        const midIndex = Math.floor(strikes.length / 2);
+        const selectedStrikes = strikes.slice(Math.max(0, midIndex - 5), midIndex + 5);
+        
+        for (const opt of options) {
+          if (!selectedStrikes.includes(parseFloat(opt.strike))) continue;
+          
+          try {
+            await Instrument.create({
+              token: opt.instrument_token,
+              symbol: opt.tradingsymbol,
+              name: `${opt.name} ${opt.strike} ${opt.instrument_type}`,
+              exchange: 'BFO',
+              segment: 'FNO',
+              displaySegment: 'BSE F&O',
+              instrumentType: 'OPTIONS',
+              optionType: opt.instrument_type,
+              strike: parseFloat(opt.strike),
+              category: 'BSE',
+              tradingSymbol: opt.tradingsymbol,
+              lotSize: parseInt(opt.lot_size) || 10,
+              tickSize: parseFloat(opt.tick_size) || 0.05,
+              expiry: new Date(opt.expiry),
+              isEnabled: true,
+              isFeatured: false,
+              sortOrder: opt.instrument_type === 'CE' ? 10 : 20
+            });
+            added++;
+            counts.bsefo++;
+          } catch (e) { errors++; }
+        }
       }
     }
     
