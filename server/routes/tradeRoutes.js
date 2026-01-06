@@ -508,9 +508,53 @@ router.post('/admin/trade/:id/reopen', protectAdmin, async (req, res) => {
     if (!trade) return res.status(404).json({ message: 'Trade not found' });
     if (trade.status !== 'CLOSED') return res.status(400).json({ message: 'Trade is not closed' });
     
-    // Reset to open state
+    // Get user to reverse wallet changes
+    const user = await User.findById(trade.user);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    // Store the P&L that was added when trade was closed (to reverse it)
+    const pnlToReverse = trade.netPnL || 0;
+    const marginToBlock = trade.marginUsed || 0;
+    
+    // Reverse wallet changes based on trade type
+    if (trade.isCrypto) {
+      // Crypto trade: Reverse P&L from crypto wallet
+      const newCryptoBalance = Math.max(0, (user.cryptoWallet?.balance || 0) - pnlToReverse);
+      const newCryptoRealizedPnL = (user.cryptoWallet?.realizedPnL || 0) - pnlToReverse;
+      
+      await User.updateOne(
+        { _id: user._id },
+        { 
+          $set: { 
+            'cryptoWallet.balance': newCryptoBalance,
+            'cryptoWallet.realizedPnL': newCryptoRealizedPnL
+          } 
+        }
+      );
+    } else {
+      // Regular trade: Reverse P&L and re-block margin
+      const newTradingBalance = Math.max(0, (user.wallet.tradingBalance || 0) - marginToBlock - pnlToReverse);
+      const newUsedMargin = (user.wallet.usedMargin || 0) + marginToBlock;
+      const newBlocked = (user.wallet.blocked || 0) + marginToBlock;
+      const newRealizedPnL = (user.wallet.realizedPnL || 0) - pnlToReverse;
+      
+      await User.updateOne(
+        { _id: user._id },
+        { 
+          $set: { 
+            'wallet.tradingBalance': newTradingBalance,
+            'wallet.usedMargin': newUsedMargin,
+            'wallet.blocked': newBlocked,
+            'wallet.realizedPnL': newRealizedPnL
+          } 
+        }
+      );
+    }
+    
+    // Reset trade to open state
     trade.status = 'OPEN';
     trade.exitPrice = null;
+    trade.effectiveExitPrice = null;
     trade.closedAt = null;
     trade.closeReason = null;
     trade.realizedPnL = 0;

@@ -6803,6 +6803,45 @@ const TradingPanel = () => {
     setUserSearch(user.fullName || user.username);
   };
 
+  // Helper function to get correct lot size for display
+  const getDisplayLotSize = (instrument) => {
+    if (instrument.lotSize && instrument.lotSize > 1) return instrument.lotSize;
+    
+    const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
+    const exch = (instrument.exchange || '').toUpperCase();
+    const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
+    
+    // MCX Commodities
+    if (exch === 'MCX' || seg.includes('MCX')) {
+      if (sym.includes('GOLD')) return 100;
+      if (sym.includes('SILVER')) return 30;
+      if (sym.includes('CRUDEOIL')) return 100;
+      if (sym.includes('NATURALGAS')) return 1250;
+      if (sym.includes('COPPER')) return 2500;
+      if (sym.includes('ZINC')) return 5000;
+      if (sym.includes('ALUMINIUM')) return 5000;
+      if (sym.includes('LEAD')) return 5000;
+      if (sym.includes('NICKEL')) return 1500;
+    }
+    
+    // NSE F&O
+    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (sym.includes('BANKNIFTY')) return 15;
+      if (sym.includes('FINNIFTY')) return 25;
+      if (sym.includes('MIDCPNIFTY')) return 50;
+      if (sym.includes('NIFTY')) return 25;
+      if (sym.includes('SENSEX')) return 10;
+      if (sym.includes('BANKEX')) return 15;
+    }
+    
+    // BSE F&O
+    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      return 10;
+    }
+    
+    return instrument.lotSize || 1;
+  };
+
   return (
     <div className="p-4 md:p-6">
       <h1 className="text-xl md:text-2xl font-bold mb-6">Market Watch</h1>
@@ -6852,7 +6891,7 @@ const TradingPanel = () => {
                     <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
                     <div className="text-xs text-gray-400">
                       {instrument.name} • {instrument.displaySegment || instrument.segment}
-                      {instrument.lotSize ? <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span> : null}
+                      <span className="text-yellow-400 ml-1">(Lot: {getDisplayLotSize(instrument)})</span>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -6905,7 +6944,7 @@ const TradingPanel = () => {
                     <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
                     <div className="text-xs text-gray-400">
                       {instrument.name} • {instrument.displaySegment || instrument.segment}
-                      {instrument.lotSize ? <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span> : null}
+                      <span className="text-yellow-400 ml-1">(Lot: {getDisplayLotSize(instrument)})</span>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -6978,7 +7017,49 @@ const TradeModal = ({
   const [livePrice, setLivePrice] = useState(instrument.lastPrice || instrument.ltp || 0);
   const [priceLoading, setPriceLoading] = useState(true);
   const [lots, setLots] = useState(1);
-  const lotSize = instrument.lotSize || 1;
+  
+  // Get lot size - use database value or calculate from symbol/category
+  const getLotSizeForInstrument = () => {
+    // If database has valid lot size > 1, use it
+    if (instrument.lotSize && instrument.lotSize > 1) return instrument.lotSize;
+    
+    const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
+    const cat = (instrument.category || '').toUpperCase();
+    const exch = (instrument.exchange || '').toUpperCase();
+    const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
+    
+    // MCX Commodities
+    if (exch === 'MCX' || seg.includes('MCX')) {
+      if (sym.includes('GOLD')) return 100;
+      if (sym.includes('SILVER')) return 30;
+      if (sym.includes('CRUDEOIL')) return 100;
+      if (sym.includes('NATURALGAS')) return 1250;
+      if (sym.includes('COPPER')) return 2500;
+      if (sym.includes('ZINC')) return 5000;
+      if (sym.includes('ALUMINIUM')) return 5000;
+      if (sym.includes('LEAD')) return 5000;
+      if (sym.includes('NICKEL')) return 1500;
+    }
+    
+    // NSE F&O
+    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (sym.includes('BANKNIFTY') || cat.includes('BANKNIFTY')) return 15;
+      if (sym.includes('FINNIFTY') || cat.includes('FINNIFTY')) return 25;
+      if (sym.includes('MIDCPNIFTY') || cat.includes('MIDCPNIFTY')) return 50;
+      if (sym.includes('NIFTY') || cat.includes('NIFTY')) return 25;
+      if (sym.includes('SENSEX') || cat.includes('SENSEX')) return 10;
+      if (sym.includes('BANKEX') || cat.includes('BANKEX')) return 15;
+    }
+    
+    // BSE
+    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      return 10;
+    }
+    
+    return instrument.lotSize || 1;
+  };
+  
+  const lotSize = getLotSizeForInstrument();
   const calculatedQuantity = lots * lotSize;
   
   // Check if this is NSE segment (quantity-based) or other segments (lot-based)
