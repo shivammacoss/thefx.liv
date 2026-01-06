@@ -1,12 +1,105 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { 
   Users, LogOut, Plus, Search, Edit, Trash2, TrendingUp,
   Key, Wallet, Eye, EyeOff, X, ArrowUpCircle, ArrowDownCircle,
-  RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus, Copy
+  RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus, Copy,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
+
+// Reusable Pagination Component
+const Pagination = ({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }) => {
+  if (totalPages <= 1) return null;
+  
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 5;
+    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let end = Math.min(totalPages, start + maxVisible - 1);
+    if (end - start + 1 < maxVisible) {
+      start = Math.max(1, end - maxVisible + 1);
+    }
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 px-2">
+      <div className="text-sm text-gray-400">
+        Showing {startItem}-{endItem} of {totalItems}
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="p-2 rounded bg-dark-700 hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        {getPageNumbers().map(page => (
+          <button
+            key={page}
+            onClick={() => onPageChange(page)}
+            className={`px-3 py-1 rounded ${currentPage === page ? 'bg-yellow-600 text-white' : 'bg-dark-700 hover:bg-dark-600'}`}
+          >
+            {page}
+          </button>
+        ))}
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="p-2 rounded bg-dark-700 hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Custom hook for pagination with global search
+const usePagination = (data, itemsPerPage = 20, searchTerm = '', searchFields = []) => {
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return data;
+    const term = searchTerm.toLowerCase();
+    return data.filter(item => 
+      searchFields.some(field => {
+        const value = field.split('.').reduce((obj, key) => obj?.[key], item);
+        return value?.toString().toLowerCase().includes(term);
+      })
+    );
+  }, [data, searchTerm, searchFields]);
+
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredData.slice(start, start + itemsPerPage);
+  }, [filteredData, currentPage, itemsPerPage]);
+
+  return {
+    currentPage,
+    setCurrentPage,
+    totalPages,
+    paginatedData,
+    filteredData,
+    totalItems: filteredData.length
+  };
+};
 
 const AdminDashboard = () => {
   const { admin, logoutAdmin, updateAdmin } = useAuth();
@@ -50,12 +143,12 @@ const AdminDashboard = () => {
     { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
     { path: '/admin/admins', icon: Shield, label: 'Admin Management' },
     { path: '/admin/all-users', icon: Users, label: 'All Users' },
+    { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
     { path: '/admin/all-trades', icon: FileText, label: 'All Trade Management' },
     { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
     { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-    { path: '/admin/instruments', icon: TrendingUp, label: 'Instruments' },
-    { path: '/admin/lot-settings', icon: Settings, label: 'Lot Management' },
-    { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
+    { path: '/admin/instruments', icon: Settings, label: 'Instruments' },
+        { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
     { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
     { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
     { path: '/admin/profile', icon: Settings, label: 'Profile' },
@@ -63,6 +156,7 @@ const AdminDashboard = () => {
     { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
     { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
     { path: '/admin/users', icon: Users, label: 'User Management' },
+    { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
     { path: '/admin/trades', icon: FileText, label: 'Trade Management' },
     { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
     { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
@@ -191,8 +285,7 @@ const AdminDashboard = () => {
           {isSuperAdmin && <Route path="all-fund-requests" element={<SuperAdminAllFundRequests />} />}
           {isSuperAdmin && <Route path="create-user" element={<SuperAdminCreateUser />} />}
           {isSuperAdmin && <Route path="instruments" element={<InstrumentManagement />} />}
-          {isSuperAdmin && <Route path="lot-settings" element={<LotManagement />} />}
-          {isSuperAdmin && <Route path="fund-requests" element={<SuperAdminFundRequests />} />}
+                    {isSuperAdmin && <Route path="fund-requests" element={<SuperAdminFundRequests />} />}
           {isSuperAdmin && <Route path="admin-fund-requests" element={<AdminFundRequestsManagement />} />}
           {isSuperAdmin && <Route path="market-control" element={<MarketControl />} />}
           {isSuperAdmin && <Route path="bank-management" element={<BankManagement />} />}
@@ -204,6 +297,7 @@ const AdminDashboard = () => {
           {!isSuperAdmin && <Route path="bank-accounts" element={<BankAccounts />} />}
           {!isSuperAdmin && <Route path="ledger" element={<LedgerView />} />}
           {/* Common Routes - Both Super Admin and Admin */}
+          <Route path="trading" element={<TradingPanel />} />
           <Route path="profile" element={<ProfileSettings />} />
           <Route path="*" element={isSuperAdmin ? <SuperAdminDashboard /> : <AdminDashboardHome />} />
         </Routes>
@@ -477,6 +571,10 @@ const AdminManagement = () => {
   const [selectedAdmin, setSelectedAdmin] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedAdmins, totalItems } = usePagination(
+    admins, 20, searchTerm, ['name', 'username', 'email', 'adminCode', 'phone']
+  );
+
   useEffect(() => {
     fetchAdmins();
   }, []);
@@ -504,13 +602,6 @@ const AdminManagement = () => {
       alert(error.response?.data?.message || 'Error updating status');
     }
   };
-
-  const filteredAdmins = admins.filter(adm => 
-    adm.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    adm.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    adm.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    adm.adminCode?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   return (
     <div className="p-4 md:p-6">
@@ -559,11 +650,11 @@ const AdminManagement = () => {
 
       {loading ? (
         <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : filteredAdmins.length === 0 ? (
+      ) : totalItems === 0 ? (
         <div className="text-center py-8 text-gray-400">No admins found</div>
       ) : (
         <div className="space-y-4">
-          {filteredAdmins.map(adm => (
+          {paginatedAdmins.map(adm => (
             <div key={adm._id} className="bg-dark-800 rounded-lg p-4">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 {/* Admin Info */}
@@ -653,6 +744,13 @@ const AdminManagement = () => {
               </div>
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={totalItems}
+            itemsPerPage={20}
+          />
         </div>
       )}
 
@@ -2729,6 +2827,11 @@ const FundRequests = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('PENDING');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedRequests, totalItems } = usePagination(
+    requests, 20, searchTerm, ['user.username', 'user.fullName', 'userId', 'referenceId', 'amount']
+  );
 
   useEffect(() => {
     fetchRequests();
@@ -2762,25 +2865,39 @@ const FundRequests = () => {
     <div className="p-4 md:p-6">
       <h1 className="text-2xl font-bold mb-6">Fund Requests</h1>
       
-      <div className="flex gap-2 mb-6">
-        {['PENDING', 'APPROVED', 'REJECTED'].map(status => (
-          <button
-            key={status}
-            onClick={() => setFilter(status)}
-            className={`px-4 py-2 rounded ${filter === status ? 'bg-purple-600' : 'bg-dark-700'}`}
-          >
-            {status}
-          </button>
-        ))}
+      <div className="flex flex-wrap gap-4 mb-6">
+        <div className="flex gap-2">
+          {['PENDING', 'APPROVED', 'REJECTED'].map(status => (
+            <button
+              key={status}
+              onClick={() => setFilter(status)}
+              className={`px-4 py-2 rounded ${filter === status ? 'bg-purple-600' : 'bg-dark-700'}`}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search by user, reference..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2"
+            />
+          </div>
+        </div>
       </div>
 
       {loading ? (
         <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : requests.length === 0 ? (
+      ) : totalItems === 0 ? (
         <div className="text-center py-8 text-gray-400">No {filter.toLowerCase()} requests</div>
       ) : (
         <div className="space-y-4">
-          {requests.map(req => (
+          {paginatedRequests.map(req => (
             <div key={req._id} className="bg-dark-800 rounded-lg p-4">
               <div className="flex flex-col md:flex-row justify-between gap-4">
                 <div>
@@ -2807,6 +2924,13 @@ const FundRequests = () => {
               </div>
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={totalItems}
+            itemsPerPage={20}
+          />
         </div>
       )}
     </div>
@@ -4453,6 +4577,21 @@ const MarketControl = () => {
                       if (btn) { btn.disabled = false; btn.textContent = 'Subscribe All'; }
                     }
                   }} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm disabled:opacity-50">Subscribe All</button>
+                  <button onClick={async () => {
+                    try {
+                      const btn = document.activeElement;
+                      btn.disabled = true;
+                      btn.textContent = 'Syncing Lots...';
+                      const { data } = await axios.post('/api/zerodha/sync-lot-sizes', {}, { headers: { Authorization: `Bearer ${admin.token}` } });
+                      alert(`${data.message}\n\nUpdated: ${data.updated}\nNot Found: ${data.notFound}\nTotal: ${data.total}`);
+                      btn.disabled = false;
+                      btn.textContent = 'Sync Lot Sizes';
+                    } catch (error) { 
+                      alert(error.response?.data?.message || 'Error syncing lot sizes'); 
+                      const btn = document.activeElement;
+                      if (btn) { btn.disabled = false; btn.textContent = 'Sync Lot Sizes'; }
+                    }
+                  }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white py-2 rounded text-sm disabled:opacity-50">Sync Lot Sizes</button>
                 </div>
                 <div className="flex gap-2 mb-2">
                   <button onClick={async () => {
@@ -4859,7 +4998,6 @@ const AdminTrades = () => {
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     fetchTrades();
@@ -4901,13 +5039,13 @@ const AdminTrades = () => {
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <h1 className="text-xl md:text-2xl font-bold">Trade Management</h1>
-        <button
-          onClick={() => setShowCreateModal(true)}
+        <Link
+          to="/admin/trading"
           className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition"
         >
           <Plus size={20} />
           <span>Create Trade</span>
-        </button>
+        </Link>
       </div>
 
       {/* Filters */}
@@ -5055,15 +5193,6 @@ const AdminTrades = () => {
           </div>
         </>
       )}
-
-      {/* Create Trade Modal */}
-      {showCreateModal && (
-        <CreateTradeModal
-          token={admin.token}
-          onClose={() => setShowCreateModal(false)}
-          onSuccess={() => { setShowCreateModal(false); fetchTrades(); }}
-        />
-      )}
     </div>
   );
 };
@@ -5077,20 +5206,10 @@ const SuperAdminAllTrades = () => {
   const [filter, setFilter] = useState('');
   const [selectedAdmin, setSelectedAdmin] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Filter trades by search term
-  const filteredTrades = trades.filter(t => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      t.symbol?.toLowerCase().includes(term) ||
-      t.userId?.toLowerCase().includes(term) ||
-      t.tradeId?.toLowerCase().includes(term) ||
-      t.adminCode?.toLowerCase().includes(term) ||
-      t.segment?.toLowerCase().includes(term)
-    );
-  });
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedTrades, totalItems } = usePagination(
+    trades, 20, searchTerm, ['symbol', 'userId', 'tradeId', 'adminCode', 'segment', 'user.username', 'user.fullName']
+  );
 
   useEffect(() => {
     fetchAdmins();
@@ -5151,22 +5270,13 @@ const SuperAdminAllTrades = () => {
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <h1 className="text-xl md:text-2xl font-bold">All Trade Management</h1>
-        <button
-          onClick={() => setShowCreateModal(true)}
+        <Link
+          to="/admin/trading"
           className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"
         >
           <Plus size={18} /> Create Trade
-        </button>
+        </Link>
       </div>
-      
-      {/* Create Trade Modal */}
-      {showCreateModal && (
-        <CreateTradeModal
-          token={admin.token}
-          onClose={() => setShowCreateModal(false)}
-          onSuccess={() => { setShowCreateModal(false); fetchTrades(); }}
-        />
-      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-4 mb-6">
@@ -5209,39 +5319,39 @@ const SuperAdminAllTrades = () => {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Trades</div>
-          <div className="text-2xl font-bold">{filteredTrades.length}</div>
+          <div className="text-2xl font-bold">{totalItems}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Open</div>
-          <div className="text-2xl font-bold text-green-400">{filteredTrades.filter(t => t.status === 'OPEN').length}</div>
+          <div className="text-2xl font-bold text-green-400">{trades.filter(t => t.status === 'OPEN').length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Closed</div>
-          <div className="text-2xl font-bold text-gray-400">{filteredTrades.filter(t => t.status === 'CLOSED').length}</div>
+          <div className="text-2xl font-bold text-gray-400">{trades.filter(t => t.status === 'CLOSED').length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total P&L</div>
-          <div className={`text-2xl font-bold ${filteredTrades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            ₹{filteredTrades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
+          <div className={`text-2xl font-bold ${trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            ₹{trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
           </div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Brokerage</div>
           <div className="text-2xl font-bold text-purple-400">
-            ₹{filteredTrades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
+            ₹{trades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
           </div>
         </div>
       </div>
 
       {loading ? (
         <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : filteredTrades.length === 0 ? (
+      ) : totalItems === 0 ? (
         <div className="text-center py-8 text-gray-400">No trades found</div>
       ) : (
         <>
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {filteredTrades.map(trade => {
+            {paginatedTrades.map(trade => {
               const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
               const currencySymbol = isCrypto ? '$' : '₹';
               return (
@@ -5304,7 +5414,7 @@ const SuperAdminAllTrades = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredTrades.map(trade => {
+                {paginatedTrades.map(trade => {
                   const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
                   const currencySymbol = isCrypto ? '$' : '₹';
                   return (
@@ -5353,6 +5463,13 @@ const SuperAdminAllTrades = () => {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={totalItems}
+            itemsPerPage={20}
+          />
         </>
       )}
     </div>
@@ -5368,6 +5485,11 @@ const SuperAdminAllFundRequests = () => {
   const [filter, setFilter] = useState('PENDING');
   const [selectedAdmin, setSelectedAdmin] = useState('');
   const [actionLoading, setActionLoading] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedRequests, totalItems } = usePagination(
+    requests, 20, searchTerm, ['user.username', 'user.fullName', 'user.email', 'adminCode', 'referenceId', 'amount']
+  );
 
   useEffect(() => {
     fetchAdmins();
@@ -5491,6 +5613,19 @@ const SuperAdminAllFundRequests = () => {
             ))}
           </select>
         </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-sm text-gray-400 mb-1">Search</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search by user, admin, reference..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2"
+            />
+          </div>
+        </div>
         <div className="flex gap-2 items-end">
           <button onClick={() => setFilter('')} className={`px-4 py-2 rounded ${!filter ? 'bg-purple-600' : 'bg-dark-700'}`}>All</button>
           <button onClick={() => setFilter('PENDING')} className={`px-4 py-2 rounded ${filter === 'PENDING' ? 'bg-yellow-600' : 'bg-dark-700'}`}>Pending</button>
@@ -5503,7 +5638,7 @@ const SuperAdminAllFundRequests = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Requests</div>
-          <div className="text-2xl font-bold">{requests.length}</div>
+          <div className="text-2xl font-bold">{totalItems}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Pending</div>
@@ -5525,13 +5660,13 @@ const SuperAdminAllFundRequests = () => {
 
       {loading ? (
         <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : requests.length === 0 ? (
+      ) : totalItems === 0 ? (
         <div className="text-center py-8 text-gray-400">No fund requests found</div>
       ) : (
         <>
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {requests.map(req => (
+            {paginatedRequests.map(req => (
               <div key={req._id} className="bg-dark-800 rounded-lg p-4">
                 <div className="flex justify-between items-start mb-2">
                   <div>
@@ -5590,7 +5725,7 @@ const SuperAdminAllFundRequests = () => {
                 </tr>
               </thead>
               <tbody>
-                {requests.map(req => (
+                {paginatedRequests.map(req => (
                   <tr key={req._id} className="border-t border-dark-600">
                     <td className="px-4 py-3 font-mono text-xs">{req.requestId}</td>
                     <td className="px-4 py-3">
@@ -5632,43 +5767,81 @@ const SuperAdminAllFundRequests = () => {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={totalItems}
+            itemsPerPage={20}
+          />
         </>
       )}
     </div>
   );
 };
 
-// Create Trade Modal - Admin can place trades for users
-const CreateTradeModal = ({ token, onClose, onSuccess }) => {
-  const [users, setUsers] = useState([]);
+// Market Watch - Trading interface
+const TradingPanel = () => {
+  const { admin } = useAuth();
+  const isSuperAdmin = admin?.role === 'SUPER_ADMIN';
   const [instruments, setInstruments] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [searchUser, setSearchUser] = useState('');
-  const [searchInstrument, setSearchInstrument] = useState('');
-  const [formData, setFormData] = useState({
-    userId: '',
-    userName: '',
-    symbol: '',
-    instrumentToken: '',
-    segment: 'NSE',
-    side: 'BUY',
-    productType: 'INTRADAY',
-    quantity: 1,
-    entryPrice: '',
-    tradeDate: new Date().toISOString().split('T')[0],
-    tradeTime: new Date().toTimeString().slice(0, 5)
-  });
+  const [watchlist, setWatchlist] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeSegment, setActiveSegment] = useState('NSE');
+  const [showTradeModal, setShowTradeModal] = useState(false);
+  const [selectedInstrument, setSelectedInstrument] = useState(null);
+  const [selectedAdmin, setSelectedAdmin] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userSearch, setUserSearch] = useState('');
+
+  const segments = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency'];
 
   useEffect(() => {
-    fetchUsers();
     fetchInstruments();
+    fetchUsers();
+    if (isSuperAdmin) fetchAdmins();
   }, []);
+
+  useEffect(() => {
+    // Re-fetch users when admin filter changes (for super admin)
+    if (isSuperAdmin && selectedAdmin) {
+      fetchUsersByAdmin(selectedAdmin);
+    }
+  }, [selectedAdmin]);
+
+  const fetchInstruments = async () => {
+    try {
+      const { data } = await axios.get('/api/instruments/admin?limit=1000', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      const instrumentsArray = data?.instruments || data || [];
+      setInstruments(Array.isArray(instrumentsArray) ? instrumentsArray : []);
+    } catch (err) {
+      console.error('Error fetching instruments:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAdmins = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/admins', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setAdmins(data);
+    } catch (err) {
+      console.error('Error fetching admins:', err);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
-      const { data } = await axios.get('/api/admin/manage/users', {
-        headers: { Authorization: `Bearer ${token}` }
+      const url = isSuperAdmin ? '/api/admin/manage/users' : '/api/admin/users';
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${admin.token}` }
       });
       setUsers(data);
     } catch (err) {
@@ -5676,71 +5849,374 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
     }
   };
 
-  const fetchInstruments = async () => {
+  const fetchUsersByAdmin = async (adminCode) => {
     try {
-      const { data } = await axios.get('/api/instruments/admin?limit=500', {
-        headers: { Authorization: `Bearer ${token}` }
+      const { data } = await axios.get('/api/admin/manage/users', {
+        headers: { Authorization: `Bearer ${admin.token}` }
       });
-      // API returns { instruments, pagination, stats } - extract instruments array
-      const instrumentsArray = data?.instruments || data || [];
-      // Map to include tradingsymbol field for compatibility
-      const mapped = (Array.isArray(instrumentsArray) ? instrumentsArray : []).map(i => ({
-        ...i,
-        tradingsymbol: i.tradingSymbol || i.symbol,
-        instrument_token: i.token
-      }));
-      setInstruments(mapped);
+      const filtered = adminCode ? data.filter(u => u.adminCode === adminCode) : data;
+      setUsers(filtered);
     } catch (err) {
-      console.error('Error fetching instruments:', err);
+      console.error('Error fetching users:', err);
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.fullName?.toLowerCase().includes(searchUser.toLowerCase()) ||
-    u.username?.toLowerCase().includes(searchUser.toLowerCase()) ||
-    u.userId?.toLowerCase().includes(searchUser.toLowerCase())
-  ).slice(0, 10);
-
-  const [segmentFilter, setSegmentFilter] = useState('');
-  const instrumentSegments = Array.from(
-    new Set(
-      instruments
-        .map(i => (i.displaySegment || i.segment || i.exchange || '').toUpperCase())
-        .filter(Boolean)
-    )
-  );
-
+  // Filter instruments by segment and search
   const filteredInstruments = instruments.filter(i => {
-    const term = searchInstrument.toLowerCase();
     const seg = (i.displaySegment || i.segment || i.exchange || '').toUpperCase();
-    const matchesSegment = segmentFilter ? seg === segmentFilter : true;
-    const matchesSearch =
-      i.tradingsymbol?.toLowerCase().includes(term) ||
+    const matchesSegment = 
+      (activeSegment === 'NSE' && (seg === 'NSE' || seg === 'NSE SPOT' || seg.includes('NSE') && !seg.includes('F&O') && !seg.includes('NFO'))) ||
+      (activeSegment === 'NSE F&O' && (seg === 'NFO' || seg === 'NSE F&O' || seg.includes('NFO'))) ||
+      (activeSegment === 'MCX' && (seg === 'MCX' || seg.includes('MCX'))) ||
+      (activeSegment === 'BSE F&O' && (seg === 'BFO' || seg === 'BSE F&O' || seg.includes('BFO'))) ||
+      (activeSegment === 'Currency' && (seg === 'CDS' || seg === 'CURRENCY' || seg.includes('CDS') || seg.includes('CURRENCY')));
+    
+    if (!searchTerm) return matchesSegment;
+    
+    const term = searchTerm.toLowerCase();
+    return matchesSegment && (
+      i.tradingSymbol?.toLowerCase().includes(term) ||
       i.symbol?.toLowerCase().includes(term) ||
-      i.name?.toLowerCase().includes(term) ||
-      i.tradingSymbol?.toLowerCase().includes(term);
-    return matchesSegment && matchesSearch;
-  }).slice(0, 20);
+      i.name?.toLowerCase().includes(term)
+    );
+  });
+
+  // Filter users by search
+  const filteredUsers = users.filter(u => {
+    if (!userSearch) return true;
+    const term = userSearch.toLowerCase();
+    return (
+      u.fullName?.toLowerCase().includes(term) ||
+      u.username?.toLowerCase().includes(term) ||
+      u.userId?.toLowerCase().includes(term)
+    );
+  }).slice(0, 15);
+
+  const addToWatchlist = (instrument) => {
+    if (!watchlist.find(w => w._id === instrument._id)) {
+      setWatchlist([...watchlist, instrument]);
+    }
+  };
+
+  const removeFromWatchlist = (instrumentId) => {
+    setWatchlist(watchlist.filter(w => w._id !== instrumentId));
+  };
+
+  const openTradeModal = (instrument) => {
+    setSelectedInstrument(instrument);
+    setSelectedUser(null);
+    setUserSearch('');
+    setShowTradeModal(true);
+  };
+
+  const handleSelectUser = (user) => {
+    setSelectedUser(user);
+    setUserSearch(user.fullName || user.username);
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <h1 className="text-xl md:text-2xl font-bold mb-6">Market Watch</h1>
+
+      {/* Segment Tabs */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {segments.map(seg => (
+          <button
+            key={seg}
+            onClick={() => setActiveSegment(seg)}
+            className={`px-4 py-2 rounded-lg font-medium transition ${
+              activeSegment === seg 
+                ? 'bg-yellow-600 text-white' 
+                : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+            }`}
+          >
+            {seg}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Search & Add Instruments */}
+        <div className="bg-dark-800 rounded-lg p-4">
+          <h2 className="text-lg font-semibold mb-4">Search Instruments</h2>
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder={`Search ${activeSegment} instruments...`}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2"
+            />
+          </div>
+
+          {loading ? (
+            <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+          ) : (
+            <div className="max-h-[400px] overflow-y-auto space-y-2">
+              {filteredInstruments.slice(0, 50).map(instrument => (
+                <div 
+                  key={instrument._id}
+                  className="flex items-center justify-between bg-dark-700 rounded-lg p-3 hover:bg-dark-600 transition"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
+                    <div className="text-xs text-gray-400">
+                      {instrument.name} • {instrument.displaySegment || instrument.segment}
+                      {instrument.lotSize > 1 && <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => addToWatchlist(instrument)}
+                      className="p-2 bg-blue-600 hover:bg-blue-700 rounded text-xs"
+                      title="Add to Watchlist"
+                    >
+                      <Plus size={14} />
+                    </button>
+                    <button
+                      onClick={() => openTradeModal(instrument)}
+                      className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                    >
+                      Trade
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredInstruments.length === 0 && (
+                <div className="text-center py-8 text-gray-400">No instruments found</div>
+              )}
+              {filteredInstruments.length > 50 && (
+                <div className="text-center py-2 text-gray-500 text-sm">
+                  Showing 50 of {filteredInstruments.length} results. Refine your search.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right: Watchlist */}
+        <div className="bg-dark-800 rounded-lg p-4">
+          <h2 className="text-lg font-semibold mb-4">My Watchlist ({watchlist.length})</h2>
+          
+          {watchlist.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <Eye size={48} className="mx-auto mb-4 opacity-50" />
+              <p>Your watchlist is empty</p>
+              <p className="text-sm">Search and add instruments to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {watchlist.map(instrument => (
+                <div 
+                  key={instrument._id}
+                  className="flex items-center justify-between bg-dark-700 rounded-lg p-3"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
+                    <div className="text-xs text-gray-400">{instrument.name} • {instrument.displaySegment || instrument.segment}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openTradeModal(instrument)}
+                      className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                    >
+                      Trade
+                    </button>
+                    <button
+                      onClick={() => removeFromWatchlist(instrument._id)}
+                      className="p-2 bg-red-600/20 hover:bg-red-600/40 rounded text-red-400"
+                      title="Remove"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Trade Modal */}
+      {showTradeModal && selectedInstrument && (
+        <TradeModal
+          instrument={selectedInstrument}
+          isSuperAdmin={isSuperAdmin}
+          admins={admins}
+          users={users}
+          selectedAdmin={selectedAdmin}
+          setSelectedAdmin={setSelectedAdmin}
+          selectedUser={selectedUser}
+          setSelectedUser={handleSelectUser}
+          userSearch={userSearch}
+          setUserSearch={setUserSearch}
+          filteredUsers={filteredUsers}
+          token={admin.token}
+          onClose={() => { setShowTradeModal(false); setSelectedInstrument(null); }}
+          onSuccess={() => { setShowTradeModal(false); setSelectedInstrument(null); }}
+          fetchUsersByAdmin={fetchUsersByAdmin}
+        />
+      )}
+    </div>
+  );
+};
+
+// Trade Modal Component
+const TradeModal = ({ 
+  instrument, 
+  isSuperAdmin, 
+  admins, 
+  users,
+  selectedAdmin,
+  setSelectedAdmin,
+  selectedUser, 
+  setSelectedUser,
+  userSearch,
+  setUserSearch,
+  filteredUsers,
+  token, 
+  onClose, 
+  onSuccess,
+  fetchUsersByAdmin
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [priceMode, setPriceMode] = useState('MANUAL'); // MARKET or MANUAL - default to MANUAL since live data may not be available
+  const [livePrice, setLivePrice] = useState(instrument.lastPrice || instrument.ltp || 0);
+  const [priceLoading, setPriceLoading] = useState(true);
+  const [lots, setLots] = useState(1);
+  const lotSize = instrument.lotSize || 1;
+  const calculatedQuantity = lots * lotSize;
+  
+  // Check if this is NSE segment (quantity-based) or other segments (lot-based)
+  const segment = instrument.displaySegment || instrument.segment || 'NSE';
+  const isNSE = segment === 'NSE' || segment === 'NSE SPOT' || segment.includes('NSE') && !segment.includes('F&O');
+  const isLotBased = !isNSE; // MCX, F&O, Currency, etc. are lot-based
+
+  const [formData, setFormData] = useState({
+    side: 'BUY',
+    productType: 'INTRADAY',
+    quantity: lotSize,
+    entryPrice: '',
+    tradeDate: new Date().toISOString().split('T')[0],
+    tradeTime: new Date().toTimeString().slice(0, 5)
+  });
+
+  // Fetch live price from market data API
+  useEffect(() => {
+    const fetchLivePrice = async () => {
+      setPriceLoading(true);
+      try {
+        const { data } = await axios.get('/api/zerodha/market-data', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        // Find price for this instrument by token
+        const instrumentToken = instrument.token?.toString();
+        if (instrumentToken && data[instrumentToken]) {
+          const price = data[instrumentToken].ltp || data[instrumentToken].last_price || 0;
+          setLivePrice(price);
+          if (priceMode === 'MARKET' && price > 0) {
+            setFormData(prev => ({ ...prev, entryPrice: price }));
+          }
+        } else {
+          // Try to find by any matching token
+          const foundPrice = Object.values(data).find(d => 
+            d.symbol === instrument.symbol || d.tradingSymbol === instrument.tradingSymbol
+          );
+          if (foundPrice) {
+            const price = foundPrice.ltp || foundPrice.last_price || 0;
+            setLivePrice(price);
+            if (priceMode === 'MARKET' && price > 0) {
+              setFormData(prev => ({ ...prev, entryPrice: price }));
+            }
+          }
+        }
+      } catch (err) {
+        console.log('Could not fetch live price:', err.message);
+      } finally {
+        setPriceLoading(false);
+      }
+    };
+
+    fetchLivePrice();
+    
+    // Refresh price every 5 seconds if in MARKET mode
+    const interval = setInterval(() => {
+      if (priceMode === 'MARKET') {
+        fetchLivePrice();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [instrument, token]);
+
+  // Update quantity when lots change
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, quantity: calculatedQuantity }));
+  }, [lots, calculatedQuantity]);
+
+  // Update entry price when price mode changes to MARKET
+  useEffect(() => {
+    if (priceMode === 'MARKET' && livePrice > 0) {
+      setFormData(prev => ({ ...prev, entryPrice: livePrice }));
+    }
+  }, [priceMode, livePrice]);
+
+  const handleAdminChange = (adminCode) => {
+    setSelectedAdmin(adminCode);
+    setSelectedUser(null);
+    setUserSearch('');
+    if (adminCode) {
+      fetchUsersByAdmin(adminCode);
+    }
+  };
+
+  const [inputMode, setInputMode] = useState('lots'); // 'lots' or 'quantity'
+  const [quantityInput, setQuantityInput] = useState(lotSize);
+
+  const handleLotsChange = (value) => {
+    const newLots = Math.max(1, parseInt(value) || 1);
+    setLots(newLots);
+    setQuantityInput(newLots * lotSize);
+    setInputMode('lots');
+  };
+
+  const handleQuantityChange = (value) => {
+    const newQty = Math.max(1, parseInt(value) || 1);
+    setQuantityInput(newQty);
+    // Calculate lots (round to nearest lot)
+    const calculatedLots = Math.max(1, Math.round(newQty / lotSize));
+    setLots(calculatedLots);
+    setInputMode('quantity');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.userId) return setError('Please select a user');
-    if (!formData.symbol) return setError('Please select an instrument');
-    if (!formData.entryPrice || Number(formData.entryPrice) <= 0) return setError('Please enter valid entry price');
-    if (!formData.quantity || Number(formData.quantity) <= 0) return setError('Please enter valid quantity');
+    if (!selectedUser) return setError('Please select a user');
+    const finalPrice = priceMode === 'MARKET' ? livePrice : Number(formData.entryPrice);
+    if (!finalPrice || finalPrice <= 0) return setError('Please enter valid entry price');
+    
+    // Use quantity based on segment type
+    // NSE: always use quantityInput directly
+    // MCX/F&O/Currency: use lots calculation or quantityInput based on inputMode
+    const finalQuantity = isNSE ? quantityInput : (inputMode === 'lots' ? calculatedQuantity : quantityInput);
+    if (!finalQuantity || finalQuantity <= 0) return setError('Please enter valid quantity');
 
     setLoading(true);
     setError('');
     try {
       await axios.post('/api/trade/admin/create-trade', {
-        userId: formData.userId,
-        symbol: formData.symbol,
-        instrumentToken: formData.instrumentToken,
-        segment: formData.segment,
+        userId: selectedUser._id,
+        symbol: instrument.tradingSymbol || instrument.symbol,
+        instrumentToken: instrument.token,
+        segment: instrument.displaySegment || instrument.segment || 'NSE',
         side: formData.side,
         productType: formData.productType,
-        quantity: Number(formData.quantity),
-        entryPrice: Number(formData.entryPrice),
+        orderType: priceMode, // MARKET, LIMIT, or MANUAL
+        quantity: finalQuantity,
+        entryPrice: finalPrice,
         tradeDate: formData.tradeDate,
         tradeTime: formData.tradeTime
       }, {
@@ -5758,12 +6234,65 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-dark-800 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-dark-800 p-4 border-b border-dark-600 flex justify-between items-center">
-          <h2 className="text-xl font-bold">Create Trade</h2>
+          <div>
+            <h2 className="text-xl font-bold">Place Trade</h2>
+            <div className="text-sm text-gray-400">
+              {instrument.tradingSymbol || instrument.symbol} • {instrument.displaySegment || instrument.segment}
+              {lotSize > 1 && <span className="ml-2 text-yellow-400">(Lot: {lotSize})</span>}
+            </div>
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
+        </div>
+
+        {/* Live Price Display */}
+        <div className="px-4 pt-4">
+          <div className="bg-dark-700 rounded-lg p-3 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-400">Live Price {priceLoading && <RefreshCw size={10} className="inline animate-spin ml-1" />}</div>
+              <div className={`text-xl font-bold ${livePrice > 0 ? 'text-green-400' : 'text-gray-500'}`}>
+                {livePrice > 0 ? `₹${livePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'Not Available'}
+              </div>
+              {livePrice === 0 && !priceLoading && (
+                <div className="text-xs text-yellow-500">Use Manual mode to enter price</div>
+              )}
+            </div>
+            <div className="text-right">
+              {isLotBased ? (
+                <>
+                  <div className="text-xs text-gray-400">Lot Size</div>
+                  <div className="text-lg font-semibold">{lotSize}</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs text-gray-400">Trade Type</div>
+                  <div className="text-sm font-semibold text-blue-400">Quantity Based</div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
           {error && <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded">{error}</div>}
+
+          {/* Super Admin: Select Admin */}
+          {isSuperAdmin && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Select Admin</label>
+              <select
+                value={selectedAdmin}
+                onChange={(e) => handleAdminChange(e.target.value)}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+              >
+                <option value="">All Admins</option>
+                {admins.map(adm => (
+                  <option key={adm._id} value={adm.adminCode}>
+                    {adm.name || adm.username} ({adm.adminCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* User Selection */}
           <div>
@@ -5771,86 +6300,31 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
             <input
               type="text"
               placeholder="Search by name or ID..."
-              value={searchUser}
-              onChange={(e) => setSearchUser(e.target.value)}
+              value={userSearch}
+              onChange={(e) => { setUserSearch(e.target.value); if (selectedUser) setSelectedUser(null); }}
               className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 mb-2"
             />
-            {searchUser && filteredUsers.length > 0 && !formData.userId && (
+            {userSearch && !selectedUser && filteredUsers.length > 0 && (
               <div className="bg-dark-700 border border-dark-600 rounded max-h-40 overflow-y-auto">
                 {filteredUsers.map(u => (
                   <div
                     key={u._id}
-                    onClick={() => {
-                      setFormData({ ...formData, userId: u._id, userName: u.fullName || u.username });
-                      setSearchUser(u.fullName || u.username);
-                    }}
+                    onClick={() => setSelectedUser(u)}
                     className="px-3 py-2 hover:bg-dark-600 cursor-pointer"
                   >
                     <div className="font-medium">{u.fullName || u.username}</div>
-                    <div className="text-xs text-gray-400">@{u.username} • {u.userId}</div>
+                    <div className="text-xs text-gray-400">@{u.username} • {u.userId} {isSuperAdmin && `• ${u.adminCode}`}</div>
                   </div>
                 ))}
               </div>
             )}
-            {formData.userId && (
+            {selectedUser && (
               <div className="flex items-center justify-between bg-green-500/10 border border-green-500/30 rounded px-3 py-2">
-                <span className="text-green-400">{formData.userName}</span>
-                <button type="button" onClick={() => { setFormData({ ...formData, userId: '', userName: '' }); setSearchUser(''); }} className="text-gray-400 hover:text-white">
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Instrument Selection */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Select Instrument *</label>
-            <div className="flex gap-2 mb-2">
-              <select
-                value={segmentFilter}
-                onChange={(e) => setSegmentFilter(e.target.value)}
-                className="w-40 bg-dark-700 border border-dark-600 rounded px-3 py-2 text-sm"
-              >
-                <option value="">All Segments</option>
-                {instrumentSegments.map(seg => (
-                  <option key={seg} value={seg}>{seg}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                placeholder="Search instruments..."
-                value={searchInstrument}
-                onChange={(e) => setSearchInstrument(e.target.value)}
-                className="flex-1 bg-dark-700 border border-dark-600 rounded px-3 py-2"
-              />
-            </div>
-            {searchInstrument && searchInstrument.length >= 1 && filteredInstruments.length > 0 && !formData.symbol && (
-              <div className="bg-dark-700 border border-dark-600 rounded max-h-48 overflow-y-auto">
-                {filteredInstruments.map(i => (
-                  <div
-                    key={i._id || i.token || i.instrument_token}
-                    onClick={() => {
-                      const symbolName = i.tradingsymbol || i.tradingSymbol || i.symbol;
-                      setFormData({ 
-                        ...formData, 
-                        symbol: symbolName, 
-                        instrumentToken: i.token || i.instrument_token,
-                        segment: i.displaySegment || i.segment || i.exchange || 'NSE'
-                      });
-                      setSearchInstrument(symbolName);
-                    }}
-                    className="px-3 py-2 hover:bg-dark-600 cursor-pointer"
-                  >
-                    <div className="font-medium">{i.tradingsymbol || i.tradingSymbol || i.symbol}</div>
-                    <div className="text-xs text-gray-400">{i.name} • {i.displaySegment || i.segment || i.exchange}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {formData.symbol && (
-              <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/30 rounded px-3 py-2">
-                <span className="text-blue-400">{formData.symbol} ({formData.segment})</span>
-                <button type="button" onClick={() => { setFormData({ ...formData, symbol: '', instrumentToken: '' }); setSearchInstrument(''); }} className="text-gray-400 hover:text-white">
+                <div>
+                  <span className="text-green-400">{selectedUser.fullName || selectedUser.username}</span>
+                  {isSuperAdmin && <span className="text-xs text-gray-400 ml-2">({selectedUser.adminCode})</span>}
+                </div>
+                <button type="button" onClick={() => { setSelectedUser(null); setUserSearch(''); }} className="text-gray-400 hover:text-white">
                   <X size={16} />
                 </button>
               </div>
@@ -5861,14 +6335,22 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-gray-400 mb-1">Side *</label>
-              <select
-                value={formData.side}
-                onChange={(e) => setFormData({ ...formData, side: e.target.value })}
-                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
-              >
-                <option value="BUY">BUY</option>
-                <option value="SELL">SELL</option>
-              </select>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, side: 'BUY' })}
+                  className={`flex-1 py-2 rounded font-medium ${formData.side === 'BUY' ? 'bg-green-600' : 'bg-dark-700'}`}
+                >
+                  BUY
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, side: 'SELL' })}
+                  className={`flex-1 py-2 rounded font-medium ${formData.side === 'SELL' ? 'bg-red-600' : 'bg-dark-700'}`}
+                >
+                  SELL
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm text-gray-400 mb-1">Product Type *</label>
@@ -5884,31 +6366,113 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
             </div>
           </div>
 
-          {/* Quantity & Price */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Price Mode Toggle */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Order Type *</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => livePrice > 0 && setPriceMode('MARKET')}
+                disabled={livePrice === 0}
+                className={`flex-1 py-2 rounded font-medium text-sm ${priceMode === 'MARKET' ? 'bg-blue-600' : 'bg-dark-700'} ${livePrice === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                MARKET
+              </button>
+              <button
+                type="button"
+                onClick={() => setPriceMode('LIMIT')}
+                className={`flex-1 py-2 rounded font-medium text-sm ${priceMode === 'LIMIT' ? 'bg-orange-600' : 'bg-dark-700'}`}
+              >
+                LIMIT
+              </button>
+              <button
+                type="button"
+                onClick={() => setPriceMode('MANUAL')}
+                className={`flex-1 py-2 rounded font-medium text-sm ${priceMode === 'MANUAL' ? 'bg-purple-600' : 'bg-dark-700'}`}
+              >
+                MANUAL
+              </button>
+            </div>
+          </div>
+
+          {/* Lots & Quantity - Show based on segment type */}
+          {isLotBased ? (
+            /* MCX, F&O, Currency - Show Lots and Quantity (bidirectional) */
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  Lots * {inputMode === 'lots' && <span className="text-green-400 text-xs">(Active)</span>}
+                </label>
+                <input
+                  type="number"
+                  value={lots}
+                  onChange={(e) => handleLotsChange(e.target.value)}
+                  className={`w-full bg-dark-700 border rounded px-3 py-2 ${inputMode === 'lots' ? 'border-green-500' : 'border-dark-600'}`}
+                  min="1"
+                />
+                {inputMode === 'quantity' && (
+                  <div className="text-xs text-gray-500 mt-1">= {lots} lots (rounded)</div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  Quantity * {inputMode === 'quantity' && <span className="text-green-400 text-xs">(Active)</span>}
+                </label>
+                <input
+                  type="number"
+                  value={inputMode === 'lots' ? calculatedQuantity : quantityInput}
+                  onChange={(e) => handleQuantityChange(e.target.value)}
+                  className={`w-full bg-dark-700 border rounded px-3 py-2 ${inputMode === 'quantity' ? 'border-green-500' : 'border-dark-600'}`}
+                  min="1"
+                />
+                {inputMode === 'lots' && lotSize > 1 && (
+                  <div className="text-xs text-gray-500 mt-1">= {lots} × {lotSize}</div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* NSE - Only show Quantity field */
             <div>
               <label className="block text-sm text-gray-400 mb-1">Quantity *</label>
               <input
                 type="number"
-                value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                value={quantityInput}
+                onChange={(e) => handleQuantityChange(e.target.value)}
                 className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
                 min="1"
-                required
+                placeholder="Enter quantity"
               />
             </div>
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">Entry Price *</label>
+          )}
+
+          {/* Entry Price */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              Entry Price * 
+              {priceMode === 'MARKET' && <span className="text-blue-400 ml-1">(Market Price)</span>}
+              {priceMode === 'LIMIT' && <span className="text-orange-400 ml-1">(Limit Price)</span>}
+              {priceMode === 'MANUAL' && <span className="text-purple-400 ml-1">(Manual Entry)</span>}
+            </label>
+            {priceMode === 'MARKET' ? (
+              <div className="w-full bg-dark-600 border border-blue-500/50 rounded px-3 py-2 text-green-400 font-medium">
+                ₹{livePrice > 0 ? livePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}
+              </div>
+            ) : (
               <input
                 type="number"
                 step="0.01"
                 value={formData.entryPrice}
                 onChange={(e) => setFormData({ ...formData, entryPrice: e.target.value })}
-                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
-                placeholder="0.00"
+                className={`w-full bg-dark-700 border rounded px-3 py-2 ${priceMode === 'LIMIT' ? 'border-orange-500/50' : 'border-dark-600'}`}
+                placeholder={priceMode === 'LIMIT' ? 'Enter limit price' : 'Enter manual price'}
                 required
               />
-            </div>
+            )}
+            {priceMode === 'LIMIT' && livePrice > 0 && (
+              <div className="text-xs text-gray-500 mt-1">
+                Current market: ₹{livePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+            )}
           </div>
 
           {/* Date & Time */}
@@ -5936,8 +6500,12 @@ const CreateTradeModal = ({ token, onClose, onSuccess }) => {
           {/* Submit */}
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="flex-1 bg-dark-600 hover:bg-dark-500 py-2 rounded">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Trade'}
+            <button 
+              type="submit" 
+              disabled={loading || !selectedUser} 
+              className={`flex-1 py-2 rounded font-medium disabled:opacity-50 ${formData.side === 'BUY' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+            >
+              {loading ? 'Placing...' : `${formData.side} ${instrument.tradingSymbol || instrument.symbol}`}
             </button>
           </div>
         </form>
@@ -7176,18 +7744,15 @@ const AllUsersManagement = () => {
     }
   };
 
-  const filteredUsers = users.filter(u => {
-    // First filter by admin if selected
-    if (selectedAdminFilter && u.adminCode !== selectedAdminFilter) return false;
-    // Then filter by search term
-    if (!filter) return true;
-    return (
-      u.username?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.email?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.fullName?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.adminCode?.toLowerCase().includes(filter.toLowerCase())
-    );
-  });
+  // Pre-filter by admin first
+  const adminFilteredUsers = useMemo(() => {
+    if (!selectedAdminFilter) return users;
+    return users.filter(u => u.adminCode === selectedAdminFilter);
+  }, [users, selectedAdminFilter]);
+
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedUsers, totalItems } = usePagination(
+    adminFilteredUsers, 20, filter, ['username', 'email', 'fullName', 'adminCode', 'phone']
+  );
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><RefreshCw className="animate-spin" size={32} /></div>;
@@ -7255,7 +7820,7 @@ const AllUsersManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-dark-700">
-              {filteredUsers.map(user => (
+              {paginatedUsers.map(user => (
                 <tr key={user._id} className="hover:bg-dark-700/50">
                   <td className="px-4 py-3">
                     <div>
@@ -7344,6 +7909,13 @@ const AllUsersManagement = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          totalItems={totalItems}
+          itemsPerPage={20}
+        />
       </div>
 
       {/* Transfer Modal */}
@@ -9115,6 +9687,10 @@ const UserManagement = () => {
   const [selectedScriptSegment, setSelectedScriptSegment] = useState(null);
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
+
+  const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedUsers, totalItems } = usePagination(
+    users, 20, searchTerm, ['username', 'fullName', 'email', 'phone']
+  );
   
   const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
   const [marketSegments, setMarketSegments] = useState([]);
@@ -9350,10 +9926,10 @@ const UserManagement = () => {
             <RefreshCw className="animate-spin inline mr-2" size={20} />
             Loading...
           </div>
-        ) : filteredUsers.length === 0 ? (
+        ) : totalItems === 0 ? (
           <div className="text-center py-8 text-gray-400">No users found</div>
         ) : (
-          filteredUsers.map(user => (
+          paginatedUsers.map(user => (
             <div key={user._id} className="bg-dark-800 rounded-lg p-4">
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -9405,14 +9981,14 @@ const UserManagement = () => {
                   Loading...
                 </td>
               </tr>
-            ) : filteredUsers.length === 0 ? (
+            ) : totalItems === 0 ? (
               <tr>
                 <td colSpan="6" className="text-center py-8 text-gray-400">
                   No users found
                 </td>
               </tr>
             ) : (
-              filteredUsers.map(user => (
+              paginatedUsers.map(user => (
                 <tr key={user._id} className="border-t border-dark-600 hover:bg-dark-700">
                   <td className="px-4 py-3">
                     <div>
@@ -9487,6 +10063,13 @@ const UserManagement = () => {
             )}
           </tbody>
         </table>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          totalItems={totalItems}
+          itemsPerPage={20}
+        />
       </div>
 
       {/* Modals */}

@@ -590,6 +590,121 @@ router.post('/seed-mcx', protectAdmin, superAdminOnly, async (req, res) => {
   }
 });
 
+// Sync LOT SIZES only for existing instruments from Zerodha
+router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    if (!zerodhaSession.accessToken) {
+      return res.status(401).json({ message: 'Not logged in to Zerodha. Please connect first.' });
+    }
+    
+    const apiKey = process.env.ZERODHA_API_KEY;
+    
+    // Download instruments CSV from Zerodha
+    console.log('Downloading instruments from Zerodha for lot size sync...');
+    const response = await axios.get(
+      'https://api.kite.trade/instruments',
+      {
+        headers: {
+          'X-Kite-Version': '3',
+          'Authorization': `token ${apiKey}:${zerodhaSession.accessToken}`
+        }
+      }
+    );
+    
+    // Parse CSV
+    const lines = response.data.split('\n');
+    const headers = lines[0].split(',');
+    
+    const zerodhaInstruments = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      
+      const values = lines[i].split(',');
+      const inst = {};
+      headers.forEach((h, idx) => {
+        inst[h.trim()] = values[idx]?.trim();
+      });
+      zerodhaInstruments.push(inst);
+    }
+    
+    console.log(`Total Zerodha instruments: ${zerodhaInstruments.length}`);
+    
+    // Create lookup maps by token and by tradingsymbol
+    const byToken = {};
+    const bySymbol = {};
+    for (const inst of zerodhaInstruments) {
+      if (inst.instrument_token) {
+        byToken[inst.instrument_token] = inst;
+      }
+      if (inst.tradingsymbol && inst.exchange) {
+        bySymbol[`${inst.exchange}:${inst.tradingsymbol}`] = inst;
+      }
+    }
+    
+    const Instrument = (await import('../models/Instrument.js')).default;
+    
+    // Get all instruments from database
+    const dbInstruments = await Instrument.find({});
+    console.log(`Database instruments: ${dbInstruments.length}`);
+    
+    let updated = 0;
+    let notFound = 0;
+    const updateResults = [];
+    
+    for (const dbInst of dbInstruments) {
+      // Try to find matching Zerodha instrument
+      let zerodhaInst = byToken[dbInst.token];
+      
+      // If not found by token, try by symbol
+      if (!zerodhaInst && dbInst.symbol && dbInst.exchange) {
+        zerodhaInst = bySymbol[`${dbInst.exchange}:${dbInst.symbol}`];
+      }
+      
+      // Also try tradingSymbol
+      if (!zerodhaInst && dbInst.tradingSymbol && dbInst.exchange) {
+        zerodhaInst = bySymbol[`${dbInst.exchange}:${dbInst.tradingSymbol}`];
+      }
+      
+      if (zerodhaInst) {
+        const newLotSize = parseInt(zerodhaInst.lot_size) || 1;
+        const newTickSize = parseFloat(zerodhaInst.tick_size) || 0.05;
+        
+        // Only update if lot size changed
+        if (dbInst.lotSize !== newLotSize || dbInst.tickSize !== newTickSize) {
+          await Instrument.findByIdAndUpdate(dbInst._id, {
+            lotSize: newLotSize,
+            tickSize: newTickSize,
+            // Also update token if it changed (for F&O contracts that roll over)
+            token: zerodhaInst.instrument_token || dbInst.token
+          });
+          updated++;
+          updateResults.push({
+            symbol: dbInst.symbol,
+            exchange: dbInst.exchange,
+            oldLotSize: dbInst.lotSize,
+            newLotSize: newLotSize
+          });
+        }
+      } else {
+        notFound++;
+      }
+    }
+    
+    console.log(`Lot sizes synced: ${updated} updated, ${notFound} not found in Zerodha`);
+    
+    res.json({
+      message: `Lot sizes synced successfully`,
+      updated,
+      notFound,
+      total: dbInstruments.length,
+      updates: updateResults.slice(0, 20) // Show first 20 updates
+    });
+  } catch (error) {
+    console.error('Sync lot sizes error:', error.response?.data || error.message);
+    res.status(500).json({ message: error.response?.data?.message || error.message });
+  }
+});
+
 // Sync ALL instruments from Zerodha and save to database
 router.post('/sync-all-instruments', protectAdmin, superAdminOnly, async (req, res) => {
   try {

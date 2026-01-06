@@ -174,7 +174,7 @@ const tradeSchema = new mongoose.Schema({
   },
   closeReason: {
     type: String,
-    enum: ['MANUAL', 'RMS', 'TIME_BASED', 'EXPIRY', 'ADMIN', null],
+    enum: ['MANUAL', 'RMS', 'TIME_BASED', 'EXPIRY', 'ADMIN', 'NETTING', null],
     default: null
   },
   

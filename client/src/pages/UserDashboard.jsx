@@ -1780,8 +1780,8 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
 
   // Quick Trade - Execute market order directly
   const executeQuickTrade = async (side) => {
-    const qty = parseFloat(quickQty);
-    if (!selectedInstrument || isNaN(qty) || qty <= 0) return;
+    const lots = parseFloat(quickQty);
+    if (!selectedInstrument || isNaN(lots) || lots <= 0) return;
     
     setQuickTrading(true);
     setQuickError('');
@@ -1795,6 +1795,37 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
       // Determine if crypto
       const isCrypto = selectedInstrument.isCrypto || selectedInstrument.segment === 'CRYPTO' || selectedInstrument.exchange === 'BINANCE';
       
+      // Determine if MCX or lot-based segment
+      const isMCX = selectedInstrument.exchange === 'MCX' || selectedInstrument.segment === 'MCX' || selectedInstrument.displaySegment === 'MCX';
+      const isFnO = selectedInstrument.instrumentType === 'FUTURES' || selectedInstrument.instrumentType === 'OPTIONS' || isMCX;
+      
+      // Get lot size for MCX/F&O instruments
+      const getLotSize = () => {
+        if (selectedInstrument.lotSize && selectedInstrument.lotSize > 1) return selectedInstrument.lotSize;
+        const symbol = selectedInstrument.symbol?.toUpperCase() || '';
+        const category = selectedInstrument.category?.toUpperCase() || '';
+        if (isMCX) {
+          if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
+          if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
+          if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
+          if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
+          if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
+          if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
+          if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
+          if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
+          if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+        }
+        if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
+        if (category.includes('BANKNIFTY')) return 15;
+        if (category.includes('FINNIFTY')) return 25;
+        if (category.includes('MIDCPNIFTY')) return 50;
+        if (category.includes('SENSEX')) return 10;
+        return 1;
+      };
+      
+      const lotSize = getLotSize();
+      const quantity = isFnO ? lots * lotSize : lots;
+      
       await axios.post('/api/trading/order', {
         symbol: selectedInstrument.symbol,
         token: selectedInstrument.token,
@@ -1804,9 +1835,9 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
         segment: isCrypto ? 'CRYPTO' : (selectedInstrument.segment || 'FNO'),
         instrumentType: isCrypto ? 'CRYPTO' : (selectedInstrument.instrumentType || 'FUTURES'),
         side: side.toUpperCase(),
-        quantity: qty,
-        lots: qty,
-        lotSize: 1,
+        quantity: quantity,
+        lots: lots,
+        lotSize: lotSize,
         price: ltp,
         orderType: 'MARKET',
         productType: 'MIS',
@@ -2387,7 +2418,8 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const isOptions = instrument?.instrumentType === 'OPTIONS';
   const isCall = instrument?.optionType === 'CE';
   const isPut = instrument?.optionType === 'PE';
-  const isFnO = isFutures || isOptions;
+  const isMCX = instrument?.exchange === 'MCX' || instrument?.segment === 'MCX' || instrument?.displaySegment === 'MCX';
+  const isFnO = isFutures || isOptions || isMCX; // MCX is always lot-based
 
   // Get lot size from instrument or default based on category/symbol
   const getLotSize = () => {
@@ -2680,9 +2712,9 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         <div>
           <label className="block text-xs text-gray-400 mb-2">Leverage (Buying Power)</label>
           <div className="flex flex-wrap gap-2">
-            {availableLeverages.map(lev => (
+            {[...new Set(availableLeverages)].map((lev, index) => (
               <button
-                key={lev}
+                key={`leverage-${lev}-${index}`}
                 onClick={() => setLeverage(lev)}
                 className={`px-3 py-1.5 rounded text-sm transition ${
                   leverage === lev 
@@ -4772,13 +4804,38 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const liveBid = isCrypto ? ltp : (liveData.bid || ltp);
   const liveAsk = isCrypto ? ltp : (liveData.ask || ltp);
 
-  const lotSize = instrument?.lotSize || 1;
-  const totalQuantity = parseFloat(quantity || 1) * lotSize;
-  const orderValue = ltp * totalQuantity;
-
   // Determine segment type
   const isFnO = instrument?.segment === 'FNO' || instrument?.instrumentType === 'OPTIONS' || instrument?.instrumentType === 'FUTURES';
-  const isMCX = instrument?.segment === 'MCX' || instrument?.exchange === 'MCX';
+  const isMCX = instrument?.segment === 'MCX' || instrument?.exchange === 'MCX' || instrument?.displaySegment === 'MCX';
+  const isLotBased = isFnO || isMCX;
+
+  // Get lot size with fallback for MCX/F&O
+  const getLotSize = () => {
+    if (instrument?.lotSize && instrument.lotSize > 1) return instrument.lotSize;
+    const symbol = instrument?.symbol?.toUpperCase() || '';
+    const category = instrument?.category?.toUpperCase() || '';
+    if (isMCX) {
+      if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
+      if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
+      if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
+      if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
+      if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
+      if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
+      if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
+      if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
+      if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+    }
+    if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
+    if (category.includes('BANKNIFTY')) return 15;
+    if (category.includes('FINNIFTY')) return 25;
+    if (category.includes('MIDCPNIFTY')) return 50;
+    if (category.includes('SENSEX')) return 10;
+    return 1;
+  };
+
+  const lotSize = getLotSize();
+  const totalQuantity = isLotBased ? parseFloat(quantity || 1) * lotSize : parseFloat(quantity || 1);
+  const orderValue = ltp * totalQuantity;
 
   // Product types based on segment
   const productTypes = isCrypto
@@ -4959,10 +5016,10 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
 
         {/* Form */}
         <div className="p-4 pt-0 space-y-4">
-          {/* Quantity */}
+          {/* Lots/Quantity */}
           <div>
             <label className="block text-sm text-gray-400 mb-2">
-              Quantity {lotSize > 1 && `(Lot Size: ${lotSize})`}
+              {isLotBased ? `Lots (1 Lot = ${lotSize} qty)` : 'Quantity'}
             </label>
             <div className="flex gap-2">
               <button 

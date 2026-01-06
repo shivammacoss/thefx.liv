@@ -199,6 +199,41 @@ class TradingService {
       throw new Error(marketStatus.reason);
     }
 
+    // POSITION NETTING: Check if there's an existing opposite position for same symbol
+    // If user has BUY position and places SELL order (or vice versa), close the existing position
+    // Works for ALL segments: NSE, MCX, F&O, Crypto, etc.
+    const oppositeSide = orderData.side === 'BUY' ? 'SELL' : 'BUY';
+    const nettingQuery = {
+      user: userId,
+      symbol: orderData.symbol,
+      side: oppositeSide,
+      status: 'OPEN'
+    };
+    // Also match exchange if provided to handle same symbol on different exchanges
+    if (orderData.exchange) {
+      nettingQuery.exchange = orderData.exchange;
+    }
+    const existingPosition = await Trade.findOne(nettingQuery);
+
+    if (existingPosition) {
+      console.log(`Position netting: Found existing ${oppositeSide} position for ${orderData.symbol}, closing it`);
+      
+      // Close the existing position instead of creating a new opposite one
+      const exitPrice = orderData.side === 'BUY' 
+        ? (orderData.askPrice || orderData.price) 
+        : (orderData.bidPrice || orderData.price);
+      
+      const result = await this.squareOffPosition(existingPosition._id, 'NETTING', exitPrice);
+      
+      return {
+        success: true,
+        trade: result.trade,
+        action: 'POSITION_CLOSED',
+        message: `Existing ${oppositeSide} position closed via netting`,
+        pnl: result.trade?.realizedPnL || 0
+      };
+    }
+
     // Get user's segment and script settings
     const segmentSettings = TradeService.getUserSegmentSettings(user, orderData.segment, orderData.instrumentType);
     const scriptSettings = TradeService.getUserScriptSettings(user, orderData.symbol, orderData.category);
