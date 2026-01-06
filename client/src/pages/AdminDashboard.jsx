@@ -7072,6 +7072,21 @@ const AllUsersManagement = () => {
     }
   };
 
+  const handleDeleteUser = async (userId, username) => {
+    if (!confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await axios.delete(`/api/admin/users/${userId}`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      alert('User deleted successfully');
+      fetchAllUsers();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error deleting user');
+    }
+  };
+
   const openEditModal = (user) => {
     setSelectedUser(user);
     const userSegmentKeys = Object.keys(user.segmentPermissions || {});
@@ -7306,13 +7321,6 @@ const AllUsersManagement = () => {
                         <Wallet size={16} />
                       </button>
                       <button
-                        onClick={() => { setSelectedUser(user); setShowCryptoWalletModal(true); }}
-                        className="p-2 hover:bg-dark-600 rounded transition text-orange-400"
-                        title="Manage Crypto Wallet"
-                      >
-                        <span className="text-sm font-bold">₿</span>
-                      </button>
-                      <button
                         onClick={() => {
                           setSelectedUser(user);
                           setShowTransferModal(true);
@@ -7321,6 +7329,13 @@ const AllUsersManagement = () => {
                         title="Transfer User"
                       >
                         <UserPlus size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user._id, user.username)}
+                        className="p-2 hover:bg-dark-600 rounded transition text-red-400"
+                        title="Delete User"
+                      >
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </td>
@@ -9361,7 +9376,6 @@ const UserManagement = () => {
                   <button onClick={() => openSettingsModal(user)} className="p-2 bg-dark-700 rounded text-purple-400"><Settings size={16} /></button>
                   <button onClick={() => { setSelectedUser(user); setShowCopyModal(true); }} className="p-2 bg-dark-700 rounded text-cyan-400"><Copy size={16} /></button>
                   <button onClick={() => { setSelectedUser(user); setShowWalletModal(true); }} className="p-2 bg-dark-700 rounded text-green-400" title="Manage INR Wallet"><Wallet size={16} /></button>
-                  <button onClick={() => { setSelectedUser(user); setShowCryptoWalletModal(true); }} className="p-2 bg-dark-700 rounded text-orange-400" title="Manage Crypto Wallet">₿</button>
                   <button onClick={() => handleDelete(user._id)} className="p-2 bg-dark-700 rounded text-red-400"><Trash2 size={16} /></button>
                 </div>
               </div>
@@ -9458,13 +9472,6 @@ const UserManagement = () => {
                         title="Manage INR Wallet"
                       >
                         <Wallet size={16} />
-                      </button>
-                      <button
-                        onClick={() => { setSelectedUser(user); setShowCryptoWalletModal(true); }}
-                        className="p-2 hover:bg-dark-600 rounded transition text-orange-400"
-                        title="Manage Crypto Wallet"
-                      >
-                        <span className="text-sm font-bold">₿</span>
                       </button>
                       <button
                         onClick={() => handleDelete(user._id)}
