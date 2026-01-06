@@ -1550,7 +1550,7 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
                     {selectedInstrument.isCrypto ? '$' : '₹'}{livePrice.ltp?.toLocaleString(undefined, selectedInstrument.isCrypto ? {minimumFractionDigits: 2, maximumFractionDigits: 2} : {})}
                   </span>
                   <span className={`text-sm ${livePrice.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {livePrice.change >= 0 ? '+' : ''}{livePrice.changePercent?.toFixed(2)}%
+                    {livePrice.change >= 0 ? '+' : ''}{(parseFloat(livePrice.changePercent) || 0).toFixed(2)}%
                   </span>
                 </>
               )}
@@ -1932,7 +1932,7 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
           <div className="text-sm">
             <span className="text-gray-400">P/L: </span>
             <span className={`font-medium ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalPnL >= 0 ? '+' : ''}₹{totalPnL.toFixed(2)}
+              {totalPnL >= 0 ? '+' : ''}₹{(parseFloat(totalPnL) || 0).toFixed(2)}
             </span>
           </div>
           
@@ -1999,13 +1999,13 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
               <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{pos.symbol}</div>
               <div className={pos.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{pos.side}</div>
               <div className="text-right">{pos.quantity}</div>
-              <div className="text-right">{currencySymbol}{pos.entryPrice?.toFixed(2)}</div>
-              <div className="text-right">{currencySymbol}{ltp?.toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{(parseFloat(pos.entryPrice) || 0).toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{(parseFloat(ltp) || 0).toFixed(2)}</div>
               <div className="text-right text-yellow-400" title={`Spread: ${pos.spread || 0} pts, Comm: ${currencySymbol}${pos.commission || 0}`}>
-                {currencySymbol}{((pos.commission || 0)).toFixed(2)}
+                {currencySymbol}{(parseFloat(pos.commission) || 0).toFixed(2)}
               </div>
               <div className={`text-right font-medium ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {pnl >= 0 ? '+' : ''}{currencySymbol}{pnl.toFixed(2)}
+                {pnl >= 0 ? '+' : ''}{currencySymbol}{(parseFloat(pnl) || 0).toFixed(2)}
               </div>
               <div className="text-center">
                 <button 
@@ -2032,9 +2032,9 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
               <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{order.symbol}</div>
               <div className={order.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{order.side}</div>
               <div className="text-right">{order.quantity}</div>
-              <div className="text-right">{currencySymbol}{order.limitPrice?.toFixed(2) || '-'}</div>
+              <div className="text-right">{currencySymbol}{order.limitPrice ? (parseFloat(order.limitPrice) || 0).toFixed(2) : '-'}</div>
               <div className="text-right">-</div>
-              <div className="text-right text-yellow-400">{currencySymbol}{(order.commission || 0).toFixed(2)}</div>
+              <div className="text-right text-yellow-400">{currencySymbol}{(parseFloat(order.commission) || 0).toFixed(2)}</div>
               <div className="text-right text-gray-400">{order.orderType}</div>
               <div className="text-center">
                 <button 
@@ -2060,11 +2060,11 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
               <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
               <div className={trade.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{trade.side}</div>
               <div className="text-right">{trade.quantity}</div>
-              <div className="text-right">{currencySymbol}{trade.entryPrice?.toFixed(2)}</div>
-              <div className="text-right">{currencySymbol}{trade.exitPrice?.toFixed(2) || '-'}</div>
-              <div className="text-right text-yellow-400">{currencySymbol}{(trade.commission || 0).toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{(parseFloat(trade.entryPrice) || 0).toFixed(2)}</div>
+              <div className="text-right">{currencySymbol}{trade.exitPrice ? (parseFloat(trade.exitPrice) || 0).toFixed(2) : '-'}</div>
+              <div className="text-right text-yellow-400">{currencySymbol}{(parseFloat(trade.commission) || 0).toFixed(2)}</div>
               <div className={`text-right font-medium ${(trade.netPnL || trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {(trade.netPnL || trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(trade.netPnL || trade.realizedPnL || 0).toFixed(2)}
+                {(trade.netPnL || trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(parseFloat(trade.netPnL || trade.realizedPnL) || 0).toFixed(2)}
               </div>
               <div className="text-center text-xs text-gray-400">{trade.closeReason || 'CLOSED'}</div>
             </div>
@@ -2245,7 +2245,7 @@ const PortfolioPanel = ({ walletData, onOpenWallet, user, marketData }) => {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className={`text-sm font-medium ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                        {pnl >= 0 ? '+' : ''}₹{(parseFloat(pnl) || 0).toFixed(2)}
                       </span>
                       <button
                         onClick={() => handleClosePosition(pos._id, pos)}
