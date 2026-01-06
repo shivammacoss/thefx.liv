@@ -296,14 +296,28 @@ class TradingService {
       marginSource = 'default_calculated';
     }
 
-    // Use tradingBalance for trading (dual wallet system)
-    const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
-    const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
-    const availableBalance = walletBalance - blockedMargin;
-
-    // Check if user has enough for margin + commission
-    if ((marginRequired + totalCommission) > availableBalance) {
-      throw new Error(`Insufficient funds. Required: ₹${(marginRequired + totalCommission).toLocaleString()}, Available: ₹${availableBalance.toLocaleString()}`);
+    // Determine if crypto trade - check before balance validation
+    const isCrypto = orderData.segment === 'CRYPTO' || orderData.isCrypto || orderData.exchange === 'BINANCE';
+    
+    // Use appropriate wallet based on trade type
+    let availableBalance;
+    if (isCrypto) {
+      // Crypto trades use separate crypto wallet (no margin system)
+      availableBalance = user.cryptoWallet?.balance || 0;
+      // For crypto, only commission is needed (no margin)
+      if (totalCommission > availableBalance) {
+        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCommission.toFixed(2)}, Available: $${availableBalance.toFixed(2)}`);
+      }
+    } else {
+      // Regular trades use trading balance with margin system
+      const walletBalance = user.wallet?.tradingBalance || user.wallet?.cashBalance || user.wallet?.balance || 0;
+      const blockedMargin = user.wallet?.usedMargin || user.wallet?.blocked || 0;
+      availableBalance = walletBalance - blockedMargin;
+      
+      // Check if user has enough for margin + commission
+      if ((marginRequired + totalCommission) > availableBalance) {
+        throw new Error(`Insufficient funds. Required: ₹${(marginRequired + totalCommission).toLocaleString()}, Available: ₹${availableBalance.toLocaleString()}`);
+      }
     }
 
     // Indian Net Trading: BUY uses Ask price, SELL uses Bid price
@@ -348,8 +362,7 @@ class TradingService {
       }
     }
 
-    // Determine if crypto trade
-    const isCrypto = orderData.segment === 'CRYPTO' || orderData.isCrypto || orderData.exchange === 'BINANCE';
+    // isCrypto already determined above for balance validation
     
     const trade = new Trade({
       user: userId,
@@ -393,36 +406,57 @@ class TradingService {
     }
     
     // Block margin from tradingBalance and deduct commission (dual wallet system)
-    // For crypto trades, no margin is blocked - only commission is deducted
-    let newTradingBalance, newUsedMargin, newBlocked;
+    // For crypto trades, use separate cryptoWallet - no margin system
+    let newTradingBalance, newUsedMargin, newBlocked, newCryptoBalance;
     
     if (isCrypto) {
-      // Crypto trades: Only deduct commission, no margin blocking
-      newTradingBalance = (user.wallet.tradingBalance || 0) - totalCommission;
-      newUsedMargin = user.wallet.usedMargin || 0; // No change
-      newBlocked = user.wallet.blocked || 0; // No change
-      console.log('Crypto trade: Only commission deducted, no margin blocked');
+      // Crypto trades: Use separate crypto wallet, no margin blocking
+      const cryptoBalance = user.cryptoWallet?.balance || 0;
+      newCryptoBalance = cryptoBalance - totalCommission;
+      
+      // Check if user has enough in crypto wallet
+      if (newCryptoBalance < 0) {
+        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCommission.toFixed(2)}, Available: $${cryptoBalance.toFixed(2)}`);
+      }
+      
+      // Regular wallet unchanged for crypto trades
+      newTradingBalance = user.wallet.tradingBalance || 0;
+      newUsedMargin = user.wallet.usedMargin || 0;
+      newBlocked = user.wallet.blocked || 0;
+      console.log('Crypto trade: Using crypto wallet, no margin system');
     } else {
       // Regular trades: Block margin and deduct commission
       newTradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
       newUsedMargin = (user.wallet.usedMargin || 0) + marginRequired;
       newBlocked = (user.wallet.blocked || 0) + marginRequired;
+      newCryptoBalance = user.cryptoWallet?.balance || 0; // Unchanged
     }
     
     // Use updateOne to avoid validation issues with segmentPermissions
+    const updateFields = { 
+      'wallet.tradingBalance': newTradingBalance,
+      'wallet.usedMargin': newUsedMargin,
+      'wallet.blocked': newBlocked
+    };
+    
+    // Update crypto wallet if it's a crypto trade
+    if (isCrypto) {
+      updateFields['cryptoWallet.balance'] = newCryptoBalance;
+    }
+    
     await User.updateOne(
       { _id: user._id },
-      { $set: { 
-        'wallet.tradingBalance': newTradingBalance,
-        'wallet.usedMargin': newUsedMargin,
-        'wallet.blocked': newBlocked
-      }}
+      { $set: updateFields }
     );
     
     // Update local user object
     user.wallet.tradingBalance = newTradingBalance;
     user.wallet.usedMargin = newUsedMargin;
     user.wallet.blocked = newBlocked;
+    if (isCrypto) {
+      if (!user.cryptoWallet) user.cryptoWallet = {};
+      user.cryptoWallet.balance = newCryptoBalance;
+    }
     
     await trade.save();
 
@@ -547,32 +581,46 @@ class TradingService {
     await trade.save();
 
     // Release blocked margin and add/subtract P&L to tradingBalance (dual wallet system)
-    // For crypto trades, no margin was blocked, so only add P&L
-    let newUsedMargin, newBlocked, newTradingBalance;
+    // For crypto trades, use separate cryptoWallet - no margin system
+    let newUsedMargin, newBlocked, newTradingBalance, newCryptoBalance, newCryptoRealizedPnL;
     
     if (trade.isCrypto) {
-      // Crypto trades: No margin to release, just add P&L
-      newUsedMargin = user.wallet.usedMargin || 0; // No change
+      // Crypto trades: Add P&L to crypto wallet, no margin to release
+      newUsedMargin = user.wallet.usedMargin || 0; // No change to regular wallet
       newBlocked = user.wallet.blocked || 0; // No change
-      newTradingBalance = (user.wallet.tradingBalance || 0) + netPnL;
-      console.log('Crypto trade closed: No margin to release, only P&L added');
+      newTradingBalance = user.wallet.tradingBalance || 0; // No change to regular trading balance
+      newCryptoBalance = (user.cryptoWallet?.balance || 0) + netPnL;
+      newCryptoRealizedPnL = (user.cryptoWallet?.realizedPnL || 0) + netPnL;
+      console.log('Crypto trade closed: P&L added to crypto wallet');
     } else {
       // Regular trades: Release margin and add P&L
       newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
       newBlocked = Math.max(0, (user.wallet.blocked || 0) - trade.marginUsed);
       newTradingBalance = (user.wallet.tradingBalance || 0) + trade.marginUsed + netPnL;
+      newCryptoBalance = user.cryptoWallet?.balance || 0; // Unchanged
+      newCryptoRealizedPnL = user.cryptoWallet?.realizedPnL || 0; // Unchanged
     }
-    const newRealizedPnL = (user.wallet.realizedPnL || 0) + netPnL;
+    const newRealizedPnL = trade.isCrypto 
+      ? (user.wallet.realizedPnL || 0) // Don't add crypto P&L to regular wallet
+      : (user.wallet.realizedPnL || 0) + netPnL;
     
     // Use updateOne to avoid validation issues with segmentPermissions
+    const updateFields = { 
+      'wallet.usedMargin': newUsedMargin,
+      'wallet.blocked': newBlocked,
+      'wallet.tradingBalance': newTradingBalance,
+      'wallet.realizedPnL': newRealizedPnL
+    };
+    
+    // Update crypto wallet if it's a crypto trade
+    if (trade.isCrypto) {
+      updateFields['cryptoWallet.balance'] = newCryptoBalance;
+      updateFields['cryptoWallet.realizedPnL'] = newCryptoRealizedPnL;
+    }
+    
     await User.updateOne(
       { _id: user._id },
-      { $set: { 
-        'wallet.usedMargin': newUsedMargin,
-        'wallet.blocked': newBlocked,
-        'wallet.tradingBalance': newTradingBalance,
-        'wallet.realizedPnL': newRealizedPnL
-      }}
+      { $set: updateFields }
     );
 
     return { 
@@ -780,6 +828,62 @@ class TradingService {
 
   static getMarketStatus(exchange = 'NSE') {
     return this.isMarketOpen(exchange);
+  }
+
+  // Recalculate and sync margin based on actual open positions
+  // This fixes stale margin issues when positions are closed but margin wasn't properly released
+  static async recalculateMargin(userId) {
+    const user = await User.findById(userId);
+    if (!user) throw new Error('User not found');
+
+    // Get all open positions for this user
+    const openTrades = await Trade.find({ user: userId, status: 'OPEN' });
+    
+    // Calculate total margin that should be blocked
+    // Only count non-crypto trades (crypto doesn't use margin)
+    let totalMarginUsed = 0;
+    for (const trade of openTrades) {
+      if (!trade.isCrypto) {
+        totalMarginUsed += trade.marginUsed || 0;
+      }
+    }
+    
+    const currentUsedMargin = user.wallet.usedMargin || 0;
+    const currentBlocked = user.wallet.blocked || 0;
+    
+    // If there's a discrepancy, fix it
+    if (currentUsedMargin !== totalMarginUsed || currentBlocked !== totalMarginUsed) {
+      const difference = currentUsedMargin - totalMarginUsed;
+      
+      // Update user wallet with correct margin values
+      await User.updateOne(
+        { _id: userId },
+        { $set: { 
+          'wallet.usedMargin': totalMarginUsed,
+          'wallet.blocked': totalMarginUsed,
+          // If margin was incorrectly blocked, add it back to trading balance
+          'wallet.tradingBalance': (user.wallet.tradingBalance || 0) + difference
+        }}
+      );
+      
+      console.log(`Margin recalculated for user ${userId}: was ${currentUsedMargin}, now ${totalMarginUsed}, difference ${difference} added back to trading balance`);
+      
+      return {
+        success: true,
+        previousMargin: currentUsedMargin,
+        correctedMargin: totalMarginUsed,
+        difference,
+        openPositions: openTrades.length,
+        cryptoPositions: openTrades.filter(t => t.isCrypto).length
+      };
+    }
+    
+    return {
+      success: true,
+      message: 'Margin is already correct',
+      usedMargin: totalMarginUsed,
+      openPositions: openTrades.length
+    };
   }
 }
 

@@ -142,6 +142,30 @@ const userSchema = new mongoose.Schema({
     },
     transactions: [walletTransactionSchema]
   },
+  
+  // Separate Crypto Wallet - No margin system, spot trading only
+  cryptoWallet: {
+    // Crypto Balance in USD
+    balance: {
+      type: Number,
+      default: 0
+    },
+    // Realized P&L from crypto trades
+    realizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Unrealized P&L from open crypto positions
+    unrealizedPnL: {
+      type: Number,
+      default: 0
+    },
+    // Today's Realized P&L
+    todayRealizedPnL: {
+      type: Number,
+      default: 0
+    }
+  },
   // Margin Settings
   marginSettings: {
     // Equity Intraday Leverage (e.g., 5 means 5x)

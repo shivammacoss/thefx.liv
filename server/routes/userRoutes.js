@@ -256,7 +256,7 @@ router.post('/withdraw-request', protectUser, async (req, res) => {
 // Get wallet info (enhanced with dual wallet system)
 router.get('/wallet', protectUser, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('wallet marginSettings rmsSettings');
+    const user = await User.findById(req.user._id).select('wallet cryptoWallet marginSettings rmsSettings');
     
     // Dual wallet system - Main Wallet (cashBalance) and Trading Account (tradingBalance)
     // Handle legacy: if cashBalance is 0 but balance has value, use balance as cashBalance
@@ -292,6 +292,14 @@ router.get('/wallet', protectUser, async (req, res) => {
       // Calculated fields
       availableMargin,
       totalBalance: mainWalletBalance + tradingBalance,
+      
+      // Separate Crypto Wallet - No margin system
+      cryptoWallet: {
+        balance: user.cryptoWallet?.balance || 0,
+        realizedPnL: user.cryptoWallet?.realizedPnL || 0,
+        unrealizedPnL: user.cryptoWallet?.unrealizedPnL || 0,
+        todayRealizedPnL: user.cryptoWallet?.todayRealizedPnL || 0
+      },
       
       // Legacy fields for backward compatibility
       wallet: {

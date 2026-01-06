@@ -1339,8 +1339,11 @@ router.post('/watchlist/add', protectUser, async (req, res) => {
       watchlist = new Watchlist({ userId, segment, instruments: [] });
     }
     
-    // Check if already exists
-    const exists = watchlist.instruments.some(i => i.token === instrument.token);
+    // Check if already exists - use pair for crypto, token for others
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    const exists = watchlist.instruments.some(i => 
+      instrument.isCrypto ? i.pair === identifier : i.token === identifier
+    );
     if (exists) {
       return res.status(400).json({ message: 'Instrument already in watchlist' });
     }
@@ -1376,10 +1379,10 @@ router.post('/watchlist/add', protectUser, async (req, res) => {
 router.post('/watchlist/remove', protectUser, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { token, segment } = req.body;
+    const { token, pair, segment } = req.body;
     
-    if (!token || !segment) {
-      return res.status(400).json({ message: 'Token and segment are required' });
+    if ((!token && !pair) || !segment) {
+      return res.status(400).json({ message: 'Token/pair and segment are required' });
     }
     
     const watchlist = await Watchlist.findOne({ userId, segment });
@@ -1388,7 +1391,12 @@ router.post('/watchlist/remove', protectUser, async (req, res) => {
       return res.status(404).json({ message: 'Watchlist not found' });
     }
     
-    watchlist.instruments = watchlist.instruments.filter(i => i.token !== token);
+    // For crypto, filter by pair; for others, filter by token
+    if (pair) {
+      watchlist.instruments = watchlist.instruments.filter(i => i.pair !== pair);
+    } else {
+      watchlist.instruments = watchlist.instruments.filter(i => i.token !== token);
+    }
     await watchlist.save();
     
     res.json({ message: 'Removed from watchlist' });

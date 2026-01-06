@@ -296,4 +296,103 @@ router.post('/internal-transfer', protectUser, async (req, res) => {
   }
 });
 
+// Crypto transfer between main wallet and crypto account
+router.post('/crypto-transfer', protectUser, async (req, res) => {
+  try {
+    const { amount, direction } = req.body;
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+    
+    if (!['toCrypto', 'fromCrypto'].includes(direction)) {
+      return res.status(400).json({ message: 'Invalid transfer direction' });
+    }
+    
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // USD to INR conversion rate
+    const usdRate = 83.50;
+    
+    // Get current balances
+    let mainWalletBalance = user.wallet?.cashBalance || 0;
+    if (mainWalletBalance === 0 && user.wallet?.balance > 0) {
+      mainWalletBalance = user.wallet.balance;
+      user.wallet.cashBalance = mainWalletBalance;
+    }
+    const cryptoBalance = user.cryptoWallet?.balance || 0;
+    
+    let newCashBalance, newCryptoBalance, convertedAmount;
+    
+    if (direction === 'toCrypto') {
+      // Transfer from Main Wallet (INR) to Crypto Account (USD)
+      if (amount > mainWalletBalance) {
+        return res.status(400).json({ message: `Insufficient balance in Main Wallet. Available: ₹${mainWalletBalance}` });
+      }
+      
+      // Convert INR to USD
+      convertedAmount = amount / usdRate;
+      newCashBalance = mainWalletBalance - amount;
+      newCryptoBalance = cryptoBalance + convertedAmount;
+      
+    } else {
+      // Transfer from Crypto Account (USD) to Main Wallet (INR)
+      if (amount > cryptoBalance) {
+        return res.status(400).json({ message: `Insufficient balance in Crypto Account. Available: $${cryptoBalance.toFixed(2)}` });
+      }
+      
+      // Convert USD to INR
+      convertedAmount = amount * usdRate;
+      newCryptoBalance = cryptoBalance - amount;
+      newCashBalance = mainWalletBalance + convertedAmount;
+    }
+    
+    // Use updateOne to avoid full document validation issues
+    await User.updateOne(
+      { _id: req.user._id },
+      { 
+        $set: { 
+          'wallet.cashBalance': newCashBalance,
+          'wallet.balance': newCashBalance,
+          'cryptoWallet.balance': newCryptoBalance
+        }
+      }
+    );
+    
+    // Create ledger entry for the transfer
+    const description = direction === 'toCrypto' 
+      ? `Crypto Transfer: ₹${amount.toLocaleString()} → $${convertedAmount.toFixed(2)} USDT`
+      : `Crypto Transfer: $${amount.toFixed(2)} USDT → ₹${convertedAmount.toLocaleString()}`;
+    
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: direction === 'toCrypto' ? 'DEBIT' : 'CREDIT',
+      reason: 'CRYPTO_TRANSFER',
+      amount: direction === 'toCrypto' ? amount : convertedAmount,
+      balanceAfter: newCashBalance,
+      description,
+      reference: {
+        type: 'Manual',
+        id: null
+      }
+    });
+    
+    res.json({ 
+      message: 'Transfer successful',
+      mainWalletBalance: newCashBalance,
+      cryptoBalance: newCryptoBalance,
+      convertedAmount: direction === 'toCrypto' ? convertedAmount : convertedAmount,
+      rate: usdRate
+    });
+  } catch (error) {
+    console.error('Crypto transfer error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

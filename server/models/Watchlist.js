@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const watchlistItemSchema = new mongoose.Schema({
-  token: { type: String, required: true },
+  token: { type: String },  // Not required for crypto (uses pair instead)
   symbol: { type: String, required: true },
   name: { type: String },
   exchange: { type: String },

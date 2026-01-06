@@ -93,7 +93,10 @@ router.post('/positions/squareoff-all', protect, async (req, res) => {
       }
     }
     
-    res.json({ squaredOff: results.length, results });
+    // After closing all positions, recalculate margin to ensure it's synced
+    const marginResult = await TradingService.recalculateMargin(req.user._id);
+    
+    res.json({ squaredOff: results.length, results, marginSync: marginResult });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -328,6 +331,16 @@ router.post('/process-pending', protect, async (req, res) => {
   try {
     const { priceUpdates } = req.body;
     const result = await TradingService.processPendingOrders(priceUpdates);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Recalculate and sync margin - fixes stale margin when positions are closed
+router.post('/recalculate-margin', protect, async (req, res) => {
+  try {
+    const result = await TradingService.recalculateMargin(req.user._id);
     res.json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });

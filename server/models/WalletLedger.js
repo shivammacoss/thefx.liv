@@ -40,7 +40,9 @@ const walletLedgerSchema = new mongoose.Schema({
       'REFUND',             // Refund
       'ADJUSTMENT',         // Manual adjustment
       'BONUS',              // Bonus credit
-      'PENALTY'             // Penalty debit
+      'PENALTY',            // Penalty debit
+      'CRYPTO_TRANSFER',    // Transfer between main wallet and crypto wallet
+      'INTERNAL_TRANSFER'   // Internal transfer between wallets
     ],
     required: true
   },

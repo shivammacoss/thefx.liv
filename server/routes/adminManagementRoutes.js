@@ -875,6 +875,93 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
   }
 });
 
+// ==================== CRYPTO WALLET ROUTES ====================
+
+// Add funds to user's crypto wallet (Admin → User)
+router.post('/users/:id/add-crypto-funds', protectAdmin, async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+    
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    // Add to user's crypto wallet
+    const currentCryptoBalance = user.cryptoWallet?.balance || 0;
+    const newCryptoBalance = currentCryptoBalance + amount;
+    
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'cryptoWallet.balance': newCryptoBalance } }
+    );
+    
+    // Create ledger entry
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: 'CREDIT',
+      reason: 'CRYPTO_DEPOSIT',
+      amount,
+      balanceAfter: newCryptoBalance,
+      description: description || 'Crypto funds added by admin',
+      performedBy: req.admin._id
+    });
+    
+    res.json({ 
+      message: 'Crypto funds added successfully', 
+      cryptoWallet: { balance: newCryptoBalance }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Deduct funds from user's crypto wallet
+router.post('/users/:id/deduct-crypto-funds', protectAdmin, async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+    
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const currentCryptoBalance = user.cryptoWallet?.balance || 0;
+    if (currentCryptoBalance < amount) {
+      return res.status(400).json({ message: 'Insufficient crypto wallet balance' });
+    }
+    
+    const newCryptoBalance = currentCryptoBalance - amount;
+    
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'cryptoWallet.balance': newCryptoBalance } }
+    );
+    
+    // Create ledger entry
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: 'DEBIT',
+      reason: 'CRYPTO_WITHDRAW',
+      amount,
+      balanceAfter: newCryptoBalance,
+      description: description || 'Crypto funds deducted by admin',
+      performedBy: req.admin._id
+    });
+    
+    res.json({ 
+      message: 'Crypto funds deducted successfully', 
+      cryptoWallet: { balance: newCryptoBalance }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==================== BANK ACCOUNT ROUTES ====================
 
 // Get bank accounts

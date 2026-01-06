@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { createChart } from 'lightweight-charts';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -139,6 +139,12 @@ const instrumentsData = {
 const UserDashboard = () => {
   const { user, logoutUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Check if we're in crypto-only mode from URL query param
+  const searchParams = new URLSearchParams(location.search);
+  const cryptoOnly = searchParams.get('mode') === 'crypto';
+  
   const [selectedInstrument, setSelectedInstrument] = useState(null);
   const [walletData, setWalletData] = useState(null);
   const [activeTab, setActiveTab] = useState('positions');
@@ -154,8 +160,16 @@ const UserDashboard = () => {
   const [indicesData, setIndicesData] = useState({});
   const [marketData, setMarketData] = useState({}); // Shared market data for chart and instruments
   const [positionsRefreshKey, setPositionsRefreshKey] = useState(0); // Key to trigger positions refresh
-  const [activeSegment, setActiveSegment] = useState('NSE'); // Track active segment for currency display
+  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE'); // Track active segment for currency display
   const [usdRate, setUsdRate] = useState(83.50); // USD to INR rate (default fallback)
+  const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0); // Key to trigger watchlist refresh
+  
+  // Header search state
+  const [headerSearchTerm, setHeaderSearchTerm] = useState('');
+  const [headerSearchResults, setHeaderSearchResults] = useState([]);
+  const [showHeaderSearchResults, setShowHeaderSearchResults] = useState(false);
+  const [headerSearching, setHeaderSearching] = useState(false);
+  const headerSearchRef = useRef(null);
   
   const refreshPositions = () => setPositionsRefreshKey(k => k + 1);
   
@@ -262,6 +276,84 @@ const UserDashboard = () => {
     navigate('/login');
   };
 
+  // Header search functionality
+  useEffect(() => {
+    const doHeaderSearch = async () => {
+      if (headerSearchTerm.length >= 2) {
+        setHeaderSearching(true);
+        setShowHeaderSearchResults(true);
+        try {
+          const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+          
+          if (cryptoOnly) {
+            // Crypto search
+            const cryptoList = [
+              { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
+              { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
+              { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
+              { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
+              { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
+              { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
+              { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
+              { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
+              { symbol: 'LTC', name: 'Litecoin', exchange: 'BINANCE', pair: 'LTCUSDT', isCrypto: true },
+              { symbol: 'AVAX', name: 'Avalanche', exchange: 'BINANCE', pair: 'AVAXUSDT', isCrypto: true },
+            ];
+            const searchLower = headerSearchTerm.toLowerCase();
+            setHeaderSearchResults(cryptoList.filter(c => 
+              c.symbol.toLowerCase().includes(searchLower) || c.name.toLowerCase().includes(searchLower)
+            ));
+          } else {
+            // Regular trading search
+            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(headerSearchTerm)}&limit=10`, { headers });
+            setHeaderSearchResults((data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE'));
+          }
+        } catch (error) {
+          setHeaderSearchResults([]);
+        }
+        setHeaderSearching(false);
+      } else {
+        setHeaderSearchResults([]);
+        setShowHeaderSearchResults(false);
+      }
+    };
+    
+    const timer = setTimeout(doHeaderSearch, 200);
+    return () => clearTimeout(timer);
+  }, [headerSearchTerm, user?.token, cryptoOnly]);
+
+  // Close header search on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (headerSearchRef.current && !headerSearchRef.current.contains(e.target)) {
+        setShowHeaderSearchResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Add to watchlist from header search
+  const addToWatchlistFromHeader = async (instrument) => {
+    const segment = instrument.isCrypto ? 'Crypto' : 
+      instrument.exchange === 'NFO' ? 'NSE F&O' :
+      instrument.exchange === 'MCX' ? 'MCX' :
+      instrument.exchange === 'BFO' ? 'BSE F&O' :
+      instrument.exchange === 'CDS' ? 'Currency' : 'NSE';
+    
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.post('/api/instruments/watchlist/add', { instrument, segment }, { headers });
+      setHeaderSearchTerm('');
+      setShowHeaderSearchResults(false);
+      // Trigger watchlist refresh in left panel
+      setWatchlistRefreshKey(k => k + 1);
+    } catch (error) {
+      console.error('Error adding to watchlist:', error);
+      alert(error.response?.data?.message || 'Error adding to watchlist');
+    }
+  };
+
   const openBuySell = (type, instrument = null) => {
     if (instrument) setSelectedInstrument(instrument);
     setOrderType(type);
@@ -297,47 +389,105 @@ const UserDashboard = () => {
             <span className="text-sm font-medium">Orders</span>
           </button>
           
-          {/* Market Indices - Live Data */}
-          <div className="hidden lg:flex items-center gap-6 text-sm">
-            <div>
-              <span className="text-gray-400">NIFTY</span>
-              {indicesData.nifty ? (
-                <span className={`ml-2 ${indicesData.nifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {indicesData.nifty.ltp?.toLocaleString()} 
-                  <span className="text-xs ml-1">({indicesData.nifty.change >= 0 ? '+' : ''}{indicesData.nifty.changePercent}%)</span>
-                </span>
-              ) : <span className="ml-2 text-gray-500">--</span>}
+          {/* Market Indices - Live Data - Hide in crypto mode */}
+          {!cryptoOnly && (
+            <div className="hidden lg:flex items-center gap-6 text-sm">
+              <div>
+                <span className="text-gray-400">NIFTY</span>
+                {indicesData.nifty ? (
+                  <span className={`ml-2 ${indicesData.nifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {indicesData.nifty.ltp?.toLocaleString()} 
+                    <span className="text-xs ml-1">({indicesData.nifty.change >= 0 ? '+' : ''}{indicesData.nifty.changePercent}%)</span>
+                  </span>
+                ) : <span className="ml-2 text-gray-500">--</span>}
+              </div>
+              <div>
+                <span className="text-gray-400">BANKNIFTY</span>
+                {indicesData.banknifty ? (
+                  <span className={`ml-2 ${indicesData.banknifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {indicesData.banknifty.ltp?.toLocaleString()}
+                    <span className="text-xs ml-1">({indicesData.banknifty.change >= 0 ? '+' : ''}{indicesData.banknifty.changePercent}%)</span>
+                  </span>
+                ) : <span className="ml-2 text-gray-500">--</span>}
+              </div>
+              <div>
+                <span className="text-gray-400">FINNIFTY</span>
+                {indicesData.finnifty ? (
+                  <span className={`ml-2 ${indicesData.finnifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {indicesData.finnifty.ltp?.toLocaleString()}
+                    <span className="text-xs ml-1">({indicesData.finnifty.change >= 0 ? '+' : ''}{indicesData.finnifty.changePercent}%)</span>
+                  </span>
+                ) : <span className="ml-2 text-gray-500">--</span>}
+              </div>
             </div>
-            <div>
-              <span className="text-gray-400">BANKNIFTY</span>
-              {indicesData.banknifty ? (
-                <span className={`ml-2 ${indicesData.banknifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {indicesData.banknifty.ltp?.toLocaleString()}
-                  <span className="text-xs ml-1">({indicesData.banknifty.change >= 0 ? '+' : ''}{indicesData.banknifty.changePercent}%)</span>
-                </span>
-              ) : <span className="ml-2 text-gray-500">--</span>}
+          )}
+          {/* Crypto Mode Label */}
+          {cryptoOnly && (
+            <div className="hidden lg:flex items-center gap-2 text-sm">
+              <span className="text-orange-400 font-medium">₿ Crypto Trading</span>
             </div>
-            <div>
-              <span className="text-gray-400">FINNIFTY</span>
-              {indicesData.finnifty ? (
-                <span className={`ml-2 ${indicesData.finnifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {indicesData.finnifty.ltp?.toLocaleString()}
-                  <span className="text-xs ml-1">({indicesData.finnifty.change >= 0 ? '+' : ''}{indicesData.finnifty.changePercent}%)</span>
-                </span>
-              ) : <span className="ml-2 text-gray-500">--</span>}
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* Search */}
-        <div className="flex-1 max-w-md mx-4">
+        {/* Search - Functional search with dropdown */}
+        <div className="flex-1 max-w-md mx-4" ref={headerSearchRef}>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
               type="text"
-              placeholder="Search Instruments"
+              placeholder={cryptoOnly ? "Search Crypto..." : "Search Instruments..."}
+              value={headerSearchTerm}
+              onChange={(e) => setHeaderSearchTerm(e.target.value)}
+              onFocus={() => headerSearchTerm.length >= 2 && setShowHeaderSearchResults(true)}
               className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-1.5 text-sm focus:outline-none focus:border-green-500"
             />
+            {headerSearchTerm && (
+              <button 
+                onClick={() => { setHeaderSearchTerm(''); setShowHeaderSearchResults(false); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            )}
+            
+            {/* Search Results Dropdown */}
+            {showHeaderSearchResults && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-dark-800 border border-dark-600 rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto">
+                {headerSearching ? (
+                  <div className="p-3 text-center text-gray-400 text-sm">
+                    <RefreshCw className="animate-spin inline mr-2" size={14} />
+                    Searching...
+                  </div>
+                ) : headerSearchResults.length === 0 ? (
+                  <div className="p-3 text-center text-gray-500 text-sm">
+                    {headerSearchTerm.length >= 2 ? 'No results found' : 'Type to search...'}
+                  </div>
+                ) : (
+                  headerSearchResults.map((inst, idx) => (
+                    <div 
+                      key={inst._id || inst.token || inst.pair || idx}
+                      className="flex items-center justify-between px-3 py-2 hover:bg-dark-700 border-b border-dark-700 last:border-0"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-medium text-sm ${inst.isCrypto ? 'text-orange-400' : 'text-white'}`}>
+                          {inst.symbol}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{inst.exchange}</span>
+                        <button
+                          onClick={() => addToWatchlistFromHeader(inst)}
+                          className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+                        >
+                          <Plus size={12} /> Add
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -345,9 +495,9 @@ const UserDashboard = () => {
         <div className="flex items-center gap-4">
           {/* Trading Account Balance Display - Shows USD when in Crypto mode */}
           <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
-            <Wallet size={18} className={isCryptoMode ? "text-orange-400" : "text-green-400"} />
-            {isCryptoMode ? (
-              <span className="text-orange-400 font-medium">${convertToUsd(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0)}</span>
+            <Wallet size={18} className={cryptoOnly ? "text-orange-400" : "text-green-400"} />
+            {cryptoOnly ? (
+              <span className="text-orange-400 font-medium">${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}</span>
             ) : (
               <span className="text-green-400 font-medium">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
             )}
@@ -370,9 +520,9 @@ const UserDashboard = () => {
         </button>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-dark-700 px-3 py-1.5 rounded-lg">
-            <Wallet size={16} className={isCryptoMode ? "text-orange-400" : "text-green-400"} />
-            {isCryptoMode ? (
-              <span className="text-orange-400 font-medium text-sm">${convertToUsd(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0)}</span>
+            <Wallet size={16} className={cryptoOnly ? "text-orange-400" : "text-green-400"} />
+            {cryptoOnly ? (
+              <span className="text-orange-400 font-medium text-sm">${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}</span>
             ) : (
               <span className="text-green-400 font-medium text-sm">₹{(walletData?.tradingBalance || walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
             )}
@@ -431,6 +581,8 @@ const UserDashboard = () => {
         <div className="flex-shrink-0 w-64">
           <InstrumentsPanel 
             selectedInstrument={selectedInstrument}
+            cryptoOnly={cryptoOnly}
+            refreshKey={watchlistRefreshKey}
             onSelectInstrument={(inst) => {
               setSelectedInstrument(inst);
               // Also update trading panel when clicking instrument
@@ -463,6 +615,7 @@ const UserDashboard = () => {
             refreshKey={positionsRefreshKey}
             selectedInstrument={selectedInstrument}
             onRefreshPositions={refreshPositions}
+            cryptoOnly={cryptoOnly}
           />
         </div>
 
@@ -491,6 +644,7 @@ const UserDashboard = () => {
         {mobileView === 'quotes' && (
           <MobileInstrumentsPanel 
             selectedInstrument={selectedInstrument}
+            cryptoOnly={cryptoOnly}
             onSelectInstrument={(inst) => {
               setSelectedInstrument(inst);
               setMobileView('chart');
@@ -510,10 +664,10 @@ const UserDashboard = () => {
           />
         )}
         {mobileView === 'positions' && (
-          <MobilePositionsPanel activeTab="positions" user={user} marketData={marketData} />
+          <MobilePositionsPanel activeTab="positions" user={user} marketData={marketData} cryptoOnly={cryptoOnly} />
         )}
         {mobileView === 'history' && (
-          <MobilePositionsPanel activeTab="history" user={user} marketData={marketData} />
+          <MobilePositionsPanel activeTab="history" user={user} marketData={marketData} cryptoOnly={cryptoOnly} />
         )}
         {mobileView === 'profile' && (
           <MobileProfilePanel user={user} walletData={walletData} onLogout={handleLogout} />
@@ -603,10 +757,10 @@ const UserDashboard = () => {
   );
 };
 
-const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
+const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange, cryptoOnly = false, refreshKey = 0 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [activeSegment, setActiveSegment] = useState('NSE');
+  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [addingToSegment, setAddingToSegment] = useState(null); // Which instrument is being added
   
@@ -635,7 +789,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   const searchInputRef = useRef(null);
   const [segmentTabs, setSegmentTabs] = useState([])
   
-  // Load watchlist from server on mount
+  // Load watchlist from server on mount and when refreshKey changes
   useEffect(() => {
     const loadWatchlist = async () => {
       if (!user?.token) return;
@@ -653,11 +807,11 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
       }
     };
     loadWatchlist();
-  }, [user?.token]);
+  }, [user?.token, refreshKey]);
   
-  // Set default segment tabs
+  // Set default segment tabs - filter based on cryptoOnly mode
   useEffect(() => {
-    const defaultTabs = [
+    const allTabs = [
       { id: 'NSE', label: 'NSE' },
       { id: 'NSE F&O', label: 'NSE F&O' },
       { id: 'MCX', label: 'MCX' },
@@ -665,8 +819,16 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
       { id: 'Currency', label: 'Currency' },
       { id: 'Crypto', label: 'Crypto' }
     ];
-    setSegmentTabs(defaultTabs);
-  }, []);
+    
+    if (cryptoOnly) {
+      // Only show Crypto tab in crypto-only mode
+      setSegmentTabs([{ id: 'Crypto', label: 'Crypto' }]);
+      setActiveSegment('Crypto');
+    } else {
+      // Remove Crypto from regular trading view
+      setSegmentTabs(allTabs.filter(tab => tab.id !== 'Crypto'));
+    }
+  }, [cryptoOnly]);
   
   // Market status derived from marketData
   const marketStatus = {
@@ -682,7 +844,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Global search using API when typing
+  // Global search using API when typing - use crypto search in crypto-only mode
   useEffect(() => {
     const doSearch = async () => {
       if (debouncedSearch.length >= 2) {
@@ -690,8 +852,44 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
         setShowSearchResults(true);
         try {
           const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-          const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=100`, { headers });
-          setSearchResults(data || []);
+          
+          if (cryptoOnly) {
+            // In crypto-only mode, search from local crypto list
+            const cryptoList = [
+              { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
+              { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
+              { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
+              { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
+              { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
+              { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
+              { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
+              { symbol: 'DOT', name: 'Polkadot', exchange: 'BINANCE', pair: 'DOTUSDT', isCrypto: true },
+              { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
+              { symbol: 'LTC', name: 'Litecoin', exchange: 'BINANCE', pair: 'LTCUSDT', isCrypto: true },
+              { symbol: 'AVAX', name: 'Avalanche', exchange: 'BINANCE', pair: 'AVAXUSDT', isCrypto: true },
+              { symbol: 'LINK', name: 'Chainlink', exchange: 'BINANCE', pair: 'LINKUSDT', isCrypto: true },
+              { symbol: 'ATOM', name: 'Cosmos', exchange: 'BINANCE', pair: 'ATOMUSDT', isCrypto: true },
+              { symbol: 'UNI', name: 'Uniswap', exchange: 'BINANCE', pair: 'UNIUSDT', isCrypto: true },
+              { symbol: 'XLM', name: 'Stellar', exchange: 'BINANCE', pair: 'XLMUSDT', isCrypto: true },
+              { symbol: 'SHIB', name: 'Shiba Inu', exchange: 'BINANCE', pair: 'SHIBUSDT', isCrypto: true },
+              { symbol: 'TRX', name: 'Tron', exchange: 'BINANCE', pair: 'TRXUSDT', isCrypto: true },
+              { symbol: 'ETC', name: 'Ethereum Classic', exchange: 'BINANCE', pair: 'ETCUSDT', isCrypto: true },
+              { symbol: 'XMR', name: 'Monero', exchange: 'BINANCE', pair: 'XMRUSDT', isCrypto: true },
+              { symbol: 'APT', name: 'Aptos', exchange: 'BINANCE', pair: 'APTUSDT', isCrypto: true },
+            ];
+            const searchLower = debouncedSearch.toLowerCase();
+            const filtered = cryptoList.filter(c => 
+              c.symbol.toLowerCase().includes(searchLower) || 
+              c.name.toLowerCase().includes(searchLower)
+            );
+            setSearchResults(filtered);
+          } else {
+            // Regular trading search - exclude crypto
+            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=100`, { headers });
+            // Filter out crypto results from regular search
+            const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');
+            setSearchResults(nonCryptoResults);
+          }
         } catch (error) {
           console.error('Search error:', error);
           setSearchResults([]);
@@ -703,7 +901,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
       }
     };
     doSearch();
-  }, [debouncedSearch, user?.token]);
+  }, [debouncedSearch, user?.token, cryptoOnly]);
 
   // Fetch crypto data (separate from Zerodha)
   useEffect(() => {
@@ -745,8 +943,9 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   const addToWatchlist = async (instrument) => {
     const segment = getSegmentFromExchange(instrument.exchange);
     const currentList = watchlistBySegment[segment] || [];
-    // Check if already exists
-    if (currentList.some(i => i.token === instrument.token)) return;
+    // Check if already exists - use pair for crypto, token for others
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    if (currentList.some(i => (i.isCrypto ? i.pair : i.token) === identifier)) return;
     
     // Update local state immediately
     setWatchlistBySegment(prev => ({
@@ -770,27 +969,30 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
 
   // Remove instrument from watchlist
   const removeFromWatchlist = async (instrument, segment) => {
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
     // Update local state immediately
     setWatchlistBySegment(prev => ({
       ...prev,
-      [segment]: (prev[segment] || []).filter(i => i.token !== instrument.token)
+      [segment]: (prev[segment] || []).filter(i => (i.isCrypto ? i.pair : i.token) !== identifier)
     }));
     
     // Save to server
     if (user?.token) {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, segment }, { headers });
+        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, pair: instrument.pair, segment }, { headers });
       } catch (error) {
         console.error('Error removing from watchlist:', error);
       }
     }
   };
 
-  // Check if instrument is in any watchlist
-  const isInWatchlist = (token) => {
+  // Check if instrument is in any watchlist - support both token and pair for crypto
+  const isInWatchlist = (instrument) => {
+    const identifier = instrument?.isCrypto ? instrument.pair : instrument?.token;
+    if (!identifier) return false;
     return Object.values(watchlistBySegment).some(list => 
-      list.some(i => i.token === token)
+      list.some(i => (i.isCrypto ? i.pair : i.token) === identifier)
     );
   };
 
@@ -856,7 +1058,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
             placeholder="Search symbols..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-dark-700 border border-dark-600 rounded pl-9 pr-8 py-2 text-sm focus:outline-none focus:border-green-500"
+            className="instruments-panel-search w-full bg-dark-700 border border-dark-600 rounded pl-9 pr-8 py-2 text-sm focus:outline-none focus:border-green-500"
           />
           {searchTerm && (
             <button 
@@ -906,7 +1108,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                   </div>
                   
                   {/* Add to Watchlist Button - Auto adds to correct segment */}
-                  {isInWatchlist(inst.token) ? (
+                  {isInWatchlist(inst) ? (
                     <span className="text-xs text-green-400 px-2 py-1">✓ Added</span>
                   ) : (
                     <button
@@ -1083,12 +1285,6 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
   // Resize chart when sidebar opens/closes
   useEffect(() => {
     if (chartRef.current && chartContainerRef.current) {
-      // Immediate resize
-      chartRef.current.applyOptions({
-        width: chartContainerRef.current.clientWidth,
-        height: chartContainerRef.current.clientHeight,
-      });
-      // Also resize after animation completes
       const timer = setTimeout(() => {
         if (chartRef.current && chartContainerRef.current) {
           chartRef.current.applyOptions({
@@ -1101,9 +1297,8 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     }
   }, [sidebarOpen]);
 
-  // Update live price from marketData (Socket.IO) - same source as instruments panel
+  // Update live price from marketData (Socket.IO)
   useEffect(() => {
-    // For crypto, check by pair or symbol as well
     const isCrypto = selectedInstrument?.isCrypto || selectedInstrument?.exchange === 'BINANCE';
     let data = null;
     
@@ -1132,9 +1327,7 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
         const intervalSeconds = getIntervalSeconds(chartInterval);
         const candleTime = Math.floor(now / intervalSeconds) * intervalSeconds;
         
-        // Update or create new candle
         if (lastCandleRef.current.time === candleTime) {
-          // Update existing candle
           const updatedCandle = {
             time: candleTime,
             open: lastCandleRef.current.open,
@@ -1145,7 +1338,6 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
           lastCandleRef.current = updatedCandle;
           candlestickSeriesRef.current.update(updatedCandle);
         } else {
-          // New candle
           const newCandle = {
             time: candleTime,
             open: data.ltp,
@@ -1160,7 +1352,6 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     }
   }, [selectedInstrument?.token, marketData, chartInterval]);
 
-  // Get interval in seconds
   const getIntervalSeconds = (interval) => {
     const map = {
       'ONE_MINUTE': 60,
@@ -1173,7 +1364,6 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     return map[interval] || 900;
   };
 
-  // Map chart interval to Binance interval format
   const getBinanceInterval = (interval) => {
     const map = {
       'ONE_MINUTE': '1m',
@@ -1186,114 +1376,50 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     return map[interval] || '15m';
   };
 
-  // Generate demo candle data based on mock price
-  const generateDemoCandles = (basePrice) => {
-    const candles = [];
-    const now = Math.floor(Date.now() / 1000);
-    for (let i = 500; i >= 0; i--) {
-      const time = now - i * 900; // 15 min intervals
-      const volatility = basePrice * 0.02;
-      const open = basePrice + (Math.random() - 0.5) * volatility;
-      const close = open + (Math.random() - 0.5) * volatility;
-      const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-      const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-      candles.push({ time, open, high, low, close, volume: Math.random() * 100000 });
-    }
-    return candles;
-  };
-
-  // Fetch candle data from Zerodha, Binance, or generate demo data
+  // Fetch candle data from Zerodha or Binance
   const fetchCandleData = async (instrument, interval) => {
     if (!instrument) return null;
     
     try {
       setLoading(true);
       
-      // Check if it's a demo instrument - generate mock candles
-      if (instrument.isDemo) {
-        return generateDemoCandles(instrument.mockPrice || 1000);
-      }
-      
-      // Check if it's a crypto instrument
+      // For crypto - use Binance API
       if (instrument.isCrypto || instrument.exchange === 'BINANCE') {
         const binanceInterval = getBinanceInterval(interval);
-        const { data } = await axios.get(`/api/binance/candles/${instrument.pair || instrument.symbol}`, {
+        const { data } = await axios.get(`/api/binance/candles/${instrument.pair || instrument.symbol}USDT`, {
           params: { interval: binanceInterval, limit: 500 }
         });
         return data;
       }
       
-      // Use Zerodha historical data API
-      if (!instrument.token) return generateSampleData();
-      
-      try {
-        const { data } = await axios.get(`/api/zerodha/historical/${instrument.token}`, {
-          params: { interval: interval }
-        });
-        if (data && data.length > 0) {
-          return data;
+      // For Indian stocks - use Zerodha historical API
+      if (instrument.token) {
+        try {
+          const { data } = await axios.get(`/api/zerodha/historical/${instrument.token}`, {
+            params: { interval: interval }
+          });
+          if (data && data.length > 0) {
+            return data;
+          }
+        } catch (err) {
+          console.log('Zerodha historical not available');
         }
-      } catch (err) {
-        console.log('Zerodha historical not available, using sample data');
       }
       
-      // Fallback to generated sample data based on current price
-      const currentPrice = instrument.ltp || 100;
-      return generateDemoCandles(currentPrice);
+      return null;
     } catch (error) {
       console.error('Failed to fetch candle data:', error);
-      return generateSampleData();
+      return null;
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch live price for the selected instrument
-  const fetchLivePrice = async () => {
-    if (!selectedInstrument) return;
-    
-    try {
-      // Check if it's a demo instrument - use mock data
-      if (selectedInstrument.isDemo) {
-        const fluctuation = (Math.random() - 0.5) * 0.02 * selectedInstrument.mockPrice;
-        setLivePrice({
-          ltp: selectedInstrument.mockPrice + fluctuation,
-          open: selectedInstrument.mockPrice * 0.99,
-          high: selectedInstrument.mockPrice * 1.02,
-          low: selectedInstrument.mockPrice * 0.98,
-          close: selectedInstrument.mockPrice,
-          change: selectedInstrument.mockChange,
-          changePercent: selectedInstrument.mockChange
-        });
-        return;
-      }
-      
-      // Check if it's crypto
-      if (selectedInstrument.isCrypto || selectedInstrument.exchange === 'BINANCE') {
-        const { data } = await axios.get(`/api/binance/price/${selectedInstrument.pair || selectedInstrument.symbol}`);
-        setLivePrice(data);
-        return;
-      }
-      
-      // Otherwise use Zerodha
-      if (!selectedInstrument.token) return;
-      const { data } = await axios.get('/api/zerodha/market-data');
-      if (data[selectedInstrument.token]) {
-        setLivePrice(data[selectedInstrument.token]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch live price:', error);
-    }
-  };
-
-  // Initialize chart when instrument is selected
+  // Initialize chart
   useEffect(() => {
     if (!selectedInstrument || !chartContainerRef.current) return;
-    
-    // If chart already exists, don't recreate
     if (chartRef.current) return;
     
-    // Small delay to ensure container has dimensions
     const initTimer = setTimeout(() => {
       if (!chartContainerRef.current || chartRef.current) return;
       
@@ -1311,12 +1437,8 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
           vertLines: { color: '#1f1f1f' },
           horzLines: { color: '#1f1f1f' },
         },
-        crosshair: {
-          mode: 1,
-        },
-        rightPriceScale: {
-          borderColor: '#2a2a2a',
-        },
+        crosshair: { mode: 1 },
+        rightPriceScale: { borderColor: '#2a2a2a' },
         timeScale: {
           borderColor: '#2a2a2a',
           timeVisible: true,
@@ -1355,14 +1477,10 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
       };
 
       window.addEventListener('resize', handleResize);
-      
-      // Initial resize after a brief delay
       setTimeout(handleResize, 100);
     }, 100);
 
-    return () => {
-      clearTimeout(initTimer);
-    };
+    return () => clearTimeout(initTimer);
   }, [selectedInstrument]);
   
   // Cleanup chart on unmount
@@ -1384,10 +1502,13 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
       if (candles && candles.length > 0) {
         candlestickSeriesRef.current.setData(candles);
         
-        // Generate volume data from candles
+        // Set last candle for real-time updates
+        lastCandleRef.current = candles[candles.length - 1];
+        
+        // Generate volume data
         const volumeData = candles.map(c => ({
           time: c.time,
-          value: c.volume || Math.random() * 1000000,
+          value: c.volume || 0,
           color: c.close >= c.open ? '#22c55e80' : '#ef444480'
         }));
         volumeSeriesRef.current.setData(volumeData);
@@ -1397,11 +1518,6 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     };
     
     loadData();
-    fetchLivePrice();
-    
-    // Refresh live price every 10 seconds
-    const interval = setInterval(fetchLivePrice, 10000);
-    return () => clearInterval(interval);
   }, [selectedInstrument, chartInterval]);
 
   const intervals = [
@@ -1424,9 +1540,8 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
           </div>
           {selectedInstrument && (
             <div className="flex items-center gap-3">
-              <span className={`font-medium ${selectedInstrument.isDemo ? 'text-purple-400' : selectedInstrument.isCrypto ? 'text-orange-400' : 'text-green-400'}`}>
+              <span className={`font-medium ${selectedInstrument.isCrypto ? 'text-orange-400' : 'text-green-400'}`}>
                 {selectedInstrument.symbol}
-                {selectedInstrument.isDemo && <span className="ml-1 text-xs bg-purple-600 px-1 rounded">DEMO</span>}
               </span>
               <span className="text-gray-400 text-sm">{selectedInstrument.exchange}</span>
               {livePrice && (
@@ -1435,7 +1550,7 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
                     {selectedInstrument.isCrypto ? '$' : '₹'}{livePrice.ltp?.toLocaleString(undefined, selectedInstrument.isCrypto ? {minimumFractionDigits: 2, maximumFractionDigits: 2} : {})}
                   </span>
                   <span className={`text-sm ${livePrice.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {livePrice.change >= 0 ? '+' : ''}{livePrice.changePercent}%
+                    {livePrice.change >= 0 ? '+' : ''}{livePrice.changePercent?.toFixed(2)}%
                   </span>
                 </>
               )}
@@ -1483,7 +1598,7 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
   );
 };
 
-const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData, refreshKey, selectedInstrument, onRefreshPositions }) => {
+const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData, refreshKey, selectedInstrument, onRefreshPositions, cryptoOnly = false }) => {
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [history, setHistory] = useState([]);
@@ -1512,11 +1627,24 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
         axios.get('/api/trading/history', { headers })
       ]);
       
-      setPositions(positionsRes.data || []);
-      setPendingOrders(pendingRes.data || []);
-      setHistory(historyRes.data || []);
+      // Filter by crypto mode - show only crypto trades in crypto mode, exclude crypto in regular mode
+      const filterByCryptoMode = (items) => {
+        if (cryptoOnly) {
+          return (items || []).filter(item => item.isCrypto === true);
+        } else {
+          return (items || []).filter(item => item.isCrypto !== true);
+        }
+      };
       
-      const pnl = (positionsRes.data || []).reduce((sum, p) => sum + (p.unrealizedPnL || 0), 0);
+      const filteredPositions = filterByCryptoMode(positionsRes.data);
+      const filteredPending = filterByCryptoMode(pendingRes.data);
+      const filteredHistory = filterByCryptoMode(historyRes.data);
+      
+      setPositions(filteredPositions);
+      setPendingOrders(filteredPending);
+      setHistory(filteredHistory);
+      
+      const pnl = filteredPositions.reduce((sum, p) => sum + (p.unrealizedPnL || 0), 0);
       setTotalPnL(pnl);
     } catch (error) {
       console.error('Error fetching positions:', error);
@@ -2777,13 +2905,13 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
 };
 
 // Mobile Components - Uses watchlist like desktop
-const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange }) => {
+const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange, cryptoOnly = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
-  const [activeSegment, setActiveSegment] = useState('NSE');
+  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE');
   const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
   const [addingToSegment, setAddingToSegment] = useState(null);
@@ -2798,7 +2926,8 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     'Crypto': []
   });
   
-  const segmentTabs = [
+  // Filter segment tabs based on cryptoOnly mode
+  const allSegmentTabs = [
     { id: 'NSE', label: 'NSE' },
     { id: 'NSE F&O', label: 'F&O' },
     { id: 'MCX', label: 'MCX' },
@@ -2806,6 +2935,10 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     { id: 'Currency', label: 'CUR' },
     { id: 'Crypto', label: 'Crypto' }
   ];
+  
+  const segmentTabs = cryptoOnly 
+    ? [{ id: 'Crypto', label: 'Crypto' }]
+    : allSegmentTabs.filter(tab => tab.id !== 'Crypto');
   
   // Load watchlist from server
   useEffect(() => {
@@ -2838,7 +2971,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Global search using API
+  // Global search using API - use crypto search in crypto-only mode
   useEffect(() => {
     const doSearch = async () => {
       if (debouncedSearch.length >= 2) {
@@ -2846,8 +2979,43 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
         setShowSearchResults(true);
         try {
           const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-          const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=50`, { headers });
-          setSearchResults(data || []);
+          
+          if (cryptoOnly) {
+            // In crypto-only mode, search from local crypto list
+            const cryptoList = [
+              { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
+              { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
+              { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
+              { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
+              { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
+              { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
+              { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
+              { symbol: 'DOT', name: 'Polkadot', exchange: 'BINANCE', pair: 'DOTUSDT', isCrypto: true },
+              { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
+              { symbol: 'LTC', name: 'Litecoin', exchange: 'BINANCE', pair: 'LTCUSDT', isCrypto: true },
+              { symbol: 'AVAX', name: 'Avalanche', exchange: 'BINANCE', pair: 'AVAXUSDT', isCrypto: true },
+              { symbol: 'LINK', name: 'Chainlink', exchange: 'BINANCE', pair: 'LINKUSDT', isCrypto: true },
+              { symbol: 'ATOM', name: 'Cosmos', exchange: 'BINANCE', pair: 'ATOMUSDT', isCrypto: true },
+              { symbol: 'UNI', name: 'Uniswap', exchange: 'BINANCE', pair: 'UNIUSDT', isCrypto: true },
+              { symbol: 'XLM', name: 'Stellar', exchange: 'BINANCE', pair: 'XLMUSDT', isCrypto: true },
+              { symbol: 'SHIB', name: 'Shiba Inu', exchange: 'BINANCE', pair: 'SHIBUSDT', isCrypto: true },
+              { symbol: 'TRX', name: 'Tron', exchange: 'BINANCE', pair: 'TRXUSDT', isCrypto: true },
+              { symbol: 'ETC', name: 'Ethereum Classic', exchange: 'BINANCE', pair: 'ETCUSDT', isCrypto: true },
+              { symbol: 'XMR', name: 'Monero', exchange: 'BINANCE', pair: 'XMRUSDT', isCrypto: true },
+              { symbol: 'APT', name: 'Aptos', exchange: 'BINANCE', pair: 'APTUSDT', isCrypto: true },
+            ];
+            const searchLower = debouncedSearch.toLowerCase();
+            const filtered = cryptoList.filter(c => 
+              c.symbol.toLowerCase().includes(searchLower) || 
+              c.name.toLowerCase().includes(searchLower)
+            );
+            setSearchResults(filtered);
+          } else {
+            // Regular trading search - exclude crypto
+            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=50`, { headers });
+            const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');
+            setSearchResults(nonCryptoResults);
+          }
         } catch (error) {
           setSearchResults([]);
         }
@@ -2858,7 +3026,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
       }
     };
     doSearch();
-  }, [debouncedSearch, user?.token]);
+  }, [debouncedSearch, user?.token, cryptoOnly]);
   
   // Get segment from exchange automatically
   const getSegmentFromExchange = (exchange) => {
@@ -2877,7 +3045,9 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   const addToWatchlist = async (instrument) => {
     const segment = getSegmentFromExchange(instrument.exchange);
     const currentList = watchlistBySegment[segment] || [];
-    if (currentList.some(i => i.token === instrument.token)) return;
+    // Check if already exists - use pair for crypto, token for others
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    if (currentList.some(i => (i.isCrypto ? i.pair : i.token) === identifier)) return;
     
     setWatchlistBySegment(prev => ({
       ...prev,
@@ -2900,25 +3070,30 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   
   // Remove from watchlist and sync to server
   const removeFromWatchlist = async (instrument) => {
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
     setWatchlistBySegment(prev => ({
       ...prev,
-      [activeSegment]: (prev[activeSegment] || []).filter(i => i.token !== instrument.token)
+      [activeSegment]: (prev[activeSegment] || []).filter(i => (i.isCrypto ? i.pair : i.token) !== identifier)
     }));
     
     // Save to server
     if (user?.token) {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, segment: activeSegment }, { headers });
+        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, pair: instrument.pair, segment: activeSegment }, { headers });
       } catch (error) {
         console.error('Error removing from watchlist:', error);
       }
     }
   };
   
-  // Check if in watchlist
-  const isInWatchlist = (token) => {
-    return Object.values(watchlistBySegment).some(list => list.some(i => i.token === token));
+  // Check if in watchlist - support both token and pair for crypto
+  const isInWatchlist = (instrument) => {
+    const identifier = instrument?.isCrypto ? instrument.pair : instrument?.token;
+    if (!identifier) return false;
+    return Object.values(watchlistBySegment).some(list => 
+      list.some(i => (i.isCrypto ? i.pair : i.token) === identifier)
+    );
   };
   
   // Get watchlist for current segment
@@ -3008,7 +3183,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
                   <div className="text-xs text-gray-500 truncate">{inst.name}</div>
                   <div className="text-xs text-gray-600">{inst.exchange}</div>
                 </div>
-                {isInWatchlist(inst.token) ? (
+                {isInWatchlist(inst) ? (
                   <span className="text-xs text-green-400">✓ Added</span>
                 ) : (
                   <button
@@ -3313,12 +3488,21 @@ const MobileChartPanel = ({ selectedInstrument, onBuySell, onBack, marketData = 
   );
 };
 
-const MobilePositionsPanel = ({ activeTab, user, marketData }) => {
+const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false }) => {
   const [tab, setTab] = useState(activeTab);
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Filter by crypto mode
+  const filterByCryptoMode = (items) => {
+    if (cryptoOnly) {
+      return (items || []).filter(item => item.isCrypto === true);
+    } else {
+      return (items || []).filter(item => item.isCrypto !== true);
+    }
+  };
 
   useEffect(() => {
     if (user?.token) {
@@ -3333,13 +3517,13 @@ const MobilePositionsPanel = ({ activeTab, user, marketData }) => {
       const headers = { Authorization: `Bearer ${user.token}` };
       if (tab === 'positions') {
         const { data } = await axios.get('/api/trading/positions?status=OPEN', { headers });
-        setPositions(data || []);
+        setPositions(filterByCryptoMode(data));
       } else if (tab === 'pending') {
         const { data } = await axios.get('/api/trading/pending-orders', { headers });
-        setPendingOrders(data || []);
+        setPendingOrders(filterByCryptoMode(data));
       } else {
         const { data } = await axios.get('/api/trading/history', { headers });
-        setHistory(data || []);
+        setHistory(filterByCryptoMode(data));
       }
     } catch (error) {
       console.error('Error:', error);
