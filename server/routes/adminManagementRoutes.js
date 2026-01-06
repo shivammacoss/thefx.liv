@@ -1959,4 +1959,96 @@ router.post('/all-fund-requests/:id/reject', protectAdmin, superAdminOnly, async
   }
 });
 
+// Reset user margin (fix orphaned margin when no open positions exist)
+router.post('/users/:id/reset-margin', protectAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Check admin access
+    if (req.admin.role !== 'SUPER_ADMIN' && user.adminCode !== req.admin.adminCode) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    
+    const oldUsedMargin = user.wallet.usedMargin || 0;
+    const oldBlocked = user.wallet.blocked || 0;
+    
+    // Reset margin fields
+    await User.updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          'wallet.usedMargin': 0,
+          'wallet.blocked': 0
+        }
+      }
+    );
+    
+    res.json({ 
+      message: 'Margin reset successfully',
+      oldUsedMargin,
+      oldBlocked,
+      newUsedMargin: 0,
+      newBlocked: 0
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Reconcile user margin based on actual open positions
+router.post('/users/:id/reconcile-margin', protectAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Check admin access
+    if (req.admin.role !== 'SUPER_ADMIN' && user.adminCode !== req.admin.adminCode) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    
+    // Import Trade model dynamically to avoid circular dependency
+    const Trade = (await import('../models/Trade.js')).default;
+    
+    // Get all open positions for this user
+    const openPositions = await Trade.find({ 
+      user: user._id, 
+      status: 'OPEN',
+      isCrypto: { $ne: true } // Only non-crypto trades use margin
+    });
+    
+    // Calculate actual margin used
+    const actualMarginUsed = openPositions.reduce((sum, pos) => sum + (pos.marginUsed || 0), 0);
+    
+    const oldUsedMargin = user.wallet.usedMargin || 0;
+    const oldBlocked = user.wallet.blocked || 0;
+    
+    // Update margin to match actual open positions
+    await User.updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          'wallet.usedMargin': actualMarginUsed,
+          'wallet.blocked': actualMarginUsed
+        }
+      }
+    );
+    
+    res.json({ 
+      message: 'Margin reconciled successfully',
+      openPositionsCount: openPositions.length,
+      oldUsedMargin,
+      oldBlocked,
+      newUsedMargin: actualMarginUsed,
+      newBlocked: actualMarginUsed
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

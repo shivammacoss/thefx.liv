@@ -8810,6 +8810,8 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
   const [description, setDescription] = useState('');
   const [action, setAction] = useState('add');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -8834,6 +8836,43 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
     }
   };
 
+  const handleResetMargin = async () => {
+    if (!confirm('Are you sure you want to reset this user\'s margin to 0? This should only be done if there are no open positions.')) {
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { data } = await axios.post(`/api/admin/manage/users/${user._id}/reset-margin`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSuccess(`Margin reset: ₹${data.oldUsedMargin} → ₹0`);
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error resetting margin');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReconcileMargin = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { data } = await axios.post(`/api/admin/manage/users/${user._id}/reconcile-margin`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSuccess(`Margin reconciled: ₹${data.oldUsedMargin} → ₹${data.newUsedMargin} (${data.openPositionsCount} open positions)`);
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error reconciling margin');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
@@ -8845,7 +8884,48 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
           <div className="text-sm text-gray-400">User</div>
           <div className="font-medium">{user.fullName || user.username}</div>
           <div className="text-lg font-bold text-green-400 mt-1">₹{user.wallet?.cashBalance?.toLocaleString() || '0'}</div>
+          <div className="flex justify-between text-sm text-gray-400 mt-1">
+            <span>Trading: ₹{(user.wallet?.tradingBalance || 0).toLocaleString()}</span>
+            <span className="text-yellow-400">Margin Used: ₹{(user.wallet?.usedMargin || 0).toLocaleString()}</span>
+          </div>
         </div>
+
+        {/* Margin Management */}
+        {(user.wallet?.usedMargin > 0) && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+            <p className="text-sm text-yellow-400 font-medium mb-2">Margin Management</p>
+            <p className="text-xs text-gray-400 mb-3">If user has stuck margin with no open positions:</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleReconcileMargin}
+                disabled={loading}
+                className="flex-1 text-xs bg-blue-600 hover:bg-blue-700 py-2 px-3 rounded disabled:opacity-50"
+              >
+                Reconcile Margin
+              </button>
+              <button
+                onClick={handleResetMargin}
+                disabled={loading}
+                className="flex-1 text-xs bg-red-600 hover:bg-red-700 py-2 px-3 rounded disabled:opacity-50"
+              >
+                Reset to Zero
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded mb-4 text-sm">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-green-500/20 border border-green-500 text-green-400 px-4 py-2 rounded mb-4 text-sm">
+            {success}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex gap-2">
             <button
@@ -10830,6 +10910,7 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [walletData, setWalletData] = useState(null);
   const [adminBalance, setAdminBalance] = useState(admin?.wallet?.balance || 0);
 
@@ -10845,6 +10926,45 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
       setWalletData(data);
     } catch (err) {
       console.error('Error fetching wallet:', err);
+    }
+  };
+
+  const handleResetMargin = async () => {
+    if (!confirm('Are you sure you want to reset this user\'s margin to 0? This should only be done if there are no open positions.')) {
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { data } = await axios.post(`/api/admin/manage/users/${user._id}/reset-margin`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSuccess(`Margin reset: ${data.oldUsedMargin} → 0`);
+      fetchWallet();
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error resetting margin');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReconcileMargin = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { data } = await axios.post(`/api/admin/manage/users/${user._id}/reconcile-margin`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSuccess(`Margin reconciled: ${data.oldUsedMargin} → ${data.newUsedMargin} (${data.openPositionsCount} open positions)`);
+      fetchWallet();
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error reconciling margin');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -10910,14 +11030,49 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
           <p className="text-2xl font-bold text-green-400 mt-1">
             ₹{(walletData?.wallet?.cashBalance || walletData?.wallet?.balance || 0).toLocaleString()}
           </p>
-          <p className="text-sm text-gray-400">
-            Cash Balance: ₹{(walletData?.wallet?.cashBalance || 0).toLocaleString()}
-          </p>
+          <div className="flex justify-between text-sm text-gray-400 mt-1">
+            <span>Cash Balance: ₹{(walletData?.wallet?.cashBalance || 0).toLocaleString()}</span>
+            <span>Trading: ₹{(walletData?.wallet?.tradingBalance || 0).toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-sm mt-1">
+            <span className="text-yellow-400">Margin Used: ₹{(walletData?.wallet?.usedMargin || 0).toLocaleString()}</span>
+            <span className="text-gray-400">Available: ₹{((walletData?.wallet?.tradingBalance || 0) - (walletData?.wallet?.usedMargin || 0)).toLocaleString()}</span>
+          </div>
         </div>
+
+        {/* Margin Management */}
+        {(walletData?.wallet?.usedMargin > 0) && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+            <p className="text-sm text-yellow-400 font-medium mb-2">Margin Management</p>
+            <p className="text-xs text-gray-400 mb-3">If user has stuck margin with no open positions, use these options:</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleReconcileMargin}
+                disabled={loading}
+                className="flex-1 text-xs bg-blue-600 hover:bg-blue-700 py-2 px-3 rounded disabled:opacity-50"
+              >
+                Reconcile Margin
+              </button>
+              <button
+                onClick={handleResetMargin}
+                disabled={loading}
+                className="flex-1 text-xs bg-red-600 hover:bg-red-700 py-2 px-3 rounded disabled:opacity-50"
+              >
+                Reset to Zero
+              </button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-green-500/20 border border-green-500 text-green-400 px-4 py-2 rounded mb-4">
+            {success}
           </div>
         )}
 
