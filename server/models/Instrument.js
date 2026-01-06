@@ -38,8 +38,8 @@ const instrumentSchema = new mongoose.Schema({
   // Display Segment (for UI tabs) - matches user allowedSegments
   displaySegment: {
     type: String,
-    enum: ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'],
-    default: 'NSE',
+    enum: ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'],
+    default: 'NSE-EQ',
     index: true
   },
   

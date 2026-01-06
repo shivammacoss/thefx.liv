@@ -56,7 +56,7 @@ const instrumentsData = {
       { symbol: 'FINNIFTY', name: 'Fin Nifty Index', exchange: 'NSE', token: '99926037' },
     ]
   },
-  'NSE Equity': {
+  'NSE-EQ': {
     stocks: [
       { symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', token: '2885' },
       { symbol: 'SBIN', name: 'State Bank of India', exchange: 'NSE', token: '3045' },
@@ -85,28 +85,25 @@ const instrumentsData = {
       { symbol: 'TECHM', name: 'Tech Mahindra', exchange: 'NSE', token: '3432' },
     ]
   },
-  'NSE F&O': {
+  'NSEFUT': {
     futures: [
       { symbol: 'NIFTY25JANFUT', name: 'NIFTY JAN FUT', exchange: 'NFO', type: 'FUT', token: '35001' },
       { symbol: 'BANKNIFTY25JANFUT', name: 'BANKNIFTY JAN FUT', exchange: 'NFO', type: 'FUT', token: '35009' },
       { symbol: 'FINNIFTY25JANFUT', name: 'FINNIFTY JAN FUT', exchange: 'NFO', type: 'FUT', token: '35037' },
-    ],
+    ]
+  },
+  'NSEOPT': {
     calls: [
       { symbol: 'NIFTY26000CE', name: 'NIFTY 26000 CE', exchange: 'NFO', type: 'CE', strike: 26000, token: '43650' },
       { symbol: 'NIFTY26100CE', name: 'NIFTY 26100 CE', exchange: 'NFO', type: 'CE', strike: 26100, token: '43652' },
-      { symbol: 'NIFTY26200CE', name: 'NIFTY 26200 CE', exchange: 'NFO', type: 'CE', strike: 26200, token: '43654' },
       { symbol: 'BANKNIFTY59500CE', name: 'BANKNIFTY 59500 CE', exchange: 'NFO', type: 'CE', strike: 59500, token: '43750' },
-      { symbol: 'BANKNIFTY59700CE', name: 'BANKNIFTY 59700 CE', exchange: 'NFO', type: 'CE', strike: 59700, token: '43752' },
     ],
     puts: [
       { symbol: 'NIFTY26000PE', name: 'NIFTY 26000 PE', exchange: 'NFO', type: 'PE', strike: 26000, token: '43651' },
-      { symbol: 'NIFTY25900PE', name: 'NIFTY 25900 PE', exchange: 'NFO', type: 'PE', strike: 25900, token: '43649' },
-      { symbol: 'NIFTY25800PE', name: 'NIFTY 25800 PE', exchange: 'NFO', type: 'PE', strike: 25800, token: '43647' },
       { symbol: 'BANKNIFTY59500PE', name: 'BANKNIFTY 59500 PE', exchange: 'NFO', type: 'PE', strike: 59500, token: '43751' },
-      { symbol: 'BANKNIFTY59300PE', name: 'BANKNIFTY 59300 PE', exchange: 'NFO', type: 'PE', strike: 59300, token: '43749' },
     ]
   },
-  'MCX': {
+  'MCXFUT': {
     futures: [
       { symbol: 'GOLDM', name: 'Gold Mini', exchange: 'MCX', type: 'FUT', token: '220822' },
       { symbol: 'SILVERM', name: 'Silver Mini', exchange: 'MCX', type: 'FUT', token: '220823' },
@@ -115,23 +112,14 @@ const instrumentsData = {
       { symbol: 'COPPER', name: 'Copper', exchange: 'MCX', type: 'FUT', token: '220824' },
     ]
   },
-  'Crypto': {
-    stocks: [
-      { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
-      { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
-      { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
-      { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
-      { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
-      { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
-      { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
-      { symbol: 'DOT', name: 'Polkadot', exchange: 'BINANCE', pair: 'DOTUSDT', isCrypto: true },
-      { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
-      { symbol: 'LTC', name: 'Litecoin', exchange: 'BINANCE', pair: 'LTCUSDT', isCrypto: true },
-      { symbol: 'AVAX', name: 'Avalanche', exchange: 'BINANCE', pair: 'AVAXUSDT', isCrypto: true },
-      { symbol: 'LINK', name: 'Chainlink', exchange: 'BINANCE', pair: 'LINKUSDT', isCrypto: true },
-      { symbol: 'ATOM', name: 'Cosmos', exchange: 'BINANCE', pair: 'ATOMUSDT', isCrypto: true },
-      { symbol: 'UNI', name: 'Uniswap', exchange: 'BINANCE', pair: 'UNIUSDT', isCrypto: true },
-      { symbol: 'XLM', name: 'Stellar', exchange: 'BINANCE', pair: 'XLMUSDT', isCrypto: true },
+  'MCXOPT': {
+    calls: [
+      { symbol: 'CRUDEOIL8000CE', name: 'CRUDEOIL 8000 CE', exchange: 'MCX', type: 'CE', strike: 8000, token: '230001' },
+      { symbol: 'GOLD75000CE', name: 'GOLD 75000 CE', exchange: 'MCX', type: 'CE', strike: 75000, token: '230002' },
+    ],
+    puts: [
+      { symbol: 'CRUDEOIL7500PE', name: 'CRUDEOIL 7500 PE', exchange: 'MCX', type: 'PE', strike: 7500, token: '230003' },
+      { symbol: 'GOLD74000PE', name: 'GOLD 74000 PE', exchange: 'MCX', type: 'PE', strike: 74000, token: '230004' },
     ]
   }
 };
@@ -160,7 +148,7 @@ const UserDashboard = () => {
   const [indicesData, setIndicesData] = useState({});
   const [marketData, setMarketData] = useState({}); // Shared market data for chart and instruments
   const [positionsRefreshKey, setPositionsRefreshKey] = useState(0); // Key to trigger positions refresh
-  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE'); // Track active segment for currency display
+  const [activeSegment, setActiveSegment] = useState('NSEFUT'); // Track active segment for currency display
   const [usdRate, setUsdRate] = useState(83.50); // USD to INR rate (default fallback)
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0); // Key to trigger watchlist refresh
   
@@ -195,8 +183,8 @@ const UserDashboard = () => {
     return (inrAmount / usdRate).toFixed(2);
   };
   
-  // Check if currently viewing crypto
-  const isCryptoMode = activeSegment === 'Crypto';
+  // Check if currently viewing crypto (no longer used since crypto is removed)
+  const isCryptoMode = false;
 
   // Connect to Socket.IO for real-time market data (shared across components)
   useEffect(() => {
@@ -335,11 +323,17 @@ const UserDashboard = () => {
 
   // Add to watchlist from header search
   const addToWatchlistFromHeader = async (instrument) => {
-    const segment = instrument.isCrypto ? 'Crypto' : 
-      instrument.exchange === 'NFO' ? 'NSE F&O' :
-      instrument.exchange === 'MCX' ? 'MCX' :
-      instrument.exchange === 'BFO' ? 'BSE F&O' :
-      instrument.exchange === 'CDS' ? 'Currency' : 'NSE';
+    // Map exchange + instrumentType to segment format
+    let segment = 'NSEFUT';
+    if (instrument.exchange === 'MCX') {
+      segment = instrument.instrumentType === 'OPTIONS' ? 'MCXOPT' : 'MCXFUT';
+    } else if (instrument.exchange === 'NFO') {
+      segment = instrument.instrumentType === 'OPTIONS' ? 'NSEOPT' : 'NSEFUT';
+    } else if (instrument.exchange === 'BFO') {
+      segment = instrument.instrumentType === 'OPTIONS' ? 'BSE-OPT' : 'BSE-FUT';
+    } else if (instrument.exchange === 'NSE') {
+      segment = 'NSE-EQ';
+    }
     
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
@@ -760,18 +754,19 @@ const UserDashboard = () => {
 const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange, cryptoOnly = false, refreshKey = 0 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE');
+  const [activeSegment, setActiveSegment] = useState('NSEFUT');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [addingToSegment, setAddingToSegment] = useState(null); // Which instrument is being added
   
-  // Watchlist stored by segment: { 'NSE': [{...}], 'NSE F&O': [{...}], ... }
+  // Watchlist stored by segment
   const [watchlistBySegment, setWatchlistBySegment] = useState({
-    'NSE': [],
-    'NSE F&O': [],
-    'MCX': [],
-    'BSE F&O': [],
-    'Currency': [],
-    'Crypto': []
+    'NSEFUT': [],
+    'NSEOPT': [],
+    'MCXFUT': [],
+    'MCXOPT': [],
+    'NSE-EQ': [],
+    'BSE-FUT': [],
+    'BSE-OPT': []
   });
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   
@@ -812,22 +807,16 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   // Set default segment tabs - filter based on cryptoOnly mode
   useEffect(() => {
     const allTabs = [
-      { id: 'NSE', label: 'NSE' },
-      { id: 'NSE F&O', label: 'NSE F&O' },
-      { id: 'MCX', label: 'MCX' },
-      { id: 'BSE F&O', label: 'BSE F&O' },
-      { id: 'Currency', label: 'Currency' },
-      { id: 'Crypto', label: 'Crypto' }
+      { id: 'NSEFUT', label: 'NSEFUT' },
+      { id: 'NSEOPT', label: 'NSEOPT' },
+      { id: 'MCXFUT', label: 'MCXFUT' },
+      { id: 'MCXOPT', label: 'MCXOPT' },
+      { id: 'NSE-EQ', label: 'NSE-EQ' },
+      { id: 'BSE-FUT', label: 'BSE-FUT' },
+      { id: 'BSE-OPT', label: 'BSE-OPT' }
     ];
     
-    if (cryptoOnly) {
-      // Only show Crypto tab in crypto-only mode
-      setSegmentTabs([{ id: 'Crypto', label: 'Crypto' }]);
-      setActiveSegment('Crypto');
-    } else {
-      // Remove Crypto from regular trading view
-      setSegmentTabs(allTabs.filter(tab => tab.id !== 'Crypto'));
-    }
+    setSegmentTabs(allTabs);
   }, [cryptoOnly]);
   
   // Market status derived from marketData
@@ -926,32 +915,39 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
     return { ltp: 0, change: 0, changePercent: 0 };
   };
 
-  // Get segment from exchange automatically
-  const getSegmentFromExchange = (exchange) => {
-    const exchangeToSegment = {
-      'NSE': 'NSE',
-      'NFO': 'NSE F&O',
-      'MCX': 'MCX',
-      'BFO': 'BSE F&O',
-      'CDS': 'Currency',
-      'BINANCE': 'Crypto'
-    };
-    return exchangeToSegment[exchange] || 'NSE';
+  // Get segment from exchange and instrument type automatically
+  const getSegmentFromExchange = (exchange, instrumentType) => {
+    if (exchange === 'MCX') {
+      return instrumentType === 'OPTIONS' ? 'MCXOPT' : 'MCXFUT';
+    }
+    if (exchange === 'NFO') {
+      return instrumentType === 'OPTIONS' ? 'NSEOPT' : 'NSEFUT';
+    }
+    if (exchange === 'BFO') {
+      return instrumentType === 'OPTIONS' ? 'BSE-OPT' : 'BSE-FUT';
+    }
+    if (exchange === 'NSE') return 'NSE-EQ';
+    return 'NSEFUT';
   };
 
   // Add instrument to watchlist - auto-detect segment from exchange
   const addToWatchlist = async (instrument) => {
-    const segment = getSegmentFromExchange(instrument.exchange);
+    const segment = getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
+    console.log('Adding to watchlist:', instrument.symbol, 'segment:', segment, 'exchange:', instrument.exchange, 'instrumentType:', instrument.instrumentType);
     const currentList = watchlistBySegment[segment] || [];
-    // Check if already exists - use pair for crypto, token for others
-    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    // Check if already exists
+    const identifier = instrument.token;
     if (currentList.some(i => (i.isCrypto ? i.pair : i.token) === identifier)) return;
     
     // Update local state immediately
-    setWatchlistBySegment(prev => ({
-      ...prev,
-      [segment]: [...(prev[segment] || []), instrument]
-    }));
+    setWatchlistBySegment(prev => {
+      const newState = {
+        ...prev,
+        [segment]: [...(prev[segment] || []), instrument]
+      };
+      console.log('New watchlist state for', segment, ':', newState[segment].length, 'items');
+      return newState;
+    });
     setAddingToSegment(null);
     setSearchTerm('');
     setShowSearchResults(false);
@@ -998,15 +994,13 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
 
   // Get watchlist for current segment
   const getWatchlistForSegment = () => {
-    if (activeSegment === 'Crypto') {
-      // For crypto, show watchlist items with live prices
-      const cryptoWatchlist = watchlistBySegment['Crypto'] || [];
-      return cryptoWatchlist.map(inst => {
-        const liveData = cryptoData[inst.pair] || {};
-        return { ...inst, ltp: liveData.ltp || 0, change: liveData.change || 0, changePercent: liveData.changePercent || 0 };
-      });
+    if (false) {
+      // Crypto removed - this block is no longer used
+      return [];
     }
-    return watchlistBySegment[activeSegment] || [];
+    const list = watchlistBySegment[activeSegment] || [];
+    console.log('getWatchlistForSegment - activeSegment:', activeSegment, 'count:', list.length, 'watchlistBySegment keys:', Object.keys(watchlistBySegment));
+    return list;
   };
 
   // Get count for segment tab
@@ -1102,9 +1096,8 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                   className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
                 >
                   <div className="flex-1 min-w-0 mr-2">
-                    <div className="font-bold text-sm text-white uppercase">{inst.symbol}</div>
-                    <div className="text-xs text-gray-500 truncate">{inst.name}</div>
-                    <div className="text-xs text-gray-600">{inst.exchange}</div>
+                    <div className="font-bold text-sm text-white uppercase">{inst.tradingSymbol || inst.symbol}</div>
+                    <div className="text-xs text-gray-500 truncate">{inst.category || inst.name} • {inst.exchange}</div>
                   </div>
                   
                   {/* Add to Watchlist Button - Auto adds to correct segment */}
@@ -1154,9 +1147,9 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                         inst.optionType === 'PE' ? 'text-red-400' :
                         inst.isCrypto ? 'text-orange-400' : 'text-white'
                       }`}>
-                        {inst.symbol}
+                        {inst.tradingSymbol || inst.symbol?.replace(/"/g, '') || inst.symbol}
                       </div>
-                      <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{inst.category || inst.name}</div>
                     </div>
                     
                     <div className="text-right flex-shrink-0 mr-2">
@@ -2943,34 +2936,34 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
-  const [activeSegment, setActiveSegment] = useState(cryptoOnly ? 'Crypto' : 'NSE');
+  const [activeSegment, setActiveSegment] = useState('NSEFUT');
   const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
   const [addingToSegment, setAddingToSegment] = useState(null);
   
   // Watchlist stored by segment (synced with server)
   const [watchlistBySegment, setWatchlistBySegment] = useState({
-    'NSE': [],
-    'NSE F&O': [],
-    'MCX': [],
-    'BSE F&O': [],
-    'Currency': [],
-    'Crypto': []
+    'NSEFUT': [],
+    'NSEOPT': [],
+    'MCXFUT': [],
+    'MCXOPT': [],
+    'NSE-EQ': [],
+    'BSE-FUT': [],
+    'BSE-OPT': []
   });
   
-  // Filter segment tabs based on cryptoOnly mode
+  // Segment tabs
   const allSegmentTabs = [
-    { id: 'NSE', label: 'NSE' },
-    { id: 'NSE F&O', label: 'F&O' },
-    { id: 'MCX', label: 'MCX' },
-    { id: 'BSE F&O', label: 'BSE' },
-    { id: 'Currency', label: 'CUR' },
-    { id: 'Crypto', label: 'Crypto' }
+    { id: 'NSEFUT', label: 'NSEFUT' },
+    { id: 'NSEOPT', label: 'NSEOPT' },
+    { id: 'MCXFUT', label: 'MCXFUT' },
+    { id: 'MCXOPT', label: 'MCXOPT' },
+    { id: 'NSE-EQ', label: 'NSE-EQ' },
+    { id: 'BSE-FUT', label: 'BSE-FUT' },
+    { id: 'BSE-OPT', label: 'BSE-OPT' }
   ];
   
-  const segmentTabs = cryptoOnly 
-    ? [{ id: 'Crypto', label: 'Crypto' }]
-    : allSegmentTabs.filter(tab => tab.id !== 'Crypto');
+  const segmentTabs = allSegmentTabs;
   
   // Load watchlist from server
   useEffect(() => {
@@ -3060,22 +3053,24 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     doSearch();
   }, [debouncedSearch, user?.token, cryptoOnly]);
   
-  // Get segment from exchange automatically
-  const getSegmentFromExchange = (exchange) => {
-    const exchangeToSegment = {
-      'NSE': 'NSE',
-      'NFO': 'NSE F&O',
-      'MCX': 'MCX',
-      'BFO': 'BSE F&O',
-      'CDS': 'Currency',
-      'BINANCE': 'Crypto'
-    };
-    return exchangeToSegment[exchange] || 'NSE';
+  // Get segment from exchange and instrument type automatically
+  const getSegmentFromExchange = (exchange, instrumentType) => {
+    if (exchange === 'MCX') {
+      return instrumentType === 'OPTIONS' ? 'MCXOPT' : 'MCXFUT';
+    }
+    if (exchange === 'NFO') {
+      return instrumentType === 'OPTIONS' ? 'NSEOPT' : 'NSEFUT';
+    }
+    if (exchange === 'BFO') {
+      return instrumentType === 'OPTIONS' ? 'BSE-OPT' : 'BSE-FUT';
+    }
+    if (exchange === 'NSE') return 'NSE-EQ';
+    return 'NSEFUT';
   };
 
   // Add to watchlist - auto-detect segment and sync to server
   const addToWatchlist = async (instrument) => {
-    const segment = getSegmentFromExchange(instrument.exchange);
+    const segment = getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
     const currentList = watchlistBySegment[segment] || [];
     // Check if already exists - use pair for crypto, token for others
     const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
@@ -3211,9 +3206,8 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
             searchResults.map(inst => (
               <div key={inst._id || inst.token} className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700">
                 <div className="flex-1 min-w-0 mr-2">
-                  <div className="font-bold text-sm text-white">{inst.symbol}</div>
-                  <div className="text-xs text-gray-500 truncate">{inst.name}</div>
-                  <div className="text-xs text-gray-600">{inst.exchange}</div>
+                  <div className="font-bold text-sm text-white">{inst.tradingSymbol || inst.symbol}</div>
+                  <div className="text-xs text-gray-500 truncate">{inst.category || inst.name} • {inst.exchange}</div>
                 </div>
                 {isInWatchlist(inst) ? (
                   <span className="text-xs text-green-400">✓ Added</span>
@@ -3254,8 +3248,8 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
                       inst.instrumentType === 'FUTURES' ? 'text-yellow-400' :
                       inst.optionType === 'CE' ? 'text-green-400' :
                       inst.optionType === 'PE' ? 'text-red-400' : 'text-white'
-                    }`}>{inst.symbol}</div>
-                    <div className="text-xs text-gray-500 truncate">{inst.name}</div>
+                    }`}>{inst.tradingSymbol || inst.symbol?.replace(/"/g, '') || inst.symbol}</div>
+                    <div className="text-xs text-gray-500 truncate">{inst.category || inst.name}</div>
                   </div>
                   <div className="text-right mr-2">
                     <div className="text-sm text-gray-300">{parseFloat(priceData.ltp || 0).toFixed(2)}</div>

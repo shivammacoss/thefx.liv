@@ -221,10 +221,11 @@ router.get('/user', protectUser, async (req, res) => {
 // Get all instruments (admin view)
 router.get('/admin', protectAdmin, async (req, res) => {
   try {
-    const { segment, category, search, enabled, optionType } = req.query;
+    const { segment, category, search, enabled, optionType, displaySegment } = req.query;
     
     let query = {};
     if (segment) query.segment = segment;
+    if (displaySegment) query.displaySegment = displaySegment;
     if (category) query.category = category;
     if (enabled !== undefined) query.isEnabled = enabled === 'true';
     if (optionType) {
@@ -249,7 +250,7 @@ router.get('/admin', protectAdmin, async (req, res) => {
     
     // Pagination - default 100 per page, max 500
     const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const limit = Math.min(parseInt(req.query.limit) || 1000, 5000);
     const skip = (page - 1) * limit;
     
     const instruments = await Instrument.find(query)
@@ -397,43 +398,43 @@ router.delete('/admin/:id', protectAdmin, superAdminOnly, async (req, res) => {
 router.post('/admin/seed-defaults', protectAdmin, superAdminOnly, async (req, res) => {
   try {
     const defaultInstruments = [
-      // Indices
-      { token: '99926000', symbol: 'NIFTY', name: 'Nifty 50', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 1 },
-      { token: '99926009', symbol: 'BANKNIFTY', name: 'Bank Nifty', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 2 },
-      { token: '99926037', symbol: 'FINNIFTY', name: 'Fin Nifty', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 3 },
-      { token: '99926074', symbol: 'MIDCPNIFTY', name: 'Midcap Nifty', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, sortOrder: 4 },
+      // Indices (NSE-EQ)
+      { token: '99926000', symbol: 'NIFTY', name: 'Nifty 50', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 1 },
+      { token: '99926009', symbol: 'BANKNIFTY', name: 'Bank Nifty', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 2 },
+      { token: '99926037', symbol: 'FINNIFTY', name: 'Fin Nifty', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, isFeatured: true, sortOrder: 3 },
+      { token: '99926074', symbol: 'MIDCPNIFTY', name: 'Midcap Nifty', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'INDEX', category: 'INDICES', lotSize: 1, sortOrder: 4 },
       
-      // Popular Stocks
-      { token: '2885', symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 1 },
-      { token: '3045', symbol: 'SBIN', name: 'State Bank of India', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 2 },
-      { token: '1333', symbol: 'HDFCBANK', name: 'HDFC Bank', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 3 },
-      { token: '11536', symbol: 'TCS', name: 'Tata Consultancy Services', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 4 },
-      { token: '1594', symbol: 'INFY', name: 'Infosys', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 5 },
-      { token: '17963', symbol: 'ICICIBANK', name: 'ICICI Bank', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 6 },
-      { token: '1922', symbol: 'KOTAKBANK', name: 'Kotak Mahindra Bank', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 7 },
-      { token: '3456', symbol: 'TATAMOTORS', name: 'Tata Motors', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 8 },
-      { token: '11630', symbol: 'NTPC', name: 'NTPC Limited', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 9 },
-      { token: '10999', symbol: 'MARUTI', name: 'Maruti Suzuki', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 10 },
-      { token: '1660', symbol: 'ITC', name: 'ITC Limited', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 11 },
-      { token: '3787', symbol: 'WIPRO', name: 'Wipro', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 12 },
-      { token: '317', symbol: 'BAJFINANCE', name: 'Bajaj Finance', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 13 },
-      { token: '16675', symbol: 'AXISBANK', name: 'Axis Bank', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 14 },
-      { token: '2031', symbol: 'LT', name: 'Larsen & Toubro', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 15 },
-      { token: '1348', symbol: 'HEROMOTOCO', name: 'Hero MotoCorp', exchange: 'NSE', segment: 'EQUITY', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 16 },
+      // Popular Stocks (NSE-EQ)
+      { token: '2885', symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 1 },
+      { token: '3045', symbol: 'SBIN', name: 'State Bank of India', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 2 },
+      { token: '1333', symbol: 'HDFCBANK', name: 'HDFC Bank', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, isFeatured: true, sortOrder: 3 },
+      { token: '11536', symbol: 'TCS', name: 'Tata Consultancy Services', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 4 },
+      { token: '1594', symbol: 'INFY', name: 'Infosys', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 5 },
+      { token: '17963', symbol: 'ICICIBANK', name: 'ICICI Bank', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 6 },
+      { token: '1922', symbol: 'KOTAKBANK', name: 'Kotak Mahindra Bank', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 7 },
+      { token: '3456', symbol: 'TATAMOTORS', name: 'Tata Motors', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 8 },
+      { token: '11630', symbol: 'NTPC', name: 'NTPC Limited', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 9 },
+      { token: '10999', symbol: 'MARUTI', name: 'Maruti Suzuki', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 10 },
+      { token: '1660', symbol: 'ITC', name: 'ITC Limited', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 11 },
+      { token: '3787', symbol: 'WIPRO', name: 'Wipro', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 12 },
+      { token: '317', symbol: 'BAJFINANCE', name: 'Bajaj Finance', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 13 },
+      { token: '16675', symbol: 'AXISBANK', name: 'Axis Bank', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 14 },
+      { token: '2031', symbol: 'LT', name: 'Larsen & Toubro', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 15 },
+      { token: '1348', symbol: 'HEROMOTOCO', name: 'Hero MotoCorp', exchange: 'NSE', segment: 'EQUITY', displaySegment: 'NSE-EQ', instrumentType: 'STOCK', category: 'STOCKS', lotSize: 1, sortOrder: 16 },
       
-      // MCX Commodities
-      { token: '53523', symbol: 'GOLDM', name: 'Gold Mini', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 10, isFeatured: true, sortOrder: 1 },
-      { token: '53524', symbol: 'GOLD', name: 'Gold', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 100, isFeatured: true, sortOrder: 2 },
-      { token: '53525', symbol: 'SILVERM', name: 'Silver Mini', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5, isFeatured: true, sortOrder: 3 },
-      { token: '53526', symbol: 'SILVER', name: 'Silver', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 30, sortOrder: 4 },
-      { token: '53527', symbol: 'CRUDEOIL', name: 'Crude Oil', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 100, isFeatured: true, sortOrder: 5 },
-      { token: '53528', symbol: 'CRUDEOILM', name: 'Crude Oil Mini', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 10, sortOrder: 6 },
-      { token: '53529', symbol: 'NATURALGAS', name: 'Natural Gas', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 1250, sortOrder: 7 },
-      { token: '53530', symbol: 'COPPER', name: 'Copper', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 2500, sortOrder: 8 },
-      { token: '53531', symbol: 'ZINC', name: 'Zinc', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 9 },
-      { token: '53532', symbol: 'ALUMINIUM', name: 'Aluminium', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 10 },
-      { token: '53533', symbol: 'LEAD', name: 'Lead', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 11 },
-      { token: '53534', symbol: 'NICKEL', name: 'Nickel', exchange: 'MCX', segment: 'MCX', instrumentType: 'FUTURES', category: 'MCX', lotSize: 1500, sortOrder: 12 },
+      // MCX Commodities (MCXFUT)
+      { token: '53523', symbol: 'GOLDM', name: 'Gold Mini', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 10, isFeatured: true, sortOrder: 1 },
+      { token: '53524', symbol: 'GOLD', name: 'Gold', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 100, isFeatured: true, sortOrder: 2 },
+      { token: '53525', symbol: 'SILVERM', name: 'Silver Mini', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5, isFeatured: true, sortOrder: 3 },
+      { token: '53526', symbol: 'SILVER', name: 'Silver', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 30, sortOrder: 4 },
+      { token: '53527', symbol: 'CRUDEOIL', name: 'Crude Oil', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 100, isFeatured: true, sortOrder: 5 },
+      { token: '53528', symbol: 'CRUDEOILM', name: 'Crude Oil Mini', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 10, sortOrder: 6 },
+      { token: '53529', symbol: 'NATURALGAS', name: 'Natural Gas', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 1250, sortOrder: 7 },
+      { token: '53530', symbol: 'COPPER', name: 'Copper', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 2500, sortOrder: 8 },
+      { token: '53531', symbol: 'ZINC', name: 'Zinc', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 9 },
+      { token: '53532', symbol: 'ALUMINIUM', name: 'Aluminium', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 10 },
+      { token: '53533', symbol: 'LEAD', name: 'Lead', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 5000, sortOrder: 11 },
+      { token: '53534', symbol: 'NICKEL', name: 'Nickel', exchange: 'MCX', segment: 'MCX', displaySegment: 'MCXFUT', instrumentType: 'FUTURES', category: 'MCX', lotSize: 1500, sortOrder: 12 },
     ];
     
     let added = 0;
@@ -512,6 +513,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
       name: `NIFTY ${expiryStr} FUT`,
       exchange: 'NFO',
       segment: 'FNO',
+      displaySegment: 'NSEFUT',
       instrumentType: 'FUTURES',
       category: 'NIFTY',
       expiry: currentExpiry,
@@ -527,6 +529,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
       name: `NIFTY ${nextExpiryStr} FUT`,
       exchange: 'NFO',
       segment: 'FNO',
+      displaySegment: 'NSEFUT',
       instrumentType: 'FUTURES',
       category: 'NIFTY',
       expiry: nextMonthExpiry,
@@ -543,6 +546,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `NIFTY ${expiryStr} ${strike} CE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'CE',
         strike: strike,
@@ -559,6 +563,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `NIFTY ${expiryStr} ${strike} PE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'PE',
         strike: strike,
@@ -576,6 +581,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
       name: `BANKNIFTY ${expiryStr} FUT`,
       exchange: 'NFO',
       segment: 'FNO',
+      displaySegment: 'NSEFUT',
       instrumentType: 'FUTURES',
       category: 'BANKNIFTY',
       expiry: currentExpiry,
@@ -591,6 +597,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
       name: `BANKNIFTY ${nextExpiryStr} FUT`,
       exchange: 'NFO',
       segment: 'FNO',
+      displaySegment: 'NSEFUT',
       instrumentType: 'FUTURES',
       category: 'BANKNIFTY',
       expiry: nextMonthExpiry,
@@ -607,6 +614,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `BANKNIFTY ${expiryStr} ${strike} CE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'CE',
         strike: strike,
@@ -623,6 +631,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `BANKNIFTY ${expiryStr} ${strike} PE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'PE',
         strike: strike,
@@ -642,6 +651,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
       name: `FINNIFTY ${expiryStr} FUT`,
       exchange: 'NFO',
       segment: 'FNO',
+      displaySegment: 'NSEFUT',
       instrumentType: 'FUTURES',
       category: 'FINNIFTY',
       expiry: currentExpiry,
@@ -657,6 +667,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `FINNIFTY ${expiryStr} ${strike} CE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'CE',
         strike: strike,
@@ -672,6 +683,7 @@ router.post('/admin/seed-fno', protectAdmin, superAdminOnly, async (req, res) =>
         name: `FINNIFTY ${expiryStr} ${strike} PE`,
         exchange: 'NFO',
         segment: 'FNO',
+        displaySegment: 'NSEOPT',
         instrumentType: 'OPTIONS',
         optionType: 'PE',
         strike: strike,
@@ -1053,7 +1065,7 @@ router.get('/by-segment', protectAdmin, async (req, res) => {
 // Get instruments grouped by displaySegment (for UI tabs)
 router.get('/by-display-segment', async (req, res) => {
   try {
-    const segments = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'];
+    const segments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
     const result = {};
     
     for (const segment of segments) {
@@ -1301,14 +1313,15 @@ router.get('/watchlist', protectUser, async (req, res) => {
     const userId = req.user._id;
     const watchlists = await Watchlist.find({ userId }).lean();
     
-    // Convert to object format { 'NSE': [...], 'NSE F&O': [...], ... }
+    // Convert to object format with segment names
     const result = {
-      'NSE': [],
-      'NSE F&O': [],
-      'MCX': [],
-      'BSE F&O': [],
-      'Currency': [],
-      'Crypto': []
+      'NSEFUT': [],
+      'NSEOPT': [],
+      'MCXFUT': [],
+      'MCXOPT': [],
+      'NSE-EQ': [],
+      'BSE-FUT': [],
+      'BSE-OPT': []
     };
     
     for (const wl of watchlists) {
@@ -1327,6 +1340,8 @@ router.post('/watchlist/add', protectUser, async (req, res) => {
   try {
     const userId = req.user._id;
     const { instrument, segment } = req.body;
+    
+    console.log('Watchlist add request - segment:', segment, 'instrument:', instrument?.symbol);
     
     if (!instrument || !segment) {
       return res.status(400).json({ message: 'Instrument and segment are required' });
@@ -1418,7 +1433,7 @@ router.post('/watchlist/sync', protectUser, async (req, res) => {
     
     // Update each segment
     for (const [segment, instruments] of Object.entries(watchlistBySegment)) {
-      if (!['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency', 'Crypto'].includes(segment)) continue;
+      if (!['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].includes(segment)) continue;
       
       await Watchlist.findOneAndUpdate(
         { userId, segment },

@@ -1316,11 +1316,13 @@ const SuperAdminCreateUser = () => {
     blockLimitBetweenHighLow: false,
     // Segment Settings with detailed settings
     segmentPermissions: {
-      MCX: { ...defaultSegmentSettings, enabled: true },
-      NSEINDEX: { ...defaultSegmentSettings, enabled: true },
-      NSESTOCK: { ...defaultSegmentSettings, enabled: true },
-      BSE: { ...defaultSegmentSettings, enabled: false },
-      EQ: { ...defaultSegmentSettings, enabled: true }
+      NSEFUT: { ...defaultSegmentSettings, enabled: true },
+      NSEOPT: { ...defaultSegmentSettings, enabled: true },
+      MCXFUT: { ...defaultSegmentSettings, enabled: true },
+      MCXOPT: { ...defaultSegmentSettings, enabled: true },
+      'NSE-EQ': { ...defaultSegmentSettings, enabled: true },
+      'BSE-FUT': { ...defaultSegmentSettings, enabled: false },
+      'BSE-OPT': { ...defaultSegmentSettings, enabled: false }
     },
     // Global Script Settings - applies to all segments
     scriptSettings: {},
@@ -1464,11 +1466,13 @@ const SuperAdminCreateUser = () => {
         isActivated: true, isReadOnly: false, isDemo: false, intradaySquare: false,
         blockLimitAboveBelowHighLow: false, blockLimitBetweenHighLow: false,
         segmentPermissions: {
-          MCX: { ...defaultSegmentSettings, enabled: true },
-          NSEINDEX: { ...defaultSegmentSettings, enabled: true },
-          NSESTOCK: { ...defaultSegmentSettings, enabled: true },
-          BSE: { ...defaultSegmentSettings, enabled: false },
-          EQ: { ...defaultSegmentSettings, enabled: true }
+          NSEFUT: { ...defaultSegmentSettings, enabled: true },
+          NSEOPT: { ...defaultSegmentSettings, enabled: true },
+          MCXFUT: { ...defaultSegmentSettings, enabled: true },
+          MCXOPT: { ...defaultSegmentSettings, enabled: true },
+          'NSE-EQ': { ...defaultSegmentSettings, enabled: true },
+          'BSE-FUT': { ...defaultSegmentSettings, enabled: false },
+          'BSE-OPT': { ...defaultSegmentSettings, enabled: false }
         },
         scriptSettings: {},
         selectedScriptSegment: null,
@@ -4120,7 +4124,7 @@ const InstrumentManagement = () => {
     fetchInstruments();
   };
 
-  const categories = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'CURRENCY', 'OTHER'];
+  const categories = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'STOCKS', 'INDICES', 'MCX', 'COMMODITY', 'OTHER'];
 
   return (
     <div className="p-4 md:p-6">
@@ -4165,11 +4169,13 @@ const InstrumentManagement = () => {
             className="bg-dark-700 border border-dark-600 rounded px-3 py-2"
           >
             <option value="">All Segments</option>
-            <option value="EQUITY">Equity</option>
-            <option value="FNO">F&O</option>
-            <option value="MCX">MCX</option>
-            <option value="COMMODITY">Commodity</option>
-            <option value="CURRENCY">Currency</option>
+            <option value="NSEFUT">NSEFUT</option>
+            <option value="NSEOPT">NSEOPT</option>
+            <option value="MCXFUT">MCXFUT</option>
+            <option value="MCXOPT">MCXOPT</option>
+            <option value="NSE-EQ">NSE-EQ</option>
+            <option value="BSE-FUT">BSE-FUT</option>
+            <option value="BSE-OPT">BSE-OPT</option>
           </select>
           <select
             value={filter.category}
@@ -4379,9 +4385,16 @@ const MarketControl = () => {
     const params = new URLSearchParams(window.location.search);
     const zerodhaResult = params.get('zerodha');
     if (zerodhaResult === 'success') {
-      alert('Zerodha connected successfully!');
       window.history.replaceState({}, '', window.location.pathname);
-      fetchBrokerStatus();
+      // Fetch status multiple times to ensure it's updated
+      const refreshStatus = async () => {
+        for (let i = 0; i < 3; i++) {
+          await fetchBrokerStatus();
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        alert('Zerodha connected successfully!');
+      };
+      refreshStatus();
     } else if (zerodhaResult === 'error') {
       alert('Zerodha connection failed: ' + (params.get('message') || 'Unknown error'));
       window.history.replaceState({}, '', window.location.pathname);
@@ -4389,6 +4402,10 @@ const MarketControl = () => {
       alert('Zerodha login was cancelled');
       window.history.replaceState({}, '', window.location.pathname);
     }
+    
+    // Refresh broker status every 10 seconds
+    const interval = setInterval(fetchBrokerStatus, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchBrokerStatus = async () => {
@@ -5790,34 +5807,34 @@ const TradingPanel = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeSegment, setActiveSegment] = useState('NSE');
+  const [activeSegment, setActiveSegment] = useState('NSEFUT');
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [selectedInstrument, setSelectedInstrument] = useState(null);
   const [selectedAdmin, setSelectedAdmin] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [userSearch, setUserSearch] = useState('');
 
-  const segments = ['NSE', 'NSE F&O', 'MCX', 'BSE F&O', 'Currency'];
+  const segments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
 
   useEffect(() => {
-    fetchInstruments();
+    fetchInstruments(activeSegment);
     fetchUsers();
     if (isSuperAdmin) fetchAdmins();
   }, []);
 
   useEffect(() => {
-    // Re-fetch users when admin filter changes (for super admin)
-    if (isSuperAdmin && selectedAdmin) {
-      fetchUsersByAdmin(selectedAdmin);
-    }
-  }, [selectedAdmin]);
+    fetchInstruments(activeSegment, searchTerm);
+  }, [activeSegment, searchTerm]);
 
-  const fetchInstruments = async () => {
+  const fetchInstruments = async (segmentToFetch, term) => {
+    setLoading(true);
     try {
-      const { data } = await axios.get('/api/instruments/admin?limit=1000', {
-        headers: { Authorization: `Bearer ${admin.token}` }
+      const { data } = await axios.get('/api/instruments/admin', {
+        headers: { Authorization: `Bearer ${admin.token}` },
+        params: { limit: 5000, displaySegment: segmentToFetch, search: term || undefined }
       });
       const instrumentsArray = data?.instruments || data || [];
+      console.log('Fetched instruments:', instrumentsArray.length, 'Sample:', instrumentsArray[0]);
       setInstruments(Array.isArray(instrumentsArray) ? instrumentsArray : []);
     } catch (err) {
       console.error('Error fetching instruments:', err);
@@ -5861,15 +5878,26 @@ const TradingPanel = () => {
     }
   };
 
-  // Filter instruments by segment and search
+  // Filter instruments by segment and search - use displaySegment directly
   const filteredInstruments = instruments.filter(i => {
-    const seg = (i.displaySegment || i.segment || i.exchange || '').toUpperCase();
-    const matchesSegment = 
-      (activeSegment === 'NSE' && (seg === 'NSE' || seg === 'NSE SPOT' || seg.includes('NSE') && !seg.includes('F&O') && !seg.includes('NFO'))) ||
-      (activeSegment === 'NSE F&O' && (seg === 'NFO' || seg === 'NSE F&O' || seg.includes('NFO'))) ||
-      (activeSegment === 'MCX' && (seg === 'MCX' || seg.includes('MCX'))) ||
-      (activeSegment === 'BSE F&O' && (seg === 'BFO' || seg === 'BSE F&O' || seg.includes('BFO'))) ||
-      (activeSegment === 'Currency' && (seg === 'CDS' || seg === 'CURRENCY' || seg.includes('CDS') || seg.includes('CURRENCY')));
+    const displaySeg = (i.displaySegment || '').toUpperCase();
+    const exchange = (i.exchange || '').toUpperCase();
+    const instType = (i.instrumentType || '').toUpperCase();
+    
+    // First try to match by displaySegment directly
+    let matchesSegment = displaySeg === activeSegment;
+    
+    // Fallback to exchange + instrumentType matching if displaySegment doesn't match
+    if (!matchesSegment) {
+      matchesSegment = 
+        (activeSegment === 'NSEFUT' && exchange === 'NFO' && instType === 'FUTURES') ||
+        (activeSegment === 'NSEOPT' && exchange === 'NFO' && instType === 'OPTIONS') ||
+        (activeSegment === 'MCXFUT' && exchange === 'MCX' && instType === 'FUTURES') ||
+        (activeSegment === 'MCXOPT' && exchange === 'MCX' && instType === 'OPTIONS') ||
+        (activeSegment === 'NSE-EQ' && exchange === 'NSE') ||
+        (activeSegment === 'BSE-FUT' && exchange === 'BFO' && instType === 'FUTURES') ||
+        (activeSegment === 'BSE-OPT' && exchange === 'BFO' && instType === 'OPTIONS');
+    }
     
     if (!searchTerm) return matchesSegment;
     
@@ -5963,7 +5991,7 @@ const TradingPanel = () => {
                     <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
                     <div className="text-xs text-gray-400">
                       {instrument.name} • {instrument.displaySegment || instrument.segment}
-                      {instrument.lotSize > 1 && <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span>}
+                      {instrument.lotSize ? <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span> : null}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -6014,7 +6042,10 @@ const TradingPanel = () => {
                 >
                   <div className="flex-1">
                     <div className="font-medium">{instrument.tradingSymbol || instrument.symbol}</div>
-                    <div className="text-xs text-gray-400">{instrument.name} • {instrument.displaySegment || instrument.segment}</div>
+                    <div className="text-xs text-gray-400">
+                      {instrument.name} • {instrument.displaySegment || instrument.segment}
+                      {instrument.lotSize ? <span className="text-yellow-400 ml-1">(Lot: {instrument.lotSize})</span> : null}
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -7520,7 +7551,7 @@ const AllUsersManagement = () => {
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   
-  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  const defaultSegmentOptions = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
   
   const defaultSegmentSettings = {
     enabled: false,
@@ -7559,11 +7590,13 @@ const AllUsersManagement = () => {
     : defaultSegmentOptions;
   const [marketScripts, setMarketScripts] = useState({});
   const [segmentSymbols, setSegmentSymbols] = useState({
-    MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
-    NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
-    NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
-    BSE: ['SENSEX', 'BANKEX'],
-    EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+    NSEFUT: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    NSEOPT: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    MCXFUT: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
+    MCXOPT: ['CRUDEOIL', 'GOLD', 'SILVER', 'NATURALGAS', 'COPPER'],
+    'NSE-EQ': ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+    'BSE-FUT': ['SENSEX', 'BANKEX'],
+    'BSE-OPT': ['SENSEX', 'BANKEX']
   });
 
   useEffect(() => {
@@ -9692,7 +9725,7 @@ const UserManagement = () => {
     users, 20, searchTerm, ['username', 'fullName', 'email', 'phone']
   );
   
-  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'];
+  const defaultSegmentOptions = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
   const [marketSegments, setMarketSegments] = useState([]);
   const [marketScripts, setMarketScripts] = useState({});
   
@@ -9731,11 +9764,13 @@ const UserManagement = () => {
   };
   
   const [segmentSymbols, setSegmentSymbols] = useState({
-    MCX: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
-    NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
-    NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
-    BSE: ['SENSEX', 'BANKEX'],
-    EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+    NSEFUT: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    NSEOPT: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
+    MCXFUT: ['CRUDEOIL', 'CRUDEM', 'GOLD', 'SILVER', 'SILVERMIC', 'NATURALGAS', 'NATGASMINI', 'COPPER', 'ZINC', 'ZINCMINI', 'ALUMINIUM', 'LEAD', 'LEADMINI', 'NICKEL'],
+    MCXOPT: ['CRUDEOIL', 'GOLD', 'SILVER', 'NATURALGAS', 'COPPER'],
+    'NSE-EQ': ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+    'BSE-FUT': ['SENSEX', 'BANKEX'],
+    'BSE-OPT': ['SENSEX', 'BANKEX']
   });
   
   // Fetch segments and scripts from market data

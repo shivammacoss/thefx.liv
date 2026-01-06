@@ -1,6 +1,9 @@
 import express from 'express';
 import axios from 'axios';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { protectAdmin, superAdminOnly } from '../middleware/auth.js';
 import { connectTicker, subscribeTokens, getMarketData, getTickerStatus, disconnectTicker } from '../services/zerodhaWebSocket.js';
 
@@ -12,16 +15,45 @@ export const setSocketIO = (socketIO) => {
   io = socketIO;
 };
 
-// Zerodha session storage
-let zerodhaSession = {
-  accessToken: null,
-  publicToken: null,
-  userId: null,
-  expiresAt: null
+// Session file path for persistence
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SESSION_FILE = path.join(__dirname, '../.zerodha-session.json');
+
+// Load session from file if exists
+const loadSession = () => {
+  try {
+    if (fs.existsSync(SESSION_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+      // Check if session is still valid (not expired)
+      if (data.expiresAt && new Date(data.expiresAt) > new Date()) {
+        console.log('Loaded Zerodha session from file:', data.userId);
+        return data;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading Zerodha session:', err.message);
+  }
+  return { accessToken: null, publicToken: null, userId: null, expiresAt: null };
 };
+
+// Save session to file
+const saveSession = (session) => {
+  try {
+    console.log('Attempting to save session to:', SESSION_FILE);
+    fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2));
+    console.log('Saved Zerodha session to file successfully');
+  } catch (err) {
+    console.error('Error saving Zerodha session:', err.message, err.stack);
+  }
+};
+
+// Zerodha session storage (persisted to file)
+let zerodhaSession = loadSession();
 
 // Get Zerodha connection status
 router.get('/status', (req, res) => {
+  console.log('Zerodha status check - accessToken exists:', !!zerodhaSession.accessToken, 'userId:', zerodhaSession.userId);
   res.json({
     connected: !!zerodhaSession.accessToken,
     userId: zerodhaSession.userId,
@@ -100,6 +132,9 @@ router.get('/callback', async (req, res) => {
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // Token valid for 1 day
       };
       
+      // Save session to file for persistence across restarts
+      saveSession(zerodhaSession);
+      
       console.log('Zerodha login successful:', zerodhaSession.userId);
       
       // Start WebSocket ticker for real-time data
@@ -152,6 +187,9 @@ router.post('/logout', protectAdmin, superAdminOnly, async (req, res) => {
       userId: null,
       expiresAt: null
     };
+    
+    // Clear session file
+    saveSession(zerodhaSession);
     
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
@@ -1063,14 +1101,29 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     
     console.log(`Total instruments from Zerodha: ${allInstruments.length}`);
     
+    // Debug: Log sample instrument and available fields
+    if (allInstruments.length > 0) {
+      console.log('CSV Headers:', headers);
+      console.log('Sample instrument:', JSON.stringify(allInstruments[0]));
+      
+      // Check what exchanges exist
+      const exchanges = [...new Set(allInstruments.map(i => i.exchange))];
+      console.log('Available exchanges:', exchanges);
+      
+      // Check NSE instruments
+      const nseCount = allInstruments.filter(i => i.exchange === 'NSE').length;
+      console.log('NSE instruments count:', nseCount);
+    }
+    
     let added = 0;
     let errors = 0;
-    const counts = { nse: 0, nsefo: 0, mcx: 0, bsefo: 0, currency: 0, indices: 0 };
+    const counts = { 'NSE-EQ': 0, 'NSEFUT': 0, 'NSEOPT': 0, 'MCXFUT': 0, 'MCXOPT': 0, 'BSE-FUT': 0, 'BSE-OPT': 0 };
     
     // 1. NSE EQUITY (Stocks)
     const nseEquity = allInstruments.filter(i => 
       i.exchange === 'NSE' && i.segment === 'NSE' && i.instrument_type === 'EQ'
     );
+    console.log(`Found ${nseEquity.length} NSE equity instruments`);
     
     for (const stock of nseEquity) {
       try {
@@ -1080,7 +1133,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           name: stock.name || stock.tradingsymbol,
           exchange: 'NSE',
           segment: 'EQUITY',
-          displaySegment: 'NSE',
+          displaySegment: 'NSE-EQ',
           instrumentType: 'STOCK',
           category: 'STOCKS',
           tradingSymbol: stock.tradingsymbol,
@@ -1091,7 +1144,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           sortOrder: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN'].includes(stock.tradingsymbol) ? 1 : 100
         });
         added++;
-        counts.nse++;
+        counts['NSE-EQ']++;
       } catch (e) { errors++; }
     }
     
@@ -1107,7 +1160,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           name: idx.tradingsymbol,
           exchange: 'NSE',
           segment: 'EQUITY',
-          displaySegment: 'NSE',
+          displaySegment: 'NSE-EQ',
           instrumentType: 'INDEX',
           category: 'INDICES',
           tradingSymbol: idx.tradingsymbol,
@@ -1117,7 +1170,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           sortOrder: isMajorIndex ? 0 : 50
         });
         added++;
-        counts.indices++;
+        counts['NSE-EQ']++;
       } catch (e) { errors++; }
     }
     
@@ -1170,7 +1223,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           name: `${baseName} ${expiryMonth} FUT`,
           exchange: 'NFO',
           segment: 'FNO',
-          displaySegment: 'NSE F&O',
+          displaySegment: 'NSEFUT',
           instrumentType: 'FUTURES',
           category: isIndex ? baseName : 'STOCKS',
           tradingSymbol: fut.tradingsymbol,
@@ -1184,7 +1237,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
         savedByName[baseName]++;
         nfoSaved++;
         added++;
-        counts.nsefo++;
+        counts['NSEFUT']++;
       } catch (e) { 
         errors++; 
         if (nfoErrors.length < 5) nfoErrors.push(`${baseName}: ${e.message}`);
@@ -1233,7 +1286,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
               name: `${opt.name} ${expiryMonth} ${opt.strike} ${opt.instrument_type}`,
               exchange: 'NFO',
               segment: 'FNO',
-              displaySegment: 'NSE F&O',
+              displaySegment: 'NSEOPT',
               instrumentType: 'OPTIONS',
               optionType: opt.instrument_type,
               strike: parseFloat(opt.strike),
@@ -1247,7 +1300,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
               sortOrder: opt.instrument_type === 'CE' ? 10 : 20
             });
             added++;
-            counts.nsefo++;
+            counts['NSEOPT']++;
           } catch (e) { errors++; }
         }
       }
@@ -1274,7 +1327,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           name: contract.name || baseSymbol,
           exchange: 'MCX',
           segment: 'MCX',
-          displaySegment: 'MCX',
+          displaySegment: 'MCXFUT',
           instrumentType: 'FUTURES',
           category: 'MCX',
           tradingSymbol: contract.tradingsymbol,
@@ -1286,8 +1339,67 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           sortOrder: priorityIndex >= 0 ? priorityIndex : 100
         });
         added++;
-        counts.mcx++;
+        counts['MCXFUT']++;
       } catch (e) { errors++; }
+    }
+    
+    // 4b. MCX OPTIONS
+    const mcxOptions = allInstruments.filter(i => 
+      i.exchange === 'MCX' && (i.instrument_type === 'CE' || i.instrument_type === 'PE')
+    );
+    
+    console.log(`Found ${mcxOptions.length} MCX options`);
+    
+    // Group MCX options by name and expiry
+    const mcxOptionsByNameExpiry = {};
+    for (const opt of mcxOptions) {
+      if (!mcxOptionsByNameExpiry[opt.name]) mcxOptionsByNameExpiry[opt.name] = {};
+      if (!mcxOptionsByNameExpiry[opt.name][opt.expiry]) mcxOptionsByNameExpiry[opt.name][opt.expiry] = [];
+      mcxOptionsByNameExpiry[opt.name][opt.expiry].push(opt);
+    }
+    
+    // Get nearest 2 expiries for each underlying and add strikes around ATM
+    for (const [name, expiries] of Object.entries(mcxOptionsByNameExpiry)) {
+      const sortedExpiries = Object.keys(expiries).sort((a, b) => new Date(a) - new Date(b));
+      const nearestExpiries = sortedExpiries.slice(0, 2); // Get 2 nearest expiries
+      
+      for (const expiry of nearestExpiries) {
+        const options = expiries[expiry];
+        
+        // Sort by strike and get strikes around ATM
+        const strikes = [...new Set(options.map(o => parseFloat(o.strike)))].sort((a, b) => a - b);
+        const midIndex = Math.floor(strikes.length / 2);
+        // Get 5 strikes around ATM
+        const selectedStrikes = strikes.slice(Math.max(0, midIndex - 3), midIndex + 3);
+        
+        for (const opt of options) {
+          if (!selectedStrikes.includes(parseFloat(opt.strike))) continue;
+          
+          try {
+            await Instrument.create({
+              token: opt.instrument_token,
+              symbol: opt.tradingsymbol,
+              name: `${opt.name} ${opt.strike} ${opt.instrument_type}`,
+              exchange: 'MCX',
+              segment: 'MCX',
+              displaySegment: 'MCXOPT',
+              instrumentType: 'OPTIONS',
+              optionType: opt.instrument_type,
+              strike: parseFloat(opt.strike),
+              category: 'MCX',
+              tradingSymbol: opt.tradingsymbol,
+              lotSize: parseInt(opt.lot_size) || 1,
+              tickSize: parseFloat(opt.tick_size) || 1,
+              expiry: new Date(opt.expiry),
+              isEnabled: true,
+              isFeatured: false,
+              sortOrder: opt.instrument_type === 'CE' ? 10 : 20
+            });
+            added++;
+            counts['MCXOPT']++;
+          } catch (e) { errors++; }
+        }
+      }
     }
     
     // 5. BSE F&O Futures
@@ -1318,7 +1430,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
             name: `${fut.name} FUT`,
             exchange: 'BFO',
             segment: 'FNO',
-            displaySegment: 'BSE F&O',
+            displaySegment: 'BSE-FUT',
             instrumentType: 'FUTURES',
             category: 'BSE',
             tradingSymbol: fut.tradingsymbol,
@@ -1330,7 +1442,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
             sortOrder: 0
           });
           added++;
-          counts.bsefo++;
+          counts['BSE-FUT']++;
         } catch (e) { errors++; }
       }
     }
@@ -1375,7 +1487,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
               name: `${opt.name} ${opt.strike} ${opt.instrument_type}`,
               exchange: 'BFO',
               segment: 'FNO',
-              displaySegment: 'BSE F&O',
+              displaySegment: 'BSE-OPT',
               instrumentType: 'OPTIONS',
               optionType: opt.instrument_type,
               strike: parseFloat(opt.strike),
@@ -1389,60 +1501,13 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
               sortOrder: opt.instrument_type === 'CE' ? 10 : 20
             });
             added++;
-            counts.bsefo++;
+            counts['BSE-OPT']++;
           } catch (e) { errors++; }
         }
       }
     }
     
-    // 6. CURRENCY (CDS)
-    const currencyPairs = ['USDINR', 'EURINR', 'GBPINR', 'JPYINR'];
-    const cdsFutures = allInstruments.filter(i => i.exchange === 'CDS' && i.instrument_type === 'FUT');
-    console.log(`Found ${cdsFutures.length} CDS futures`);
-    
-    const cdsBySymbol = {};
-    for (const fut of cdsFutures) {
-      // Check both name and tradingsymbol for currency pairs
-      const matchedPair = currencyPairs.find(pair => 
-        fut.name === pair || 
-        fut.tradingsymbol?.startsWith(pair) ||
-        fut.name?.toUpperCase() === pair
-      );
-      if (matchedPair) {
-        if (!cdsBySymbol[matchedPair]) cdsBySymbol[matchedPair] = [];
-        cdsBySymbol[matchedPair].push(fut);
-      }
-    }
-    
-    // Get nearest 2 expiries for each currency pair
-    for (const [baseSymbol, contracts] of Object.entries(cdsBySymbol)) {
-      const sorted = contracts.sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
-      const nearest = sorted.slice(0, 2); // Get 2 nearest expiries
-      
-      for (const contract of nearest) {
-        try {
-          await Instrument.create({
-            token: contract.instrument_token,
-            symbol: contract.tradingsymbol,
-            name: baseSymbol,
-            exchange: 'CDS',
-            segment: 'CURRENCY',
-            displaySegment: 'Currency',
-            instrumentType: 'FUTURES',
-            category: 'CURRENCY',
-            tradingSymbol: contract.tradingsymbol,
-            lotSize: parseInt(contract.lot_size) || 1,
-            tickSize: parseFloat(contract.tick_size) || 0.0025,
-            expiry: new Date(contract.expiry),
-            isEnabled: true,
-            isFeatured: baseSymbol === 'USDINR',
-            sortOrder: currencyPairs.indexOf(baseSymbol)
-          });
-          added++;
-          counts.currency++;
-        } catch (e) { errors++; }
-      }
-    }
+    // Currency (CDS) sync removed - no longer part of segment structure
     
     // Subscribe to all tokens
     const allDbInstruments = await Instrument.find({ isEnabled: true }).select('token').lean();
@@ -1511,7 +1576,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
     let added = 0;
     let updated = 0;
     let errors = 0;
-    const counts = { nse: 0, nsefo: 0, mcx: 0, bsefo: 0, currency: 0, indices: 0 };
+    const counts = { 'NSE-EQ': 0, 'NSEFUT': 0, 'NSEOPT': 0, 'MCXFUT': 0, 'MCXOPT': 0, 'BSE-FUT': 0, 'BSE-OPT': 0 };
     
     // ============ 1. NSE EQUITY (Stocks) ============
     const nseEquity = allInstruments.filter(i => 
@@ -1531,7 +1596,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           name: stock.name || stock.tradingsymbol,
           exchange: 'NSE',
           segment: 'EQUITY',
-          displaySegment: 'NSE',
+          displaySegment: 'NSE-EQ',
           instrumentType: 'STOCK',
           category: 'STOCKS',
           tradingSymbol: stock.tradingsymbol,
@@ -1549,7 +1614,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           await Instrument.create(instrumentData);
           added++;
         }
-        counts.nse++;
+        counts['NSE-EQ']++;
       } catch (e) {
         errors++;
       }
@@ -1572,7 +1637,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           name: idx.tradingsymbol,
           exchange: 'NSE',
           segment: 'EQUITY',
-          displaySegment: 'NSE',
+          displaySegment: 'NSE-EQ',
           instrumentType: 'INDEX',
           category: 'INDICES',
           tradingSymbol: idx.tradingsymbol,
@@ -1589,7 +1654,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           await Instrument.create(instrumentData);
           added++;
         }
-        counts.indices++;
+        counts['NSE-EQ']++;
       } catch (e) {
         errors++;
       }
@@ -1622,7 +1687,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
             name: `${fut.name} FUT`,
             exchange: 'NFO',
             segment: 'FNO',
-            displaySegment: 'NSE F&O',
+            displaySegment: 'NSEFUT',
             instrumentType: 'FUTURES',
             category: fut.name === 'NIFTY' ? 'NIFTY' : fut.name === 'BANKNIFTY' ? 'BANKNIFTY' : 'FINNIFTY',
             tradingSymbol: fut.tradingsymbol,
@@ -1641,7 +1706,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
             await Instrument.create(instrumentData);
             added++;
           }
-          counts.nsefo++;
+          counts['NSEFUT']++;
         } catch (e) {
           errors++;
         }
@@ -1677,7 +1742,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           name: contract.name || baseSymbol,
           exchange: 'MCX',
           segment: 'MCX',
-          displaySegment: 'MCX',
+          displaySegment: 'MCXFUT',
           instrumentType: 'FUTURES',
           category: 'MCX',
           tradingSymbol: contract.tradingsymbol,
@@ -1696,7 +1761,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
           await Instrument.create(instrumentData);
           added++;
         }
-        counts.mcx++;
+        counts['MCXFUT']++;
       } catch (e) {
         errors++;
       }
@@ -1728,7 +1793,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
             name: `${fut.name} FUT`,
             exchange: 'BFO',
             segment: 'FNO',
-            displaySegment: 'BSE F&O',
+            displaySegment: 'BSE-FUT',
             instrumentType: 'FUTURES',
             category: 'BSE',
             tradingSymbol: fut.tradingsymbol,
@@ -1747,63 +1812,14 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
             await Instrument.create(instrumentData);
             added++;
           }
-          counts.bsefo++;
+          counts['BSE-FUT']++;
         } catch (e) {
           errors++;
         }
       }
     }
     
-    // ============ 6. CURRENCY (CDS) ============
-    const cdsFutures = allInstruments.filter(i => 
-      i.exchange === 'CDS' && i.instrument_type === 'FUT'
-    );
-    
-    // Get major currency pairs
-    const currencyPairs = ['USDINR', 'EURINR', 'GBPINR', 'JPYINR'];
-    const cdsBySymbol = {};
-    for (const fut of cdsFutures) {
-      const baseSymbol = fut.name;
-      if (currencyPairs.includes(baseSymbol)) {
-        if (!cdsBySymbol[baseSymbol] || new Date(fut.expiry) < new Date(cdsBySymbol[baseSymbol].expiry)) {
-          cdsBySymbol[baseSymbol] = fut;
-        }
-      }
-    }
-    
-    for (const [baseSymbol, contract] of Object.entries(cdsBySymbol)) {
-      try {
-        const existing = await Instrument.findOne({ symbol: baseSymbol, exchange: 'CDS' });
-        const instrumentData = {
-          token: contract.instrument_token,
-          symbol: baseSymbol,
-          name: baseSymbol,
-          exchange: 'CDS',
-          segment: 'CURRENCY',
-          displaySegment: 'Currency',
-          instrumentType: 'FUTURES',
-          category: 'CURRENCY',
-          tradingSymbol: contract.tradingsymbol,
-          lotSize: parseInt(contract.lot_size) || 1,
-          tickSize: parseFloat(contract.tick_size) || 0.0025,
-          expiry: new Date(contract.expiry),
-          isEnabled: true,
-          isFeatured: baseSymbol === 'USDINR',
-          sortOrder: currencyPairs.indexOf(baseSymbol)
-        };
-        
-        if (existing) {
-          await Instrument.findByIdAndUpdate(existing._id, instrumentData);
-          updated++;
-        } else {
-          await Instrument.create(instrumentData);
-          added++;
-        }
-        counts.currency++;
-      } catch (e) {
-        errors++;
-      }
-    }
+    // Currency (CDS) sync removed - no longer part of segment structure
     
     // Subscribe to all tokens
     const allDbInstruments = await Instrument.find({ isEnabled: true }).select('token').lean();
@@ -1817,14 +1833,7 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
     
     res.json({
       message: `Synced ALL instruments from Zerodha`,
-      counts: {
-        'NSE (Stocks)': counts.nse,
-        'NSE (Indices)': counts.indices,
-        'NSE F&O': counts.nsefo,
-        'MCX': counts.mcx,
-        'BSE F&O': counts.bsefo,
-        'Currency': counts.currency
-      },
+      counts,
       added,
       updated,
       errors,
