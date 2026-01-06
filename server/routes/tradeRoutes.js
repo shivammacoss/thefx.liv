@@ -439,6 +439,96 @@ router.post('/admin/trade/:id/close', protectAdmin, async (req, res) => {
   }
 });
 
+// Delete a trade (Admin/Super Admin)
+router.delete('/admin/trade/:id', protectAdmin, async (req, res) => {
+  try {
+    let query = { _id: req.params.id };
+    if (req.admin.role !== 'SUPER_ADMIN') {
+      query.adminCode = req.admin.adminCode;
+    }
+    
+    const trade = await Trade.findOne(query);
+    if (!trade) return res.status(404).json({ message: 'Trade not found' });
+    
+    await Trade.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Trade deleted successfully' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Edit/Update a trade (Admin/Super Admin)
+router.put('/admin/trade/:id', protectAdmin, async (req, res) => {
+  try {
+    let query = { _id: req.params.id };
+    if (req.admin.role !== 'SUPER_ADMIN') {
+      query.adminCode = req.admin.adminCode;
+    }
+    
+    const trade = await Trade.findOne(query);
+    if (!trade) return res.status(404).json({ message: 'Trade not found' });
+    
+    const { quantity, entryPrice, exitPrice } = req.body;
+    
+    // Update fields
+    if (quantity !== undefined) trade.quantity = quantity;
+    if (entryPrice !== undefined) trade.entryPrice = entryPrice;
+    
+    // Recalculate PNL
+    if (trade.status === 'OPEN') {
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const currentPrice = trade.currentPrice || trade.entryPrice;
+      trade.unrealizedPnL = (currentPrice - trade.entryPrice) * multiplier * trade.quantity * (trade.lotSize || 1);
+    } else if (trade.status === 'CLOSED') {
+      if (exitPrice !== undefined) trade.exitPrice = exitPrice;
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const grossPnL = (trade.exitPrice - trade.entryPrice) * multiplier * trade.quantity * (trade.lotSize || 1);
+      trade.realizedPnL = grossPnL;
+      trade.pnl = grossPnL;
+      trade.netPnL = grossPnL - (trade.charges?.total || 0);
+      trade.adminPnL = trade.bookType === 'B_BOOK' ? -trade.netPnL : 0;
+    }
+    
+    await trade.save();
+    res.json(trade);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Reopen a closed trade (Admin/Super Admin)
+router.post('/admin/trade/:id/reopen', protectAdmin, async (req, res) => {
+  try {
+    let query = { _id: req.params.id };
+    if (req.admin.role !== 'SUPER_ADMIN') {
+      query.adminCode = req.admin.adminCode;
+    }
+    
+    const trade = await Trade.findOne(query);
+    if (!trade) return res.status(404).json({ message: 'Trade not found' });
+    if (trade.status !== 'CLOSED') return res.status(400).json({ message: 'Trade is not closed' });
+    
+    // Reset to open state
+    trade.status = 'OPEN';
+    trade.exitPrice = null;
+    trade.closedAt = null;
+    trade.closeReason = null;
+    trade.realizedPnL = 0;
+    trade.pnl = 0;
+    trade.netPnL = 0;
+    trade.adminPnL = 0;
+    
+    // Recalculate unrealized PNL based on entry price (current price will be updated by market data)
+    trade.unrealizedPnL = 0;
+    trade.currentPrice = trade.entryPrice;
+    
+    await trade.save();
+    res.json(trade);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
 // Run RMS check manually (Admin)
 router.post('/admin/rms-check', protectAdmin, async (req, res) => {
   try {

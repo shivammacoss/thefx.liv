@@ -1,10 +1,47 @@
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import BankAccount from '../models/BankAccount.js';
 import FundRequest from '../models/FundRequest.js';
 import WalletLedger from '../models/WalletLedger.js';
 import jwt from 'jsonwebtoken';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configure multer for payment proof uploads
+const proofUploadDir = path.join(__dirname, '..', 'uploads', 'proofs');
+if (!fs.existsSync(proofUploadDir)) {
+  fs.mkdirSync(proofUploadDir, { recursive: true });
+}
+
+const proofStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, proofUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'proof-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const uploadProof = multer({
+  storage: proofStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    }
+    cb(new Error('Only image files are allowed'));
+  }
+});
 
 const router = express.Router();
 
@@ -40,12 +77,12 @@ router.get('/admin-bank-accounts', protectUser, async (req, res) => {
   }
 });
 
-// Create fund request (deposit)
-router.post('/fund-request/deposit', protectUser, async (req, res) => {
+// Create fund request (deposit) with image upload
+router.post('/fund-request/deposit', protectUser, uploadProof.single('proofImage'), async (req, res) => {
   try {
-    const { amount, paymentMethod, bankAccountId, referenceId, proofUrl, remarks } = req.body;
+    const { amount, paymentMethod, bankAccountId, referenceId, remarks } = req.body;
     
-    if (!amount || amount <= 0) {
+    if (!amount || parseFloat(amount) <= 0) {
       return res.status(400).json({ message: 'Invalid amount' });
     }
     
@@ -60,16 +97,19 @@ router.post('/fund-request/deposit', protectUser, async (req, res) => {
       }
     }
     
+    // Get proof image URL if uploaded
+    const proofUrl = req.file ? `/uploads/proofs/${req.file.filename}` : '';
+    
     const request = await FundRequest.create({
       user: req.user._id,
       userId: req.user.userId,
       adminCode: req.user.adminCode,
       type: 'DEPOSIT',
-      amount,
+      amount: parseFloat(amount),
       paymentMethod,
       bankAccount: bankAccountId || null,
       referenceId: referenceId || '',
-      proofUrl: proofUrl || '',
+      proofUrl: proofUrl,
       userRemarks: remarks || ''
     });
     

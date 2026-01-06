@@ -346,8 +346,27 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
   const [selectedBank, setSelectedBank] = useState('');
   const [referenceId, setReferenceId] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [proofImage, setProofImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Get selected bank account details
+  const selectedBankDetails = bankAccounts.find(acc => acc._id === selectedBank);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image size should be less than 5MB');
+        return;
+      }
+      setProofImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -360,14 +379,19 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
     setError('');
 
     try {
-      await axios.post('/api/user/funds/fund-request/deposit', {
-        amount: parseFloat(amount),
-        paymentMethod,
-        bankAccountId: selectedBank || null,
-        referenceId,
-        remarks
-      }, {
-        headers: { Authorization: `Bearer ${user.token}` }
+      const formData = new FormData();
+      formData.append('amount', parseFloat(amount));
+      formData.append('paymentMethod', paymentMethod);
+      if (selectedBank) formData.append('bankAccountId', selectedBank);
+      if (referenceId) formData.append('referenceId', referenceId);
+      if (remarks) formData.append('remarks', remarks);
+      if (proofImage) formData.append('proofImage', proofImage);
+
+      await axios.post('/api/user/funds/fund-request/deposit', formData, {
+        headers: { 
+          Authorization: `Bearer ${user.token}`,
+          'Content-Type': 'multipart/form-data'
+        }
       });
       onSuccess();
     } catch (err) {
@@ -378,8 +402,8 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-dark-800 rounded-xl w-full max-w-md p-6">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-dark-800 rounded-xl w-full max-w-md p-6 my-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Deposit Funds</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
@@ -436,6 +460,73 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
             </div>
           )}
 
+          {/* Show selected bank details */}
+          {selectedBankDetails && (
+            <div className="bg-dark-700 rounded-lg p-3 border border-dark-600">
+              <div className="text-xs text-gray-400 mb-2 font-medium">Bank Details - Transfer to:</div>
+              {selectedBankDetails.type === 'UPI' ? (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">UPI ID</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-green-400">{selectedBankDetails.upiId}</span>
+                      <button 
+                        type="button"
+                        onClick={() => {navigator.clipboard.writeText(selectedBankDetails.upiId); alert('Copied!')}}
+                        className="text-xs bg-dark-600 hover:bg-dark-500 px-2 py-1 rounded"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Bank Name</span>
+                    <span className="font-medium text-white">{selectedBankDetails.bankName}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400">Account Number</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-green-400">{selectedBankDetails.accountNumber}</span>
+                      <button 
+                        type="button"
+                        onClick={() => {navigator.clipboard.writeText(selectedBankDetails.accountNumber); alert('Copied!')}}
+                        className="text-xs bg-dark-600 hover:bg-dark-500 px-2 py-1 rounded"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400">IFSC Code</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-yellow-400">{selectedBankDetails.ifscCode}</span>
+                      <button 
+                        type="button"
+                        onClick={() => {navigator.clipboard.writeText(selectedBankDetails.ifscCode); alert('Copied!')}}
+                        className="text-xs bg-dark-600 hover:bg-dark-500 px-2 py-1 rounded"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Account Holder</span>
+                    <span className="font-medium text-white">{selectedBankDetails.accountHolderName}</span>
+                  </div>
+                  {selectedBankDetails.branch && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Branch</span>
+                      <span className="text-gray-300">{selectedBankDetails.branch}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm text-gray-400 mb-1">Reference/UTR Number</label>
             <input
@@ -445,6 +536,29 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
               placeholder="Enter transaction reference"
               className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
             />
+          </div>
+
+          {/* Payment Proof Image Upload */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Payment Proof (Screenshot)</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500 text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:bg-green-600 file:text-white hover:file:bg-green-700"
+            />
+            {imagePreview && (
+              <div className="mt-2 relative">
+                <img src={imagePreview} alt="Payment proof" className="w-full max-h-40 object-contain rounded-lg border border-dark-600" />
+                <button
+                  type="button"
+                  onClick={() => { setProofImage(null); setImagePreview(''); }}
+                  className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 rounded-full p-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
           </div>
 
           <div>

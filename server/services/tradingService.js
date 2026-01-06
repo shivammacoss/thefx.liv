@@ -467,6 +467,10 @@ class TradingService {
       newCryptoBalance = user.cryptoWallet?.balance || 0; // Unchanged
     }
     
+    // Prevent negative balances
+    newTradingBalance = Math.max(0, newTradingBalance);
+    newCryptoBalance = Math.max(0, newCryptoBalance);
+    
     // Use updateOne to avoid validation issues with segmentPermissions
     const updateFields = { 
       'wallet.tradingBalance': newTradingBalance,
@@ -635,6 +639,11 @@ class TradingService {
       newCryptoBalance = user.cryptoWallet?.balance || 0; // Unchanged
       newCryptoRealizedPnL = user.cryptoWallet?.realizedPnL || 0; // Unchanged
     }
+    
+    // Prevent negative balances
+    newTradingBalance = Math.max(0, newTradingBalance);
+    newCryptoBalance = Math.max(0, newCryptoBalance);
+    
     const newRealizedPnL = trade.isCrypto 
       ? (user.wallet.realizedPnL || 0) // Don't add crypto P&L to regular wallet
       : (user.wallet.realizedPnL || 0) + netPnL;

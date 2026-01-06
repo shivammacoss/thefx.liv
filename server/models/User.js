@@ -438,6 +438,19 @@ userSchema.pre('save', async function(next) {
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(this.password, 12);
   }
+  
+  // Prevent wallet balances from going negative
+  if (this.wallet) {
+    if (this.wallet.cashBalance < 0) this.wallet.cashBalance = 0;
+    if (this.wallet.tradingBalance < 0) this.wallet.tradingBalance = 0;
+    if (this.wallet.balance < 0) this.wallet.balance = 0;
+    if (this.wallet.usedMargin < 0) this.wallet.usedMargin = 0;
+    if (this.wallet.blocked < 0) this.wallet.blocked = 0;
+  }
+  if (this.cryptoWallet && this.cryptoWallet.balance < 0) {
+    this.cryptoWallet.balance = 0;
+  }
+  
   next();
 });
 
