@@ -61,10 +61,8 @@ router.get('/status', (req, res) => {
     zerodhaSession.expiresAt && 
     new Date(zerodhaSession.expiresAt) > new Date();
   
-  // Connected only if both session is valid AND WebSocket ticker is connected
-  const isConnected = isSessionValid && tickerStatus.connected;
-  
-  console.log('Zerodha status check - session valid:', isSessionValid, 'ticker connected:', tickerStatus.connected, 'userId:', zerodhaSession.userId);
+  // Connected if session is valid (WebSocket ticker may not connect outside market hours)
+  const isConnected = isSessionValid;
   
   res.json({
     connected: isConnected,

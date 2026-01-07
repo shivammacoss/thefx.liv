@@ -3059,13 +3059,14 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
-  const [activeSegment, setActiveSegment] = useState('NSEFUT');
+  const [activeSegment, setActiveSegment] = useState(() => localStorage.getItem('ntrader_active_segment') || 'FAVORITES');
   const [cryptoData, setCryptoData] = useState({});
   const searchInputRef = useRef(null);
   const [addingToSegment, setAddingToSegment] = useState(null);
   
   // Watchlist stored by segment (synced with server)
   const [watchlistBySegment, setWatchlistBySegment] = useState({
+    'FAVORITES': [],
     'NSEFUT': [],
     'NSEOPT': [],
     'MCXFUT': [],
@@ -3077,6 +3078,7 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   
   // Segment tabs
   const allSegmentTabs = [
+    { id: 'FAVORITES', label: '★ Favorites' },
     { id: 'NSEFUT', label: 'NSEFUT' },
     { id: 'NSEOPT', label: 'NSEOPT' },
     { id: 'MCXFUT', label: 'MCXFUT' },
@@ -3108,6 +3110,11 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     setActiveSegment(segment);
     setSearchTerm('');
     setShowSearchResults(false);
+    try {
+      localStorage.setItem('ntrader_active_segment', segment);
+    } catch (e) {
+      // ignore storage errors
+    }
     if (onSegmentChange) onSegmentChange(segment);
   };
 

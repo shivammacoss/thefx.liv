@@ -33,7 +33,7 @@ const tradeSchema = new mongoose.Schema({
   // Instrument details
   segment: {
     type: String,
-    enum: ['EQUITY', 'FNO', 'MCX', 'COMMODITY', 'CRYPTO', 'CURRENCY'],
+    enum: ['EQUITY', 'FNO', 'MCX', 'COMMODITY', 'CRYPTO', 'CURRENCY', 'NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CDS'],
     required: true
   },
   instrumentType: {
