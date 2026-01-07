@@ -53,9 +53,24 @@ let zerodhaSession = loadSession();
 
 // Get Zerodha connection status
 router.get('/status', (req, res) => {
-  console.log('Zerodha status check - accessToken exists:', !!zerodhaSession.accessToken, 'userId:', zerodhaSession.userId);
+  // Get actual WebSocket ticker status
+  const tickerStatus = getTickerStatus();
+  
+  // Check if session is expired
+  const isSessionValid = zerodhaSession.accessToken && 
+    zerodhaSession.expiresAt && 
+    new Date(zerodhaSession.expiresAt) > new Date();
+  
+  // Connected only if both session is valid AND WebSocket ticker is connected
+  const isConnected = isSessionValid && tickerStatus.connected;
+  
+  console.log('Zerodha status check - session valid:', isSessionValid, 'ticker connected:', tickerStatus.connected, 'userId:', zerodhaSession.userId);
+  
   res.json({
-    connected: !!zerodhaSession.accessToken,
+    connected: isConnected,
+    sessionValid: isSessionValid,
+    tickerConnected: tickerStatus.connected,
+    subscribedTokens: tickerStatus.subscribedTokens,
     userId: zerodhaSession.userId,
     expiresAt: zerodhaSession.expiresAt
   });

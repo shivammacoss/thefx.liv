@@ -325,6 +325,55 @@ router.get('/wallet', protectUser, async (req, res) => {
   }
 });
 
+// Get user settings (margin, exposure, RMS)
+router.get('/settings', protectUser, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('marginSettings rmsSettings settings segmentPermissions')
+      .lean(); // Use lean() to get plain JS object instead of Mongoose document
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Default segment settings for all Market Watch segments
+    const defaultSegment = { 
+      enabled: false, 
+      maxExchangeLots: 100, 
+      commissionType: 'PER_LOT', 
+      commissionLot: 0, 
+      maxLots: 50, 
+      minLots: 1, 
+      orderLots: 10, 
+      exposureIntraday: 1, 
+      exposureCarryForward: 1,
+      optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 },
+      optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }
+    };
+    
+    // All segments matching Market Watch
+    const allSegments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+    
+    // Build segment permissions with defaults for missing segments
+    const userSegments = user.segmentPermissions || {};
+    const segmentPermissions = {};
+    
+    allSegments.forEach(segment => {
+      segmentPermissions[segment] = userSegments[segment] || { ...defaultSegment };
+    });
+    
+    res.json({
+      marginSettings: user.marginSettings || {},
+      rmsSettings: user.rmsSettings || {},
+      settings: user.settings || {},
+      segmentPermissions
+    });
+  } catch (error) {
+    console.error('Get settings error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Change password
 router.post('/change-password', protectUser, async (req, res) => {
   try {

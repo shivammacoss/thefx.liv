@@ -127,9 +127,15 @@ router.post('/margin-preview', protect, async (req, res) => {
     
     // Debug logging
     console.log('Margin Preview Debug:', {
-      symbol, category, segment,
+      symbol, category, segment, instrumentType,
+      segmentSettingsFound: !!segmentSettings,
+      exposureIntraday: segmentSettings?.exposureIntraday,
+      exposureCarryForward: segmentSettings?.exposureCarryForward,
       hasScriptSettings: !!scriptSettings,
       fixedMargin: scriptSettings?.fixedMargin,
+      userSegmentKeys: req.user.segmentPermissions instanceof Map 
+        ? Array.from(req.user.segmentPermissions.keys()) 
+        : Object.keys(req.user.segmentPermissions || {}),
       userScriptSettingsKeys: req.user.scriptSettings instanceof Map 
         ? Array.from(req.user.scriptSettings.keys()) 
         : Object.keys(req.user.scriptSettings || {})

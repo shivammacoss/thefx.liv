@@ -43,17 +43,32 @@ class TradeService {
   
   // Get user's segment settings for a trade
   static getUserSegmentSettings(user, segment, instrumentType) {
-    // Map trade segment to user segment permission key
-    const segmentMap = {
-      'EQUITY': 'EQ',
-      'FNO': instrumentType === 'OPTIONS' ? 'NSEINDEX' : 'NSEINDEX',
-      'MCX': 'MCX',
-      'COMMODITY': 'MCX',
-      'CURRENCY': 'NSEINDEX',
-      'CRYPTO': 'EQ'
-    };
+    // Map trade segment/displaySegment to Market Watch segment permission key
+    // Market Watch segments: NSEFUT, NSEOPT, MCXFUT, MCXOPT, NSE-EQ, BSE-FUT, BSE-OPT
+    const segmentUpper = segment?.toUpperCase() || '';
+    const isOptions = instrumentType === 'OPTIONS' || instrumentType === 'OPT';
     
-    const segmentKey = segmentMap[segment?.toUpperCase()] || segment || 'EQ';
+    let segmentKey = segment; // Default to passed segment
+    
+    // Direct matches for Market Watch segments
+    const marketWatchSegments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+    if (marketWatchSegments.includes(segmentUpper)) {
+      segmentKey = segmentUpper;
+    }
+    // Map old segment names to new Market Watch segments
+    else if (segmentUpper === 'EQUITY' || segmentUpper === 'EQ' || segmentUpper === 'NSE' || segmentUpper === 'NSEEQ') {
+      segmentKey = 'NSE-EQ';
+    } else if (segmentUpper === 'FNO' || segmentUpper === 'NFO' || segmentUpper === 'NSEINDEX' || segmentUpper === 'NSESTOCK') {
+      segmentKey = isOptions ? 'NSEOPT' : 'NSEFUT';
+    } else if (segmentUpper === 'MCX' || segmentUpper === 'COMMODITY') {
+      segmentKey = isOptions ? 'MCXOPT' : 'MCXFUT';
+    } else if (segmentUpper === 'BSE' || segmentUpper === 'BFO') {
+      segmentKey = isOptions ? 'BSE-OPT' : 'BSE-FUT';
+    } else if (segmentUpper === 'CURRENCY' || segmentUpper === 'CDS') {
+      segmentKey = 'NSEFUT'; // Currency derivatives mapped to NSE futures
+    } else if (segmentUpper === 'CRYPTO') {
+      segmentKey = 'NSE-EQ'; // Crypto uses equity settings
+    }
     
     // Handle Mongoose Map - convert to plain object first if needed
     let segmentPerms = user.segmentPermissions;

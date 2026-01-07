@@ -6805,13 +6805,11 @@ const TradingPanel = () => {
 
   // Helper function to get correct lot size for display
   const getDisplayLotSize = (instrument) => {
-    if (instrument.lotSize && instrument.lotSize > 1) return instrument.lotSize;
-    
     const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
     const exch = (instrument.exchange || '').toUpperCase();
     const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
     
-    // MCX Commodities
+    // MCX Commodities - always use known values
     if (exch === 'MCX' || seg.includes('MCX')) {
       if (sym.includes('GOLD')) return 100;
       if (sym.includes('SILVER')) return 30;
@@ -6824,7 +6822,7 @@ const TradingPanel = () => {
       if (sym.includes('NICKEL')) return 1500;
     }
     
-    // NSE F&O
+    // NSE F&O - always use known values for index derivatives
     if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
       if (sym.includes('BANKNIFTY')) return 15;
       if (sym.includes('FINNIFTY')) return 25;
@@ -6836,9 +6834,12 @@ const TradingPanel = () => {
     
     // BSE F&O
     if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (sym.includes('SENSEX')) return 10;
+      if (sym.includes('BANKEX')) return 15;
       return 10;
     }
     
+    // For other instruments, use database value
     return instrument.lotSize || 1;
   };
 
@@ -7018,17 +7019,14 @@ const TradeModal = ({
   const [priceLoading, setPriceLoading] = useState(true);
   const [lots, setLots] = useState(1);
   
-  // Get lot size - use database value or calculate from symbol/category
+  // Get lot size - prioritize known values for index derivatives
   const getLotSizeForInstrument = () => {
-    // If database has valid lot size > 1, use it
-    if (instrument.lotSize && instrument.lotSize > 1) return instrument.lotSize;
-    
     const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
     const cat = (instrument.category || '').toUpperCase();
     const exch = (instrument.exchange || '').toUpperCase();
     const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
     
-    // MCX Commodities
+    // MCX Commodities - always use known values
     if (exch === 'MCX' || seg.includes('MCX')) {
       if (sym.includes('GOLD')) return 100;
       if (sym.includes('SILVER')) return 30;
@@ -7041,7 +7039,7 @@ const TradeModal = ({
       if (sym.includes('NICKEL')) return 1500;
     }
     
-    // NSE F&O
+    // NSE F&O - always use known values for index derivatives
     if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
       if (sym.includes('BANKNIFTY') || cat.includes('BANKNIFTY')) return 15;
       if (sym.includes('FINNIFTY') || cat.includes('FINNIFTY')) return 25;
@@ -7051,11 +7049,14 @@ const TradeModal = ({
       if (sym.includes('BANKEX') || cat.includes('BANKEX')) return 15;
     }
     
-    // BSE
+    // BSE F&O
     if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (sym.includes('SENSEX')) return 10;
+      if (sym.includes('BANKEX')) return 15;
       return 10;
     }
     
+    // For other instruments, use database value
     return instrument.lotSize || 1;
   };
   

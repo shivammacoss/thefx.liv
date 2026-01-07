@@ -1171,22 +1171,27 @@ router.get('/segments', async (req, res) => {
 // Get all segments and scripts for user settings page
 router.get('/settings-data', async (req, res) => {
   try {
-    // Normalize segment name to standard format
+    // All Market Watch segments - these are the standard segment names
+    const MARKET_WATCH_SEGMENTS = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+    
+    // Map displaySegment to standard Market Watch segment name
     const normalizeSegment = (seg) => {
-      if (!seg) return 'OTHER';
-      // Map various formats to standard segment names
-      const normalized = seg.toUpperCase()
-        .replace(/[•·]/g, '')  // Remove bullet characters
-        .replace(/\s+/g, ' ')   // Normalize spaces
-        .trim();
+      if (!seg) return null;
+      const upper = seg.toUpperCase().trim();
       
-      if (normalized.includes('NSE') && (normalized.includes('FO') || normalized.includes('F&O'))) return 'NSE_FO';
-      if (normalized.includes('BSE') && (normalized.includes('FO') || normalized.includes('F&O'))) return 'BSE_FO';
-      if (normalized.includes('NSE') || normalized.includes('SPOT') || normalized.includes('EQUITY')) return 'NSE';
-      if (normalized.includes('MCX')) return 'MCX';
-      if (normalized.includes('CURRENCY') || normalized.includes('CDS')) return 'CURRENCY';
-      if (normalized.includes('CRYPTO')) return 'CRYPTO';
-      return normalized.replace(/\s+/g, '_');
+      // Direct matches first
+      if (MARKET_WATCH_SEGMENTS.includes(upper)) return upper;
+      
+      // Map variations to standard names
+      if (upper.includes('NSEFUT') || (upper.includes('NSE') && upper.includes('FUT') && !upper.includes('OPT'))) return 'NSEFUT';
+      if (upper.includes('NSEOPT') || (upper.includes('NSE') && upper.includes('OPT'))) return 'NSEOPT';
+      if (upper.includes('MCXFUT') || (upper.includes('MCX') && upper.includes('FUT') && !upper.includes('OPT'))) return 'MCXFUT';
+      if (upper.includes('MCXOPT') || (upper.includes('MCX') && upper.includes('OPT'))) return 'MCXOPT';
+      if (upper.includes('NSE-EQ') || upper.includes('NSEEQ') || upper === 'NSE' || upper.includes('EQUITY')) return 'NSE-EQ';
+      if (upper.includes('BSE-FUT') || upper.includes('BSEFUT') || (upper.includes('BSE') && upper.includes('FUT'))) return 'BSE-FUT';
+      if (upper.includes('BSE-OPT') || upper.includes('BSEOPT') || (upper.includes('BSE') && upper.includes('OPT'))) return 'BSE-OPT';
+      
+      return null; // Unknown segment
     };
     
     // Get all unique segments from instruments
@@ -1200,15 +1205,19 @@ router.get('/settings-data', async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
     
-    // Merge segments with same normalized name
+    // Initialize all Market Watch segments first
     const segmentMap = {};
+    for (const seg of MARKET_WATCH_SEGMENTS) {
+      segmentMap[seg] = { id: seg, name: seg, count: 0, exchanges: [] };
+    }
+    
+    // Merge instrument counts into segments
     for (const s of segmentAgg) {
       const normalizedId = normalizeSegment(s._id);
-      if (!segmentMap[normalizedId]) {
-        segmentMap[normalizedId] = { id: normalizedId, name: s._id || 'Other', count: 0, exchanges: [] };
+      if (normalizedId && segmentMap[normalizedId]) {
+        segmentMap[normalizedId].count += s.count;
+        segmentMap[normalizedId].exchanges = [...new Set([...segmentMap[normalizedId].exchanges, ...s.exchanges])];
       }
-      segmentMap[normalizedId].count += s.count;
-      segmentMap[normalizedId].exchanges = [...new Set([...segmentMap[normalizedId].exchanges, ...s.exchanges])];
     }
     
     const segments = Object.values(segmentMap);
@@ -1231,13 +1240,16 @@ router.get('/settings-data', async (req, res) => {
       { $sort: { '_id.segment': 1, '_id.category': 1, '_id.name': 1 } }
     ]);
     
-    // Group scripts by segment using normalized segment names
+    // Initialize scripts for all Market Watch segments
     const scriptsBySegment = {};
+    for (const seg of MARKET_WATCH_SEGMENTS) {
+      scriptsBySegment[seg] = [];
+    }
+    
+    // Group scripts by segment using normalized segment names
     for (const script of scriptsAgg) {
       const segmentKey = normalizeSegment(script._id.segment);
-      if (!scriptsBySegment[segmentKey]) {
-        scriptsBySegment[segmentKey] = [];
-      }
+      if (!segmentKey || !scriptsBySegment[segmentKey]) continue;
       
       // Extract base symbol name
       let baseSymbol = script._id.name || script.symbol;
@@ -1272,15 +1284,20 @@ router.get('/settings-data', async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
     
-    // Add F&O symbols to their respective segments
+    // Add F&O symbols to their respective segments using Market Watch segment names
     for (const sym of fnoSymbols) {
-      let segmentKey = 'NSE_FO';
-      if (sym.exchange === 'BFO') segmentKey = 'BSE_FO';
-      else if (sym.exchange === 'MCX') segmentKey = 'MCX';
-      
-      if (!scriptsBySegment[segmentKey]) {
-        scriptsBySegment[segmentKey] = [];
+      // Map exchange to Market Watch segment names
+      let segmentKey = null;
+      if (sym.exchange === 'NFO') {
+        // NFO can be either NSEFUT or NSEOPT - check instrument type if available
+        segmentKey = 'NSEFUT'; // Default to futures, options will be added via scriptsAgg
+      } else if (sym.exchange === 'BFO') {
+        segmentKey = 'BSE-FUT';
+      } else if (sym.exchange === 'MCX') {
+        segmentKey = 'MCXFUT';
       }
+      
+      if (!segmentKey || !scriptsBySegment[segmentKey]) continue;
       
       const existing = scriptsBySegment[segmentKey].find(s => s.baseSymbol === sym._id);
       if (!existing && sym._id) {
@@ -1321,7 +1338,8 @@ router.get('/watchlist', protectUser, async (req, res) => {
       'MCXOPT': [],
       'NSE-EQ': [],
       'BSE-FUT': [],
-      'BSE-OPT': []
+      'BSE-OPT': [],
+      'FAVORITES': []
     };
     
     for (const wl of watchlists) {
@@ -1433,7 +1451,7 @@ router.post('/watchlist/sync', protectUser, async (req, res) => {
     
     // Update each segment
     for (const [segment, instruments] of Object.entries(watchlistBySegment)) {
-      if (!['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].includes(segment)) continue;
+      if (!['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'FAVORITES'].includes(segment)) continue;
       
       await Watchlist.findOneAndUpdate(
         { userId, segment },

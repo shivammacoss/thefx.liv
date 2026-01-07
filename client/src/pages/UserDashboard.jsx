@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronRight, Settings, Bell, User, X,
   BarChart2, History, ListOrdered, UserCircle, Menu,
   ArrowDownCircle, ArrowUpCircle, CreditCard, Copy, Check, Building2,
-  Home, ArrowLeft, ClipboardList
+  Home, ArrowLeft, ClipboardList, Star
 } from 'lucide-react';
 import MarketWatch from '../components/MarketWatch';
 
@@ -148,7 +148,7 @@ const UserDashboard = () => {
   const [indicesData, setIndicesData] = useState({});
   const [marketData, setMarketData] = useState({}); // Shared market data for chart and instruments
   const [positionsRefreshKey, setPositionsRefreshKey] = useState(0); // Key to trigger positions refresh
-  const [activeSegment, setActiveSegment] = useState('NSEFUT'); // Track active segment for currency display
+  const [activeSegment, setActiveSegment] = useState(() => localStorage.getItem('ntrader_active_segment') || 'FAVORITES'); // Track active segment for currency display
   const [usdRate, setUsdRate] = useState(83.50); // USD to INR rate (default fallback)
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0); // Key to trigger watchlist refresh
   
@@ -292,9 +292,12 @@ const UserDashboard = () => {
               c.symbol.toLowerCase().includes(searchLower) || c.name.toLowerCase().includes(searchLower)
             ));
           } else {
-            // Regular trading search
-            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(headerSearchTerm)}&limit=10`, { headers });
-            setHeaderSearchResults((data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE'));
+            // Regular trading search - use user endpoint for full results, segment-aware
+            const { data } = await axios.get(
+              `/api/instruments/user?search=${encodeURIComponent(headerSearchTerm)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              { headers }
+            );
+            setHeaderSearchResults((data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE').slice(0, 20));
           }
         } catch (error) {
           setHeaderSearchResults([]);
@@ -754,12 +757,13 @@ const UserDashboard = () => {
 const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, user, marketData = {}, onSegmentChange, cryptoOnly = false, refreshKey = 0 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [activeSegment, setActiveSegment] = useState('NSEFUT');
+  const [activeSegment, setActiveSegment] = useState(() => localStorage.getItem('ntrader_active_segment') || 'FAVORITES');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [addingToSegment, setAddingToSegment] = useState(null); // Which instrument is being added
   
   // Watchlist stored by segment
   const [watchlistBySegment, setWatchlistBySegment] = useState({
+    'FAVORITES': [],
     'NSEFUT': [],
     'NSEOPT': [],
     'MCXFUT': [],
@@ -773,6 +777,11 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   // Notify parent when segment changes
   const handleSegmentChange = (segment) => {
     setActiveSegment(segment);
+    try {
+      localStorage.setItem('ntrader_active_segment', segment);
+    } catch (e) {
+      // ignore storage errors
+    }
     setSearchTerm('');
     setShowSearchResults(false);
     if (onSegmentChange) onSegmentChange(segment);
@@ -784,6 +793,52 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   const searchInputRef = useRef(null);
   const [segmentTabs, setSegmentTabs] = useState([])
   
+  // Favorites helpers
+  const isInFavorites = (instrument) => {
+    const identifier = instrument?.isCrypto ? instrument.pair : instrument?.token;
+    if (!identifier) return false;
+    return (watchlistBySegment['FAVORITES'] || []).some(i => (i.isCrypto ? i.pair : i.token) === identifier);
+  };
+  
+  const addToFavorites = async (instrument) => {
+    const segment = 'FAVORITES';
+    const currentList = watchlistBySegment[segment] || [];
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    if (currentList.some(i => (i.isCrypto ? i.pair : i.token) === identifier)) return;
+    
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [segment]: [...(prev[segment] || []), instrument]
+    }));
+    
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/add', { instrument, segment }, { headers });
+      } catch (error) {
+        console.error('Error saving favorite:', error);
+      }
+    }
+  };
+  
+  const removeFromFavorites = async (instrument) => {
+    const segment = 'FAVORITES';
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
+    setWatchlistBySegment(prev => ({
+      ...prev,
+      [segment]: (prev[segment] || []).filter(i => (i.isCrypto ? i.pair : i.token) !== identifier)
+    }));
+    
+    if (user?.token) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post('/api/instruments/watchlist/remove', { token: instrument.token, pair: instrument.pair, segment }, { headers });
+      } catch (error) {
+        console.error('Error removing favorite:', error);
+      }
+    }
+  };
+  
   // Load watchlist from server on mount and when refreshKey changes
   useEffect(() => {
     const loadWatchlist = async () => {
@@ -791,7 +846,17 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
         const { data } = await axios.get('/api/instruments/watchlist', { headers });
-        setWatchlistBySegment(data);
+        const defaults = {
+          'FAVORITES': [],
+          'NSEFUT': [],
+          'NSEOPT': [],
+          'MCXFUT': [],
+          'MCXOPT': [],
+          'NSE-EQ': [],
+          'BSE-FUT': [],
+          'BSE-OPT': []
+        };
+        setWatchlistBySegment({ ...defaults, ...(data || {}) });
         setWatchlistLoaded(true);
       } catch (error) {
         console.error('Error loading watchlist:', error);
@@ -803,10 +868,20 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
     };
     loadWatchlist();
   }, [user?.token, refreshKey]);
+
+  // Persist watchlist locally as fallback (including favorites)
+  useEffect(() => {
+    try {
+      localStorage.setItem('ntrader_watchlist_v2', JSON.stringify(watchlistBySegment));
+    } catch (e) {
+      // ignore storage errors
+    }
+  }, [watchlistBySegment]);
   
   // Set default segment tabs - filter based on cryptoOnly mode
   useEffect(() => {
     const allTabs = [
+      { id: 'FAVORITES', label: '★ Favorites' },
       { id: 'NSEFUT', label: 'NSEFUT' },
       { id: 'NSEOPT', label: 'NSEOPT' },
       { id: 'MCXFUT', label: 'MCXFUT' },
@@ -873,11 +948,14 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto
-            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=100`, { headers });
+            // Regular trading search - exclude crypto, segment-aware, use higher limit
+            const { data } = await axios.get(
+              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              { headers }
+            );
             // Filter out crypto results from regular search
             const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');
-            setSearchResults(nonCryptoResults);
+            setSearchResults(nonCryptoResults.slice(0, 500)); // Limit display to 500 for performance
           }
         } catch (error) {
           console.error('Search error:', error);
@@ -1100,17 +1178,26 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                     <div className="text-xs text-gray-500 truncate">{inst.category || inst.name} • {inst.exchange}</div>
                   </div>
                   
-                  {/* Add to Watchlist Button - Auto adds to correct segment */}
-                  {isInWatchlist(inst) ? (
-                    <span className="text-xs text-green-400 px-2 py-1">✓ Added</span>
-                  ) : (
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => addToWatchlist(inst)}
-                      className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+                      onClick={() => isInFavorites(inst) ? removeFromFavorites(inst) : addToFavorites(inst)}
+                      className={`w-7 h-7 rounded-full flex items-center justify-center ${isInFavorites(inst) ? 'bg-yellow-400 text-black' : 'bg-dark-600 text-gray-300 hover:bg-yellow-500 hover:text-black'}`}
+                      title={isInFavorites(inst) ? 'Remove from Favorites' : 'Add to Favorites'}
                     >
-                      <Plus size={12} /> Add
+                      <Star size={14} />
                     </button>
-                  )}
+                    {/* Add to Watchlist Button - Auto adds to correct segment */}
+                    {isInWatchlist(inst) ? (
+                      <span className="text-xs text-green-400 px-2 py-1">✓ Added</span>
+                    ) : (
+                      <button
+                        onClick={() => addToWatchlist(inst)}
+                        className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+                      >
+                        <Plus size={12} /> Add
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -1136,12 +1223,13 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                   <div
                     key={inst.token}
                     onClick={() => onSelectInstrument({...inst, ltp: priceData.ltp || inst.ltp || 0})}
-                    className={`flex items-center justify-between px-3 py-2.5 cursor-pointer border-b border-dark-700 hover:bg-dark-750 ${
+                    className={`flex flex-col px-3 py-2.5 cursor-pointer border-b border-dark-700 hover:bg-dark-750 ${
                       selectedInstrument?.token === inst.token ? 'bg-green-600/20 border-l-2 border-l-green-500' : ''
                     }`}
                   >
-                    <div className="flex-1 min-w-0 mr-2">
-                      <div className={`font-bold text-sm uppercase ${
+                    {/* Top row: Symbol and Price */}
+                    <div className="flex items-center justify-between w-full">
+                      <div className={`font-bold text-sm uppercase truncate max-w-[120px] ${
                         inst.instrumentType === 'FUTURES' ? 'text-yellow-400' :
                         inst.optionType === 'CE' ? 'text-green-400' :
                         inst.optionType === 'PE' ? 'text-red-400' :
@@ -1149,39 +1237,49 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
                       }`}>
                         {inst.tradingSymbol || inst.symbol?.replace(/"/g, '') || inst.symbol}
                       </div>
-                      <div className="text-xs text-gray-500 truncate">{inst.category || inst.name}</div>
-                    </div>
-                    
-                    <div className="text-right flex-shrink-0 mr-2">
-                      <div className="text-sm font-medium text-gray-300">
+                      <div className="text-sm font-medium text-gray-300 ml-2">
                         {(priceData.ltp || inst.ltp || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
-                      <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
-                      </div>
                     </div>
                     
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }}
-                        className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center text-white text-xs font-bold"
-                      >
-                        S
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }}
-                        className="w-7 h-7 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white text-xs font-bold"
-                      >
-                        B
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst, activeSegment); }}
-                        className="w-7 h-7 rounded-full bg-dark-600 hover:bg-red-600 flex items-center justify-center text-gray-400 hover:text-white"
-                        title="Remove from watchlist"
-                      >
-                        <X size={12} />
-                      </button>
+                    {/* Bottom row: Category, Change %, and Buttons */}
+                    <div className="flex items-center justify-between w-full mt-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-gray-500 truncate max-w-[80px]">{inst.category || inst.name}</div>
+                        <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                        </div>
+                      </div>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); isInFavorites(inst) ? removeFromFavorites(inst) : addToFavorites(inst); }}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center ${isInFavorites(inst) ? 'bg-yellow-400 text-black' : 'bg-dark-600 text-gray-300 hover:bg-yellow-500 hover:text-black'}`}
+                          title={isInFavorites(inst) ? 'Remove from Favorites' : 'Add to Favorites'}
+                        >
+                          <Star size={12} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }}
+                          className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center text-white text-xs font-bold"
+                        >
+                          S
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }}
+                          className="w-7 h-7 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white text-xs font-bold"
+                        >
+                          B
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst, activeSegment); }}
+                          className="w-7 h-7 rounded-full bg-dark-600 hover:bg-red-600 flex items-center justify-center text-gray-400 hover:text-white"
+                          title="Remove from watchlist"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1792,28 +1890,43 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
       const isMCX = selectedInstrument.exchange === 'MCX' || selectedInstrument.segment === 'MCX' || selectedInstrument.displaySegment === 'MCX';
       const isFnO = selectedInstrument.instrumentType === 'FUTURES' || selectedInstrument.instrumentType === 'OPTIONS' || isMCX;
       
-      // Get lot size for MCX/F&O instruments
+      // Get lot size - prioritize known values for index derivatives
       const getLotSize = () => {
-        if (selectedInstrument.lotSize && selectedInstrument.lotSize > 1) return selectedInstrument.lotSize;
-        const symbol = selectedInstrument.symbol?.toUpperCase() || '';
+        const symbol = (selectedInstrument.symbol || selectedInstrument.tradingSymbol || '').toUpperCase();
         const category = selectedInstrument.category?.toUpperCase() || '';
-        if (isMCX) {
-          if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
-          if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
-          if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
-          if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
-          if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
-          if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
-          if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
-          if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
-          if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+        const seg = (selectedInstrument.displaySegment || selectedInstrument.segment || '').toUpperCase();
+        
+        // MCX lot sizes - always use known values
+        if (isMCX || seg.includes('MCX')) {
+          if (symbol.includes('GOLD')) return 100;
+          if (symbol.includes('SILVER')) return 30;
+          if (symbol.includes('CRUDEOIL')) return 100;
+          if (symbol.includes('NATURALGAS')) return 1250;
+          if (symbol.includes('COPPER')) return 2500;
+          if (symbol.includes('ZINC')) return 5000;
+          if (symbol.includes('ALUMINIUM')) return 5000;
+          if (symbol.includes('LEAD')) return 5000;
+          if (symbol.includes('NICKEL')) return 1500;
         }
-        if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
-        if (category.includes('BANKNIFTY')) return 15;
-        if (category.includes('FINNIFTY')) return 25;
-        if (category.includes('MIDCPNIFTY')) return 50;
-        if (category.includes('SENSEX')) return 10;
-        return 1;
+        
+        // NSE F&O - always use known values for index derivatives
+        if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+          if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
+          if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
+          if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
+          if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
+          if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
+          if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
+        }
+        
+        // BSE F&O
+        if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+          if (symbol.includes('SENSEX')) return 10;
+          if (symbol.includes('BANKEX')) return 15;
+          return 10;
+        }
+        
+        return selectedInstrument.lotSize || 1;
       };
       
       const lotSize = getLotSize();
@@ -2414,35 +2527,45 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const isMCX = instrument?.exchange === 'MCX' || instrument?.segment === 'MCX' || instrument?.displaySegment === 'MCX';
   const isFnO = isFutures || isOptions || isMCX; // MCX is always lot-based
 
-  // Get lot size from instrument or default based on category/symbol
+  // Get lot size - prioritize known values for index derivatives
   const getLotSize = () => {
-    if (instrument?.lotSize && instrument.lotSize > 1) return instrument.lotSize;
-    
     const category = instrument?.category?.toUpperCase() || '';
-    const symbol = instrument?.symbol?.toUpperCase() || '';
+    const symbol = (instrument?.symbol || instrument?.tradingSymbol || '').toUpperCase();
     const exchange = instrument?.exchange?.toUpperCase() || '';
+    const seg = (instrument?.displaySegment || instrument?.segment || '').toUpperCase();
     
-    // MCX lot sizes
-    if (exchange === 'MCX' || instrument?.segment === 'MCX' || instrument?.displaySegment === 'MCX') {
-      if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
-      if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
-      if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
-      if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
-      if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
-      if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
-      if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
-      if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
-      if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+    // MCX lot sizes - always use known values
+    if (exchange === 'MCX' || seg.includes('MCX')) {
+      if (symbol.includes('GOLD')) return 100;
+      if (symbol.includes('SILVER')) return 30;
+      if (symbol.includes('CRUDEOIL')) return 100;
+      if (symbol.includes('NATURALGAS')) return 1250;
+      if (symbol.includes('COPPER')) return 2500;
+      if (symbol.includes('ZINC')) return 5000;
+      if (symbol.includes('ALUMINIUM')) return 5000;
+      if (symbol.includes('LEAD')) return 5000;
+      if (symbol.includes('NICKEL')) return 1500;
     }
     
-    // NSE F&O lot sizes
-    if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
-    if (category.includes('BANKNIFTY')) return 15;
-    if (category.includes('FINNIFTY')) return 25;
-    if (category.includes('MIDCPNIFTY')) return 50;
-    if (category.includes('SENSEX')) return 10;
+    // NSE F&O lot sizes - always use known values for index derivatives
+    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
+      if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
+      if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
+      if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
+      if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
+      if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
+    }
     
-    return 1;
+    // BSE F&O
+    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (symbol.includes('SENSEX')) return 10;
+      if (symbol.includes('BANKEX')) return 15;
+      return 10;
+    }
+    
+    // For other instruments, use database value
+    return instrument?.lotSize || 1;
   };
 
   const lotSize = getLotSize();
@@ -2457,7 +2580,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         const { data } = await axios.post('/api/trading/margin-preview', {
           symbol: instrument.symbol,
           exchange: instrument.exchange,
-          segment: instrument.segment,
+          segment: instrument.displaySegment || instrument.segment,
           instrumentType: instrument.instrumentType,
           optionType: instrument.optionType || null,
           strikePrice: instrument.strike || null,
@@ -2507,7 +2630,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         pair: instrument.pair, // For crypto
         isCrypto: isCrypto,
         exchange: instrument.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
-        segment: isCrypto ? 'CRYPTO' : (instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO')),
+        segment: isCrypto ? 'CRYPTO' : (instrument.displaySegment || instrument.segment || (instrument.exchange === 'MCX' ? 'MCXFUT' : 'NSEFUT')),
         instrumentType: isCrypto ? 'CRYPTO' : (instrument.instrumentType || 'FUTURES'),
         optionType: instrument.optionType || null,
         strike: instrument.strike || null,
@@ -3036,10 +3159,10 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto
-            const { data } = await axios.get(`/api/instruments/search?q=${encodeURIComponent(debouncedSearch)}&limit=50`, { headers });
+            // Regular trading search - exclude crypto, use higher limit
+            const { data } = await axios.get(`/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}`, { headers });
             const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');
-            setSearchResults(nonCryptoResults);
+            setSearchResults(nonCryptoResults.slice(0, 200)); // Limit display to 200 for performance
           }
         } catch (error) {
           setSearchResults([]);
@@ -3241,28 +3364,32 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
                 <div
                   key={inst.token}
                   onClick={() => onSelectInstrument({...inst, ltp: priceData.ltp || 0})}
-                  className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
+                  className="flex flex-col px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
                 >
-                  <div className="flex-1 min-w-0 mr-2">
-                    <div className={`font-bold text-sm ${
+                  {/* Top row: Symbol and Price */}
+                  <div className="flex items-center justify-between w-full">
+                    <div className={`font-bold text-sm truncate max-w-[120px] ${
                       inst.instrumentType === 'FUTURES' ? 'text-yellow-400' :
                       inst.optionType === 'CE' ? 'text-green-400' :
                       inst.optionType === 'PE' ? 'text-red-400' : 'text-white'
                     }`}>{inst.tradingSymbol || inst.symbol?.replace(/"/g, '') || inst.symbol}</div>
-                    <div className="text-xs text-gray-500 truncate">{inst.category || inst.name}</div>
+                    <div className="text-sm text-gray-300 ml-2">{parseFloat(priceData.ltp || 0).toFixed(2)}</div>
                   </div>
-                  <div className="text-right mr-2">
-                    <div className="text-sm text-gray-300">{parseFloat(priceData.ltp || 0).toFixed(2)}</div>
-                    <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                  {/* Bottom row: Category, Change %, and Buttons */}
+                  <div className="flex items-center justify-between w-full mt-1">
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-gray-500 truncate max-w-[80px]">{inst.category || inst.name}</div>
+                      <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <button onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold">S</button>
-                    <button onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }} className="w-6 h-6 rounded-full bg-green-500 text-white text-xs font-bold">B</button>
-                    <button onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst); }} className="w-6 h-6 rounded-full bg-dark-600 text-gray-400 hover:bg-red-600 hover:text-white">
-                      <X size={12} className="mx-auto" />
-                    </button>
+                    <div className="flex gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); onBuySell('sell', inst); }} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold">S</button>
+                      <button onClick={(e) => { e.stopPropagation(); onBuySell('buy', inst); }} className="w-6 h-6 rounded-full bg-green-500 text-white text-xs font-bold">B</button>
+                      <button onClick={(e) => { e.stopPropagation(); removeFromWatchlist(inst); }} className="w-6 h-6 rounded-full bg-dark-600 text-gray-400 hover:bg-red-600 hover:text-white">
+                        <X size={12} className="mx-auto" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -4253,12 +4380,35 @@ const NotificationsModal = ({ onClose, user }) => {
 };
 
 const SettingsModal = ({ onClose, user }) => {
-  const [activeSection, setActiveSection] = useState('account'); // 'account', 'password'
+  const [activeSection, setActiveSection] = useState('account'); // 'account', 'password', 'margin'
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
+  const [marginData, setMarginData] = useState(null);
+  const [loadingMargin, setLoadingMargin] = useState(false);
+
+  // Fetch margin/exposure settings
+  useEffect(() => {
+    if (activeSection === 'margin') {
+      fetchMarginSettings();
+    }
+  }, [activeSection]);
+
+  const fetchMarginSettings = async () => {
+    try {
+      setLoadingMargin(true);
+      const { data } = await axios.get('/api/user/settings', {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      setMarginData(data);
+    } catch (err) {
+      console.error('Error fetching margin settings:', err);
+    } finally {
+      setLoadingMargin(false);
+    }
+  };
 
   const handleChangePassword = async () => {
     if (!oldPassword || !newPassword || !confirmPassword) {
@@ -4313,10 +4463,16 @@ const SettingsModal = ({ onClose, user }) => {
             Account
           </button>
           <button
+            onClick={() => setActiveSection('margin')}
+            className={`flex-1 py-3 text-sm font-medium ${activeSection === 'margin' ? 'text-green-400 border-b-2 border-green-400' : 'text-gray-400'}`}
+          >
+            Margin/Exposure
+          </button>
+          <button
             onClick={() => setActiveSection('password')}
             className={`flex-1 py-3 text-sm font-medium ${activeSection === 'password' ? 'text-green-400 border-b-2 border-green-400' : 'text-gray-400'}`}
           >
-            Change Password
+            Password
           </button>
         </div>
 
@@ -4370,6 +4526,112 @@ const SettingsModal = ({ onClose, user }) => {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeSection === 'margin' && (
+            <div className="space-y-4">
+              {loadingMargin ? (
+                <div className="p-4 text-center text-gray-400">
+                  <RefreshCw className="animate-spin inline mr-2" size={16} />
+                  Loading margin settings...
+                </div>
+              ) : marginData ? (
+                <>
+                  {/* Margin Settings */}
+                  <div className="bg-dark-700 rounded-lg p-4">
+                    <h3 className="font-medium mb-3">Margin Settings</h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Margin Type</span>
+                        <span className="text-yellow-400 font-medium">{marginData.settings?.marginType?.toUpperCase() || 'EXPOSURE'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Equity Intraday Leverage</span>
+                        <span className="text-green-400">{marginData.marginSettings?.equityIntradayLeverage || 5}x</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">F&O Leverage</span>
+                        <span className="text-green-400">{marginData.marginSettings?.foLeverage || 1}x</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Max Loss %</span>
+                        <span className="text-red-400">{marginData.marginSettings?.maxLossPercent || 80}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Auto Square-Off</span>
+                        <span className={marginData.marginSettings?.autoSquareOff !== false ? 'text-green-400' : 'text-red-400'}>
+                          {marginData.marginSettings?.autoSquareOff !== false ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Ledger Balance Close %</span>
+                        <span className="text-yellow-400">{marginData.settings?.ledgerBalanceClosePercent || 90}%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Segment Exposure Settings */}
+                  <div className="bg-dark-700 rounded-lg p-4">
+                    <h3 className="font-medium mb-3">Segment Exposure</h3>
+                    <div className="space-y-3 text-sm">
+                      {marginData.segmentPermissions && Object.entries(
+                        typeof marginData.segmentPermissions === 'object' && marginData.segmentPermissions !== null
+                          ? (marginData.segmentPermissions instanceof Map 
+                              ? Object.fromEntries(marginData.segmentPermissions) 
+                              : marginData.segmentPermissions)
+                          : {}
+                      ).map(([segment, settings]) => (
+                        <div key={segment} className="border-b border-dark-600 pb-2 last:border-0">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-medium text-white">{segment}</span>
+                            <span className={settings?.enabled ? 'text-green-400 text-xs' : 'text-red-400 text-xs'}>
+                              {settings?.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                          </div>
+                          {settings?.enabled && (
+                            <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                              <div>Intraday: <span className="text-green-400">{settings?.exposureIntraday || 1}x</span></div>
+                              <div>Carry Fwd: <span className="text-blue-400">{settings?.exposureCarryForward || 1}x</span></div>
+                              <div>Max Lots: <span className="text-yellow-400">{settings?.maxLots || 50}</span></div>
+                              <div>Order Lots: <span className="text-purple-400">{settings?.orderLots || 10}</span></div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* RMS Settings */}
+                  <div className="bg-dark-700 rounded-lg p-4">
+                    <h3 className="font-medium mb-3">Risk Management (RMS)</h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">RMS Active</span>
+                        <span className={marginData.rmsSettings?.isActive !== false ? 'text-green-400' : 'text-red-400'}>
+                          {marginData.rmsSettings?.isActive !== false ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Trading Blocked</span>
+                        <span className={marginData.rmsSettings?.tradingBlocked ? 'text-red-400' : 'text-green-400'}>
+                          {marginData.rmsSettings?.tradingBlocked ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                      {marginData.rmsSettings?.blockReason && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Block Reason</span>
+                          <span className="text-red-400 text-xs">{marginData.rmsSettings.blockReason}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="p-4 text-center text-gray-500">
+                  Unable to load margin settings
+                </div>
+              )}
             </div>
           )}
 
@@ -4803,28 +5065,43 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const isMCX = instrument?.segment === 'MCX' || instrument?.exchange === 'MCX' || instrument?.displaySegment === 'MCX';
   const isLotBased = isFnO || isMCX;
 
-  // Get lot size with fallback for MCX/F&O
+  // Get lot size - prioritize known values for index derivatives
   const getLotSize = () => {
-    if (instrument?.lotSize && instrument.lotSize > 1) return instrument.lotSize;
-    const symbol = instrument?.symbol?.toUpperCase() || '';
+    const symbol = (instrument?.symbol || instrument?.tradingSymbol || '').toUpperCase();
     const category = instrument?.category?.toUpperCase() || '';
-    if (isMCX) {
-      if (symbol.includes('GOLD') || category.includes('GOLD')) return 100;
-      if (symbol.includes('SILVER') || category.includes('SILVER')) return 30;
-      if (symbol.includes('CRUDEOIL') || category.includes('CRUDEOIL')) return 100;
-      if (symbol.includes('NATURALGAS') || category.includes('NATURALGAS')) return 1250;
-      if (symbol.includes('COPPER') || category.includes('COPPER')) return 2500;
-      if (symbol.includes('ZINC') || category.includes('ZINC')) return 5000;
-      if (symbol.includes('ALUMINIUM') || category.includes('ALUMINIUM')) return 5000;
-      if (symbol.includes('LEAD') || category.includes('LEAD')) return 5000;
-      if (symbol.includes('NICKEL') || category.includes('NICKEL')) return 1500;
+    const seg = (instrument?.displaySegment || instrument?.segment || '').toUpperCase();
+    
+    // MCX lot sizes - always use known values
+    if (isMCX || seg.includes('MCX')) {
+      if (symbol.includes('GOLD')) return 100;
+      if (symbol.includes('SILVER')) return 30;
+      if (symbol.includes('CRUDEOIL')) return 100;
+      if (symbol.includes('NATURALGAS')) return 1250;
+      if (symbol.includes('COPPER')) return 2500;
+      if (symbol.includes('ZINC')) return 5000;
+      if (symbol.includes('ALUMINIUM')) return 5000;
+      if (symbol.includes('LEAD')) return 5000;
+      if (symbol.includes('NICKEL')) return 1500;
     }
-    if (category.includes('NIFTY') && !category.includes('BANK') && !category.includes('FIN') && !category.includes('MID')) return 25;
-    if (category.includes('BANKNIFTY')) return 15;
-    if (category.includes('FINNIFTY')) return 25;
-    if (category.includes('MIDCPNIFTY')) return 50;
-    if (category.includes('SENSEX')) return 10;
-    return 1;
+    
+    // NSE F&O - always use known values for index derivatives
+    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
+      if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
+      if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
+      if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
+      if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
+      if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
+    }
+    
+    // BSE F&O
+    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
+      if (symbol.includes('SENSEX')) return 10;
+      if (symbol.includes('BANKEX')) return 15;
+      return 10;
+    }
+    
+    return instrument?.lotSize || 1;
   };
 
   const lotSize = getLotSize();
@@ -4864,7 +5141,7 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
         pair: instrument.pair, // For crypto
         isCrypto: isCrypto,
         exchange: instrument.exchange || (isCrypto ? 'BINANCE' : 'NSE'),
-        segment: isCrypto ? 'CRYPTO' : (instrument.segment || (instrument.exchange === 'MCX' ? 'MCX' : 'FNO')),
+        segment: isCrypto ? 'CRYPTO' : (instrument.displaySegment || instrument.segment || (instrument.exchange === 'MCX' ? 'MCXFUT' : 'NSEFUT')),
         instrumentType: isCrypto ? 'CRYPTO' : (instrument.instrumentType || 'FUTURES'),
         optionType: instrument.optionType || null,
         strike: instrument.strike || null,
