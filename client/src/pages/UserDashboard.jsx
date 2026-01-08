@@ -292,9 +292,9 @@ const UserDashboard = () => {
               c.symbol.toLowerCase().includes(searchLower) || c.name.toLowerCase().includes(searchLower)
             ));
           } else {
-            // Regular trading search - use user endpoint for full results, segment-aware
+            // Regular trading search - use user endpoint for full results, global search across all instruments
             const { data } = await axios.get(
-              `/api/instruments/user?search=${encodeURIComponent(headerSearchTerm)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              `/api/instruments/user?search=${encodeURIComponent(headerSearchTerm)}`,
               { headers }
             );
             setHeaderSearchResults((data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE').slice(0, 20));
@@ -948,7 +948,7 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto, segment-aware, use higher limit
+            // Regular trading search - exclude crypto, segment-specific search
             const { data } = await axios.get(
               `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}&displaySegment=${encodeURIComponent(activeSegment)}`,
               { headers }
@@ -1890,46 +1890,13 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
       const isMCX = selectedInstrument.exchange === 'MCX' || selectedInstrument.segment === 'MCX' || selectedInstrument.displaySegment === 'MCX';
       const isFnO = selectedInstrument.instrumentType === 'FUTURES' || selectedInstrument.instrumentType === 'OPTIONS' || isMCX;
       
-      // Get lot size - prioritize known values for index derivatives
-      const getLotSize = () => {
-        const symbol = (selectedInstrument.symbol || selectedInstrument.tradingSymbol || '').toUpperCase();
-        const category = selectedInstrument.category?.toUpperCase() || '';
-        const seg = (selectedInstrument.displaySegment || selectedInstrument.segment || '').toUpperCase();
-        
-        // MCX lot sizes - always use known values
-        if (isMCX || seg.includes('MCX')) {
-          if (symbol.includes('GOLD')) return 100;
-          if (symbol.includes('SILVER')) return 30;
-          if (symbol.includes('CRUDEOIL')) return 100;
-          if (symbol.includes('NATURALGAS')) return 1250;
-          if (symbol.includes('COPPER')) return 2500;
-          if (symbol.includes('ZINC')) return 5000;
-          if (symbol.includes('ALUMINIUM')) return 5000;
-          if (symbol.includes('LEAD')) return 5000;
-          if (symbol.includes('NICKEL')) return 1500;
-        }
-        
-        // NSE F&O - always use known values for index derivatives
-        if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-          if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
-          if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
-          if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
-          if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
-          if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
-          if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
-        }
-        
-        // BSE F&O
-        if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-          if (symbol.includes('SENSEX')) return 10;
-          if (symbol.includes('BANKEX')) return 15;
-          return 10;
-        }
-        
-        return selectedInstrument.lotSize || 1;
-      };
-      
-      const lotSize = getLotSize();
+      // Always use lotSize from database (no hardcoded fallbacks)
+      const lotSize = isCrypto ? 1 : (selectedInstrument.lotSize || 1);
+      if (!isCrypto && !selectedInstrument.lotSize) {
+        setQuickError(`Lot size missing for ${selectedInstrument.symbol}`);
+        setTimeout(() => setQuickError(''), 3000);
+        return;
+      }
       const quantity = isFnO ? lots * lotSize : lots;
       
       await axios.post('/api/trading/order', {
@@ -2527,48 +2494,12 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const isMCX = instrument?.exchange === 'MCX' || instrument?.segment === 'MCX' || instrument?.displaySegment === 'MCX';
   const isFnO = isFutures || isOptions || isMCX; // MCX is always lot-based
 
-  // Get lot size - prioritize known values for index derivatives
-  const getLotSize = () => {
-    const category = instrument?.category?.toUpperCase() || '';
-    const symbol = (instrument?.symbol || instrument?.tradingSymbol || '').toUpperCase();
-    const exchange = instrument?.exchange?.toUpperCase() || '';
-    const seg = (instrument?.displaySegment || instrument?.segment || '').toUpperCase();
-    
-    // MCX lot sizes - always use known values
-    if (exchange === 'MCX' || seg.includes('MCX')) {
-      if (symbol.includes('GOLD')) return 100;
-      if (symbol.includes('SILVER')) return 30;
-      if (symbol.includes('CRUDEOIL')) return 100;
-      if (symbol.includes('NATURALGAS')) return 1250;
-      if (symbol.includes('COPPER')) return 2500;
-      if (symbol.includes('ZINC')) return 5000;
-      if (symbol.includes('ALUMINIUM')) return 5000;
-      if (symbol.includes('LEAD')) return 5000;
-      if (symbol.includes('NICKEL')) return 1500;
-    }
-    
-    // NSE F&O lot sizes - always use known values for index derivatives
-    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
-      if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
-      if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
-      if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
-      if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
-      if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
-    }
-    
-    // BSE F&O
-    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (symbol.includes('SENSEX')) return 10;
-      if (symbol.includes('BANKEX')) return 15;
-      return 10;
-    }
-    
-    // For other instruments, use database value
-    return instrument?.lotSize || 1;
-  };
-
-  const lotSize = getLotSize();
+  // Always use lot size from DB (no hardcoded fallbacks)
+  const lotSize = isCrypto ? 1 : (instrument?.lotSize || 1);
+  if (!isCrypto && !instrument?.lotSize) {
+    setError(`Lot size missing for ${instrument?.symbol || 'instrument'}`);
+    return null;
+  }
   const totalQuantity = isFnO ? parseInt(lots || 0) * lotSize : parseInt(lots || 0);
 
   // Fetch margin preview when inputs change
@@ -3166,8 +3097,11 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto, use higher limit
-            const { data } = await axios.get(`/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}`, { headers });
+            // Regular trading search - exclude crypto, segment-specific search
+            const { data } = await axios.get(
+              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              { headers }
+            );
             const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');
             setSearchResults(nonCryptoResults.slice(0, 200)); // Limit display to 200 for performance
           }
@@ -5072,46 +5006,12 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const isMCX = instrument?.segment === 'MCX' || instrument?.exchange === 'MCX' || instrument?.displaySegment === 'MCX';
   const isLotBased = isFnO || isMCX;
 
-  // Get lot size - prioritize known values for index derivatives
-  const getLotSize = () => {
-    const symbol = (instrument?.symbol || instrument?.tradingSymbol || '').toUpperCase();
-    const category = instrument?.category?.toUpperCase() || '';
-    const seg = (instrument?.displaySegment || instrument?.segment || '').toUpperCase();
-    
-    // MCX lot sizes - always use known values
-    if (isMCX || seg.includes('MCX')) {
-      if (symbol.includes('GOLD')) return 100;
-      if (symbol.includes('SILVER')) return 30;
-      if (symbol.includes('CRUDEOIL')) return 100;
-      if (symbol.includes('NATURALGAS')) return 1250;
-      if (symbol.includes('COPPER')) return 2500;
-      if (symbol.includes('ZINC')) return 5000;
-      if (symbol.includes('ALUMINIUM')) return 5000;
-      if (symbol.includes('LEAD')) return 5000;
-      if (symbol.includes('NICKEL')) return 1500;
-    }
-    
-    // NSE F&O - always use known values for index derivatives
-    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (symbol.includes('BANKNIFTY') || category.includes('BANKNIFTY')) return 15;
-      if (symbol.includes('FINNIFTY') || category.includes('FINNIFTY')) return 25;
-      if (symbol.includes('MIDCPNIFTY') || category.includes('MIDCPNIFTY')) return 50;
-      if (symbol.includes('NIFTY') || category.includes('NIFTY')) return 25;
-      if (symbol.includes('SENSEX') || category.includes('SENSEX')) return 10;
-      if (symbol.includes('BANKEX') || category.includes('BANKEX')) return 15;
-    }
-    
-    // BSE F&O
-    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (symbol.includes('SENSEX')) return 10;
-      if (symbol.includes('BANKEX')) return 15;
-      return 10;
-    }
-    
-    return instrument?.lotSize || 1;
-  };
-
-  const lotSize = getLotSize();
+  // Always use lotSize from DB (no hardcoded fallbacks)
+  const lotSize = isCrypto ? 1 : (instrument?.lotSize || 1);
+  if (!isCrypto && !instrument?.lotSize) {
+    setError(`Lot size missing for ${instrument?.symbol || 'instrument'}`);
+    return null;
+  }
   const totalQuantity = isLotBased ? parseFloat(quantity || 1) * lotSize : parseFloat(quantity || 1);
   const orderValue = ltp * totalQuantity;
 

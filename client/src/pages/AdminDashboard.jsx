@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
+import io from 'socket.io-client';
 import { 
   Users, LogOut, Plus, Search, Edit, Trash2, TrendingUp,
   Key, Wallet, Eye, EyeOff, X, ArrowUpCircle, ArrowDownCircle,
@@ -1007,6 +1008,7 @@ const AdminDetailModal = ({ admin: targetAdmin, token, onClose }) => {
                     </div>
                     <div className="text-right">
                       <div className="text-green-400 font-bold">₹{(user.wallet?.cashBalance || 0).toLocaleString()}</div>
+                      <div className="text-xs text-blue-400">Trading: ₹{(user.wallet?.tradingBalance || 0).toLocaleString()}</div>
                       <div className={`text-xs ${user.isActive ? 'text-green-400' : 'text-red-400'}`}>
                         {user.isActive ? 'Active' : 'Inactive'}
                       </div>
@@ -4902,10 +4904,63 @@ const AllTrades = () => {
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [marketData, setMarketData] = useState({});
+  const socketRef = useRef(null);
 
   useEffect(() => {
     fetchTrades();
+    
+    // Connect to Socket.IO for live market data
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    socketRef.current = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+    
+    socketRef.current.on('connect', () => {
+      console.log('Super Admin: Connected to Socket.IO for live market data');
+    });
+    
+    socketRef.current.on('marketData', (data) => {
+      setMarketData(prev => ({ ...prev, ...data }));
+    });
+    
+    socketRef.current.on('disconnect', () => {
+      console.log('Super Admin: Disconnected from Socket.IO');
+    });
+    
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
   }, [filter]);
+  
+  // Update P&L in real-time when market data changes
+  useEffect(() => {
+    if (Object.keys(marketData).length === 0) return;
+    
+    setTrades(prevTrades => prevTrades.map(trade => {
+      if (trade.status !== 'OPEN' || !trade.token) return trade;
+      
+      const liveData = marketData[trade.token];
+      if (!liveData || !liveData.ltp) return trade;
+      
+      // Calculate unrealized P&L
+      const currentPrice = liveData.ltp;
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
+      const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
+      
+      return {
+        ...trade,
+        currentPrice,
+        unrealizedPnL
+      };
+    }));
+  }, [marketData]);
 
   const fetchTrades = async () => {
     try {
@@ -4941,7 +4996,15 @@ const AllTrades = () => {
 
   return (
     <div className="p-4 md:p-6">
-      <h1 className="text-2xl font-bold mb-6">All Trades</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">All Trades</h1>
+        {Object.keys(marketData).length > 0 && (
+          <div className="flex items-center gap-2 text-sm text-green-400">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            Live ({Object.keys(marketData).length} prices)
+          </div>
+        )}
+      </div>
 
       {/* Filters */}
       <div className="flex gap-2 mb-6">
@@ -5044,7 +5107,7 @@ const AllTrades = () => {
 };
 
 // Admin Position Management (Admin only - shows trades for their users)
-const AdminTrades = () => {
+const TradeManagement = () => {
   const { admin } = useAuth();
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5052,6 +5115,8 @@ const AdminTrades = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editModal, setEditModal] = useState({ show: false, trade: null });
   const [editForm, setEditForm] = useState({ quantity: '', entryPrice: '', exitPrice: '' });
+  const [marketData, setMarketData] = useState({});
+  const socketRef = useRef(null);
 
   // Separate trades by status
   const openTrades = trades.filter(t => t.status === 'OPEN');
@@ -5075,7 +5140,58 @@ const AdminTrades = () => {
 
   useEffect(() => {
     fetchTrades();
+    
+    // Connect to Socket.IO for live market data
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    socketRef.current = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+    
+    socketRef.current.on('connect', () => {
+      console.log('Admin: Connected to Socket.IO for live market data');
+    });
+    
+    socketRef.current.on('marketData', (data) => {
+      setMarketData(prev => ({ ...prev, ...data }));
+    });
+    
+    socketRef.current.on('disconnect', () => {
+      console.log('Admin: Disconnected from Socket.IO');
+    });
+    
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
   }, []);
+  
+  // Update P&L in real-time when market data changes
+  useEffect(() => {
+    if (Object.keys(marketData).length === 0) return;
+    
+    setTrades(prevTrades => prevTrades.map(trade => {
+      if (trade.status !== 'OPEN' || !trade.token) return trade;
+      
+      const liveData = marketData[trade.token];
+      if (!liveData || !liveData.ltp) return trade;
+      
+      // Calculate unrealized P&L
+      const currentPrice = liveData.ltp;
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
+      const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
+      
+      return {
+        ...trade,
+        currentPrice,
+        unrealizedPnL
+      };
+    }));
+  }, [marketData]);
 
   const fetchTrades = async () => {
     try {
@@ -5184,6 +5300,12 @@ const AdminTrades = () => {
           <div className="flex items-center gap-2">
             <Shield className="text-purple-400" size={20} />
             <span className="text-lg font-bold text-purple-400">{admin?.username || admin?.name}</span>
+            {Object.keys(marketData).length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-green-400">
+                <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
+                Live
+              </span>
+            )}
           </div>
           
           <button
@@ -6803,45 +6925,8 @@ const TradingPanel = () => {
     setUserSearch(user.fullName || user.username);
   };
 
-  // Helper function to get correct lot size for display
-  const getDisplayLotSize = (instrument) => {
-    const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
-    const exch = (instrument.exchange || '').toUpperCase();
-    const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
-    
-    // MCX Commodities - always use known values
-    if (exch === 'MCX' || seg.includes('MCX')) {
-      if (sym.includes('GOLD')) return 100;
-      if (sym.includes('SILVER')) return 30;
-      if (sym.includes('CRUDEOIL')) return 100;
-      if (sym.includes('NATURALGAS')) return 1250;
-      if (sym.includes('COPPER')) return 2500;
-      if (sym.includes('ZINC')) return 5000;
-      if (sym.includes('ALUMINIUM')) return 5000;
-      if (sym.includes('LEAD')) return 5000;
-      if (sym.includes('NICKEL')) return 1500;
-    }
-    
-    // NSE F&O - always use known values for index derivatives
-    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (sym.includes('BANKNIFTY')) return 15;
-      if (sym.includes('FINNIFTY')) return 25;
-      if (sym.includes('MIDCPNIFTY')) return 50;
-      if (sym.includes('NIFTY')) return 25;
-      if (sym.includes('SENSEX')) return 10;
-      if (sym.includes('BANKEX')) return 15;
-    }
-    
-    // BSE F&O
-    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (sym.includes('SENSEX')) return 10;
-      if (sym.includes('BANKEX')) return 15;
-      return 10;
-    }
-    
-    // For other instruments, use database value
-    return instrument.lotSize || 1;
-  };
+  // Display lot size strictly from DB (no hardcoded fallbacks)
+  const getDisplayLotSize = (instrument) => instrument.lotSize || 1;
 
   return (
     <div className="p-4 md:p-6">
@@ -7019,46 +7104,8 @@ const TradeModal = ({
   const [priceLoading, setPriceLoading] = useState(true);
   const [lots, setLots] = useState(1);
   
-  // Get lot size - prioritize known values for index derivatives
-  const getLotSizeForInstrument = () => {
-    const sym = (instrument.symbol || instrument.tradingSymbol || '').toUpperCase();
-    const cat = (instrument.category || '').toUpperCase();
-    const exch = (instrument.exchange || '').toUpperCase();
-    const seg = (instrument.displaySegment || instrument.segment || '').toUpperCase();
-    
-    // MCX Commodities - always use known values
-    if (exch === 'MCX' || seg.includes('MCX')) {
-      if (sym.includes('GOLD')) return 100;
-      if (sym.includes('SILVER')) return 30;
-      if (sym.includes('CRUDEOIL')) return 100;
-      if (sym.includes('NATURALGAS')) return 1250;
-      if (sym.includes('COPPER')) return 2500;
-      if (sym.includes('ZINC')) return 5000;
-      if (sym.includes('ALUMINIUM')) return 5000;
-      if (sym.includes('LEAD')) return 5000;
-      if (sym.includes('NICKEL')) return 1500;
-    }
-    
-    // NSE F&O - always use known values for index derivatives
-    if (seg.includes('NSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (sym.includes('BANKNIFTY') || cat.includes('BANKNIFTY')) return 15;
-      if (sym.includes('FINNIFTY') || cat.includes('FINNIFTY')) return 25;
-      if (sym.includes('MIDCPNIFTY') || cat.includes('MIDCPNIFTY')) return 50;
-      if (sym.includes('NIFTY') || cat.includes('NIFTY')) return 25;
-      if (sym.includes('SENSEX') || cat.includes('SENSEX')) return 10;
-      if (sym.includes('BANKEX') || cat.includes('BANKEX')) return 15;
-    }
-    
-    // BSE F&O
-    if (seg.includes('BSE') && (seg.includes('FUT') || seg.includes('OPT'))) {
-      if (sym.includes('SENSEX')) return 10;
-      if (sym.includes('BANKEX')) return 15;
-      return 10;
-    }
-    
-    // For other instruments, use database value
-    return instrument.lotSize || 1;
-  };
+  // Always use lot size from DB (no hardcoded fallbacks)
+  const getLotSizeForInstrument = () => instrument.lotSize || 1;
   
   const lotSize = getLotSizeForInstrument();
   const calculatedQuantity = lots * lotSize;
@@ -8811,7 +8858,8 @@ const AllUsersManagement = () => {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-green-400">₹{(user.wallet?.balance || 0).toLocaleString()}</span>
+                    <div className="text-green-400 font-medium">₹{(user.wallet?.balance || 0).toLocaleString()}</div>
+                    <div className="text-xs text-blue-400">Trading: ₹{(user.wallet?.tradingBalance || 0).toLocaleString()}</div>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded text-xs ${user.isActive ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -10923,7 +10971,10 @@ const UserManagement = () => {
               <div className="text-sm text-gray-400 mb-1">{user.email}</div>
               <div className="text-sm text-gray-400 mb-3">{user.phone || 'No phone'}</div>
               <div className="flex items-center justify-between">
-                <span className="text-green-400 font-bold">₹{user.wallet?.balance?.toLocaleString() || '0'}</span>
+                <div>
+                  <div className="text-green-400 font-bold">₹{user.wallet?.balance?.toLocaleString() || '0'}</div>
+                  <div className="text-xs text-blue-400">Trading: ₹{(user.wallet?.tradingBalance || 0).toLocaleString()}</div>
+                </div>
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={() => { setSelectedUser(user); setShowEditModal(true); }} className="p-2 bg-dark-700 rounded text-blue-400"><Edit size={16} /></button>
                   <button onClick={() => { setSelectedUser(user); setShowPasswordModal(true); }} className="p-2 bg-dark-700 rounded text-yellow-400"><Key size={16} /></button>
@@ -10977,9 +11028,12 @@ const UserManagement = () => {
                   <td className="px-4 py-3 text-gray-300">{user.email}</td>
                   <td className="px-4 py-3 text-gray-300">{user.phone || '-'}</td>
                   <td className="px-4 py-3 text-right">
-                    <span className="text-green-400 font-medium">
+                    <div className="text-green-400 font-medium">
                       ₹{user.wallet?.balance?.toLocaleString() || '0'}
-                    </span>
+                    </div>
+                    <div className="text-xs text-blue-400">
+                      Trading: ₹{(user.wallet?.tradingBalance || 0).toLocaleString()}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`px-2 py-1 rounded text-xs ${

@@ -20,6 +20,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSION_FILE = path.join(__dirname, '../.zerodha-session.json');
 
+// Helper: Parse CSV line properly handling quoted fields (names with commas, etc.)
+const parseCSVLine = (line) => {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  values.push(current.trim());
+  return values;
+};
+
 // Load session from file if exists
 const loadSession = () => {
   try {
@@ -61,8 +82,8 @@ router.get('/status', (req, res) => {
     zerodhaSession.expiresAt && 
     new Date(zerodhaSession.expiresAt) > new Date();
   
-  // Connected if session is valid (WebSocket ticker may not connect outside market hours)
-  const isConnected = isSessionValid;
+  // Treat as connected only if session valid AND ticker is connected
+  const isConnected = isSessionValid && tickerStatus.connected;
   
   res.json({
     connected: isConnected,
@@ -357,15 +378,15 @@ router.post('/sync-instruments', protectAdmin, superAdminOnly, async (req, res) 
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const instruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
@@ -531,15 +552,15 @@ router.post('/seed-mcx', protectAdmin, superAdminOnly, async (req, res) => {
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const allInstruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
@@ -547,11 +568,10 @@ router.post('/seed-mcx', protectAdmin, superAdminOnly, async (req, res) => {
       allInstruments.push(inst);
     }
     
-    // Filter MCX futures - get current month contracts
-    const mcxFutures = allInstruments.filter(i => 
-      i.exchange === 'MCX' && 
-      i.instrument_type === 'FUT'
-    );
+    console.log(`Downloaded ${allInstruments.length} instruments from Zerodha`);
+    
+    // Now filter for MCX commodities
+    const mcxFutures = allInstruments.filter(i => i.exchange === 'MCX' && i.instrument_type === 'FUT');
     
     // Group by tradingsymbol base (GOLD, SILVER, CRUDEOIL, etc.)
     const mcxSymbols = ['GOLD', 'GOLDM', 'SILVER', 'SILVERM', 'CRUDEOIL', 'CRUDEOILM', 'NATURALGAS', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL'];
@@ -622,8 +642,8 @@ router.post('/seed-mcx', protectAdmin, superAdminOnly, async (req, res) => {
     }
     
     // Subscribe to new MCX tokens
-    const mcxInstruments = await Instrument.find({ exchange: 'MCX', isEnabled: true }).select('token').lean();
-    const tokens = mcxInstruments.map(i => parseInt(i.token)).filter(t => !isNaN(t));
+    const mcxInstrumentsForSubscribe = await Instrument.find({ exchange: 'MCX', isEnabled: true }).select('token').lean();
+    const tokens = mcxInstrumentsForSubscribe.map(i => parseInt(i.token)).filter(t => !isNaN(t));
     
     if (tokens.length > 0) {
       subscribeTokens(tokens);
@@ -662,15 +682,15 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const zerodhaInstruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
@@ -685,10 +705,17 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
     const bySymbol = {};
     for (const inst of zerodhaInstruments) {
       if (inst.instrument_token) {
-        byToken[inst.instrument_token] = inst;
+        const key = inst.instrument_token.toString();
+        byToken[key] = inst;
+        // Also store numeric key for robustness
+        const numKey = Number(inst.instrument_token);
+        if (!Number.isNaN(numKey)) {
+          byToken[numKey] = inst;
+        }
       }
       if (inst.tradingsymbol && inst.exchange) {
-        bySymbol[`${inst.exchange}:${inst.tradingsymbol}`] = inst;
+        const exchKey = inst.exchange.toUpperCase();
+        bySymbol[`${exchKey}:${inst.tradingsymbol}`] = inst;
       }
     }
     
@@ -703,17 +730,24 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
     const updateResults = [];
     
     for (const dbInst of dbInstruments) {
-      // Try to find matching Zerodha instrument
-      let zerodhaInst = byToken[dbInst.token];
+      // Try to find matching Zerodha instrument (token stored as string/number)
+      const tokenKey = dbInst.token?.toString();
+      let zerodhaInst = tokenKey ? (byToken[tokenKey] || byToken[Number(tokenKey)]) : null;
       
-      // If not found by token, try by symbol
-      if (!zerodhaInst && dbInst.symbol && dbInst.exchange) {
-        zerodhaInst = bySymbol[`${dbInst.exchange}:${dbInst.symbol}`];
+      // If not found by token, try by symbol/tradingSymbol (force uppercase exchange)
+      const exchKey = dbInst.exchange ? dbInst.exchange.toUpperCase() : '';
+      if (!zerodhaInst && dbInst.symbol && exchKey) {
+        zerodhaInst = bySymbol[`${exchKey}:${dbInst.symbol}`];
       }
       
       // Also try tradingSymbol
-      if (!zerodhaInst && dbInst.tradingSymbol && dbInst.exchange) {
-        zerodhaInst = bySymbol[`${dbInst.exchange}:${dbInst.tradingSymbol}`];
+      if (!zerodhaInst && dbInst.tradingSymbol && exchKey) {
+        zerodhaInst = bySymbol[`${exchKey}:${dbInst.tradingSymbol}`];
+      }
+      
+      // Try name as last resort
+      if (!zerodhaInst && dbInst.name && exchKey) {
+        zerodhaInst = bySymbol[`${exchKey}:${dbInst.name}`];
       }
       
       if (zerodhaInst) {
@@ -735,9 +769,31 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
             oldLotSize: dbInst.lotSize,
             newLotSize: newLotSize
           });
+          
+          if (updated <= 5) {
+            console.log('Lot size updated', {
+              symbol: dbInst.symbol,
+              exchange: dbInst.exchange,
+              token: dbInst.token,
+              zToken: zerodhaInst.instrument_token,
+              oldLotSize: dbInst.lotSize,
+              newLotSize,
+              oldTickSize: dbInst.tickSize,
+              newTickSize
+            });
+          }
         }
       } else {
         notFound++;
+        if (notFound <= 5) {
+          console.log('No Zerodha match for', {
+            symbol: dbInst.symbol,
+            tradingSymbol: dbInst.tradingSymbol,
+            name: dbInst.name,
+            exchange: dbInst.exchange,
+            token: dbInst.token
+          });
+        }
       }
     }
     
@@ -753,6 +809,82 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
   } catch (error) {
     console.error('Sync lot sizes error:', error.response?.data || error.message);
     res.status(500).json({ message: error.response?.data?.message || error.message });
+  }
+});
+
+// Reset lot sizes in DB (for re-sync)
+router.post('/reset-lot-sizes', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const Instrument = (await import('../models/Instrument.js')).default;
+    const result = await Instrument.updateMany(
+      { exchange: { $in: ['MCX', 'NFO', 'NSE'] } },
+      { $set: { lotSize: null } }
+    );
+    res.json({ message: 'Lot sizes reset. Run Sync Lot Sizes next.', modified: result.modifiedCount });
+  } catch (error) {
+    console.error('Reset lot sizes error:', error.message);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Quick diagnostics for lot sizes (no writes)
+router.get('/lot-size-diagnostics', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const Instrument = (await import('../models/Instrument.js')).default;
+    const instruments = await Instrument.find({}).lean();
+    
+    const fno = instruments.filter(i => i.exchange === 'NFO');
+    const nse = instruments.filter(i => i.exchange === 'NSE');
+    const mcx = instruments.filter(i => i.exchange === 'MCX');
+    
+    const badFno = fno.filter(i => !i.lotSize || i.lotSize <= 1);
+    const badNse = nse.filter(i => !i.lotSize || i.lotSize <= 1);
+    
+    const sampleByName = (name) => fno
+      .filter(i => (i.name || '').toUpperCase().includes(name))
+      .slice(0, 5)
+      .map(i => ({ symbol: i.symbol, tradingSymbol: i.tradingSymbol, lotSize: i.lotSize, token: i.token }));
+    
+    res.json({
+      summary: {
+        total: instruments.length,
+        fno: fno.length,
+        nse: nse.length,
+        mcx: mcx.length,
+        badFno: badFno.length,
+        badNse: badNse.length
+      },
+      lotSizeDistinct: {
+        fno: Array.from(new Set(fno.map(i => i.lotSize))).sort((a, b) => a - b),
+        nse: Array.from(new Set(nse.map(i => i.lotSize))).sort((a, b) => a - b),
+        mcx: Array.from(new Set(mcx.map(i => i.lotSize))).sort((a, b) => a - b)
+      },
+      samples: {
+        NIFTY: sampleByName('NIFTY'),
+        BANKNIFTY: sampleByName('BANKNIFTY'),
+        FINNIFTY: sampleByName('FINNIFTY'),
+        MIDCPNIFTY: sampleByName('MIDCPNIFTY')
+      },
+      badSamples: {
+        fno: badFno.slice(0, 10).map(i => ({
+          symbol: i.symbol,
+          tradingSymbol: i.tradingSymbol,
+          exchange: i.exchange,
+          lotSize: i.lotSize,
+          token: i.token
+        })),
+        nse: badNse.slice(0, 10).map(i => ({
+          symbol: i.symbol,
+          tradingSymbol: i.tradingSymbol,
+          exchange: i.exchange,
+          lotSize: i.lotSize,
+          token: i.token
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Lot size diagnostics error:', error.message);
+    res.status(500).json({ message: error.message });
   }
 });
 
@@ -777,15 +909,15 @@ router.post('/sync-all-instruments', protectAdmin, superAdminOnly, async (req, r
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const allInstruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
@@ -1096,15 +1228,15 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const allInstruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
@@ -1566,15 +1698,15 @@ router.post('/sync-all-nse', protectAdmin, superAdminOnly, async (req, res) => {
       }
     );
     
-    // Parse CSV
+    // Parse CSV with proper quote handling
     const lines = response.data.split('\n');
-    const headers = lines[0].split(',');
+    const headers = parseCSVLine(lines[0]);
     
     const allInstruments = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const values = lines[i].split(',');
+      const values = parseCSVLine(lines[i]);
       const inst = {};
       headers.forEach((h, idx) => {
         inst[h.trim()] = values[idx]?.trim();
