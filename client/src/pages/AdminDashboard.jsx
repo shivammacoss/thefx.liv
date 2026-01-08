@@ -293,7 +293,7 @@ const AdminDashboard = () => {
           {/* Admin Only Routes */}
           {!isSuperAdmin && <Route path="wallet" element={<AdminWallet />} />}
           {!isSuperAdmin && <Route path="users/*" element={<UserManagement />} />}
-          {!isSuperAdmin && <Route path="trades" element={<AdminTrades />} />}
+          {!isSuperAdmin && <Route path="trades" element={<AllTrades />} />}
           {!isSuperAdmin && <Route path="fund-requests" element={<FundRequests />} />}
           {!isSuperAdmin && <Route path="bank-accounts" element={<BankAccounts />} />}
           {!isSuperAdmin && <Route path="ledger" element={<LedgerView />} />}
