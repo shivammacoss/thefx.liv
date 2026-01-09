@@ -314,9 +314,23 @@ const SuperAdminDashboard = () => {
   const { admin } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [zerodhaStatus, setZerodhaStatus] = useState({ connected: false });
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     fetchStats();
+    fetchZerodhaStatus();
+    
+    // Check URL params for Zerodha callback
+    const params = new URLSearchParams(window.location.search);
+    const zerodhaResult = params.get('zerodha');
+    if (zerodhaResult === 'success') {
+      window.history.replaceState({}, '', window.location.pathname);
+      fetchZerodhaStatus();
+    } else if (zerodhaResult === 'error') {
+      alert('Zerodha connection failed: ' + (params.get('message') || 'Unknown error'));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   const fetchStats = async () => {
@@ -332,6 +346,28 @@ const SuperAdminDashboard = () => {
     }
   };
 
+  const fetchZerodhaStatus = async () => {
+    try {
+      const { data } = await axios.get('/api/zerodha/status');
+      setZerodhaStatus(data);
+    } catch (error) {
+      console.error('Error fetching Zerodha status:', error);
+    }
+  };
+
+  const connectZerodha = async () => {
+    setConnecting(true);
+    try {
+      const { data } = await axios.get('/api/zerodha/login-url', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      window.location.href = data.loginUrl;
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error getting Zerodha login URL');
+      setConnecting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -342,7 +378,42 @@ const SuperAdminDashboard = () => {
 
   return (
     <div className="p-4 md:p-6">
-      <h1 className="text-2xl font-bold mb-6">Super Admin Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Super Admin Dashboard</h1>
+        
+        {/* Zerodha Connection */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${zerodhaStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+            <span className="text-sm text-gray-400">
+              Zerodha: {zerodhaStatus.connected ? (
+                <span className="text-green-400">Connected ({zerodhaStatus.userId})</span>
+              ) : (
+                <span className="text-red-400">Disconnected</span>
+              )}
+            </span>
+          </div>
+          {!zerodhaStatus.connected && (
+            <button
+              onClick={connectZerodha}
+              disabled={connecting}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {connecting ? (
+                <>
+                  <RefreshCw className="animate-spin" size={14} />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <TrendingUp size={14} />
+                  Connect Zerodha
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard title="Total Admins" value={stats?.totalAdmins || 0} subtitle={`${stats?.activeAdmins || 0} active`} color="yellow" />
@@ -2043,7 +2114,7 @@ const SuperAdminCreateUser = () => {
           
           {/* Segment Tabs for Script Settings */}
           <div className="flex flex-wrap gap-2 mb-4">
-            {['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ'].map(seg => (
+            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].map(seg => (
               <button
                 key={seg}
                 type="button"
@@ -2120,14 +2191,31 @@ const SuperAdminCreateUser = () => {
                 </div>
               </div>
               
-              {/* Symbol List */}
+              {/* Search Filter */}
+              <div className="mb-3">
+                <input
+                  type="text"
+                  placeholder="Search symbols..."
+                  value={formData.scriptSearchTerm || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, scriptSearchTerm: e.target.value }))}
+                  className="w-full bg-dark-600 border border-dark-500 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+              </div>
+              
+              {/* Symbol List with Checkboxes */}
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4 max-h-40 overflow-y-auto">
-                {(formData.segmentSymbols?.[formData.selectedScriptSegment] || []).map(symbol => {
+                {(formData.segmentSymbols?.[formData.selectedScriptSegment] || [])
+                  .filter(symbol => !formData.scriptSearchTerm || symbol.toLowerCase().includes(formData.scriptSearchTerm.toLowerCase()))
+                  .map(symbol => {
                   const isCustomized = formData.scriptSettings?.[symbol];
                   return (
-                    <button
+                    <div
                       key={symbol}
-                      type="button"
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium transition-all cursor-pointer ${
+                        isCustomized
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                      } ${formData.selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
                       onClick={() => {
                         if (isCustomized) {
                           setFormData(prev => ({ ...prev, selectedScript: symbol }));
@@ -2143,7 +2231,6 @@ const SuperAdminCreateUser = () => {
                               [symbol]: {
                                 segment: segmentKey,
                                 settingType: 'LOT',
-                                // Use segment settings as defaults
                                 lotSettings: { 
                                   maxLots: segmentDefaults.maxLots || 50, 
                                   minLots: segmentDefaults.minLots || 1, 
@@ -2162,14 +2249,54 @@ const SuperAdminCreateUser = () => {
                           }));
                         }
                       }}
-                      className={`px-2 py-1.5 rounded text-xs font-medium transition-all ${
-                        isCustomized
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
-                      } ${formData.selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
                     >
-                      {symbol}
-                    </button>
+                      <input
+                        type="checkbox"
+                        checked={!!isCustomized}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (isCustomized) {
+                            // Remove from script settings
+                            const updatedScripts = { ...formData.scriptSettings };
+                            delete updatedScripts[symbol];
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              scriptSettings: updatedScripts,
+                              selectedScript: prev.selectedScript === symbol ? null : prev.selectedScript
+                            }));
+                          } else {
+                            // Add to script settings with defaults
+                            const segmentKey = formData.selectedScriptSegment;
+                            const segmentDefaults = formData.segmentPermissions?.[segmentKey] || {};
+                            setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [symbol]: {
+                                  segment: segmentKey,
+                                  settingType: 'LOT',
+                                  lotSettings: { 
+                                    maxLots: segmentDefaults.maxLots || 50, 
+                                    minLots: segmentDefaults.minLots || 1, 
+                                    perOrderLots: segmentDefaults.orderLots || 10 
+                                  },
+                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                  fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                  brokerage: { 
+                                    type: segmentDefaults.commissionType || 'PER_LOT', 
+                                    value: segmentDefaults.commissionLot || 0 
+                                  },
+                                  spread: { buy: 0, sell: 0 },
+                                  block: { future: false, option: false }
+                                }
+                              }
+                            }));
+                          }
+                        }}
+                        className="w-3 h-3 accent-purple-500"
+                      />
+                      <span className="truncate">{symbol}</span>
+                    </div>
                   );
                 })}
                 {(!formData.segmentSymbols?.[formData.selectedScriptSegment] || formData.segmentSymbols[formData.selectedScriptSegment].length === 0) && (
@@ -2708,6 +2835,7 @@ const AdminCreateUser = () => {
     scriptSettings: {},
     selectedScriptSegment: null,
     selectedScript: null,
+    scriptSearchTerm: '',
     segmentSymbols: {}
   });
 
@@ -3135,6 +3263,247 @@ const AdminCreateUser = () => {
                   />
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Script Settings - Full Width */}
+        <div className="lg:col-span-2 bg-dark-800 rounded-lg p-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-purple-400">Script Settings</h2>
+            <p className="text-gray-400 text-sm">Select a segment to view its symbols. Click on a symbol to customize its settings.</p>
+          </div>
+          
+          {/* Segment Tabs for Script Settings */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].map(seg => (
+              <button
+                key={seg}
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, selectedScriptSegment: seg, scriptSearchTerm: '' }))}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  formData.selectedScriptSegment === seg
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                }`}
+              >
+                {seg}
+              </button>
+            ))}
+          </div>
+          
+          {formData.selectedScriptSegment && (
+            <div className="bg-dark-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-yellow-400">{formData.selectedScriptSegment} Symbols</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">
+                    {Object.keys(formData.scriptSettings || {}).filter(s => 
+                      formData.scriptSettings[s]?.segment === formData.selectedScriptSegment
+                    ).length} customized
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const symbols = formData.segmentSymbols?.[formData.selectedScriptSegment] || [];
+                      const segmentDefaults = formData.segmentPermissions?.[formData.selectedScriptSegment] || {};
+                      const newScriptSettings = { ...formData.scriptSettings };
+                      symbols.forEach(symbol => {
+                        if (!newScriptSettings[symbol]) {
+                          newScriptSettings[symbol] = {
+                            segment: formData.selectedScriptSegment,
+                            settingType: 'LOT',
+                            lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                            quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                          };
+                        }
+                      });
+                      setFormData(prev => ({ ...prev, scriptSettings: newScriptSettings }));
+                    }}
+                    className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const symbols = formData.segmentSymbols?.[formData.selectedScriptSegment] || [];
+                      const newScriptSettings = { ...formData.scriptSettings };
+                      symbols.forEach(symbol => {
+                        delete newScriptSettings[symbol];
+                      });
+                      setFormData(prev => ({ ...prev, scriptSettings: newScriptSettings, selectedScript: null }));
+                    }}
+                    className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs font-medium"
+                  >
+                    Unselect All
+                  </button>
+                </div>
+              </div>
+              
+              {/* Search Filter */}
+              <div className="mb-3">
+                <input
+                  type="text"
+                  placeholder="Search symbols..."
+                  value={formData.scriptSearchTerm || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, scriptSearchTerm: e.target.value }))}
+                  className="w-full bg-dark-600 border border-dark-500 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+              </div>
+              
+              {/* Symbol List with Checkboxes */}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4 max-h-40 overflow-y-auto">
+                {(formData.segmentSymbols?.[formData.selectedScriptSegment] || [])
+                  .filter(symbol => !formData.scriptSearchTerm || symbol.toLowerCase().includes(formData.scriptSearchTerm.toLowerCase()))
+                  .map(symbol => {
+                  const isCustomized = formData.scriptSettings?.[symbol];
+                  return (
+                    <div
+                      key={symbol}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium transition-all cursor-pointer ${
+                        isCustomized
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                      } ${formData.selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
+                      onClick={() => {
+                        if (isCustomized) {
+                          setFormData(prev => ({ ...prev, selectedScript: symbol }));
+                        } else {
+                          const segmentDefaults = formData.segmentPermissions?.[formData.selectedScriptSegment] || {};
+                          setFormData(prev => ({
+                            ...prev,
+                            selectedScript: symbol,
+                            scriptSettings: {
+                              ...prev.scriptSettings,
+                              [symbol]: {
+                                segment: formData.selectedScriptSegment,
+                                settingType: 'LOT',
+                                lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                              }
+                            }
+                          }));
+                        }
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!isCustomized}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (isCustomized) {
+                            const updatedScripts = { ...formData.scriptSettings };
+                            delete updatedScripts[symbol];
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              scriptSettings: updatedScripts,
+                              selectedScript: prev.selectedScript === symbol ? null : prev.selectedScript
+                            }));
+                          } else {
+                            const segmentDefaults = formData.segmentPermissions?.[formData.selectedScriptSegment] || {};
+                            setFormData(prev => ({
+                              ...prev,
+                              scriptSettings: {
+                                ...prev.scriptSettings,
+                                [symbol]: {
+                                  segment: formData.selectedScriptSegment,
+                                  settingType: 'LOT',
+                                  lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                }
+                              }
+                            }));
+                          }
+                        }}
+                        className="w-3 h-3 accent-purple-500"
+                      />
+                      <span className="truncate">{symbol}</span>
+                    </div>
+                  );
+                })}
+                {(!formData.segmentSymbols?.[formData.selectedScriptSegment] || formData.segmentSymbols[formData.selectedScriptSegment].length === 0) && (
+                  <p className="col-span-full text-xs text-gray-500 italic">No symbols available for this segment</p>
+                )}
+              </div>
+              
+              {/* Selected Symbol Settings */}
+              {formData.selectedScript && formData.scriptSettings?.[formData.selectedScript] && (
+                <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-yellow-400">{formData.selectedScript} Settings</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updatedScripts = { ...formData.scriptSettings };
+                        delete updatedScripts[formData.selectedScript];
+                        setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
+                      }}
+                      className="text-red-400 hover:text-red-300 text-xs"
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+                  
+                  {/* Lot Settings */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500">Max Lots</label>
+                      <input
+                        type="number"
+                        value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.maxLots || 50}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          scriptSettings: {
+                            ...prev.scriptSettings,
+                            [formData.selectedScript]: {
+                              ...prev.scriptSettings[formData.selectedScript],
+                              lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, maxLots: Number(e.target.value) }
+                            }
+                          }
+                        }))}
+                        className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500">Min Lots</label>
+                      <input
+                        type="number"
+                        value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.minLots || 1}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          scriptSettings: {
+                            ...prev.scriptSettings,
+                            [formData.selectedScript]: {
+                              ...prev.scriptSettings[formData.selectedScript],
+                              lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, minLots: Number(e.target.value) }
+                            }
+                          }
+                        }))}
+                        className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500">Per Order</label>
+                      <input
+                        type="number"
+                        value={formData.scriptSettings[formData.selectedScript]?.lotSettings?.perOrderLots || 10}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          scriptSettings: {
+                            ...prev.scriptSettings,
+                            [formData.selectedScript]: {
+                              ...prev.scriptSettings[formData.selectedScript],
+                              lotSettings: { ...prev.scriptSettings[formData.selectedScript]?.lotSettings, perOrderLots: Number(e.target.value) }
+                            }
+                          }
+                        }))}
+                        className="w-full bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -9563,7 +9932,7 @@ const AllUsersManagement = () => {
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   
-  const defaultSegmentOptions = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ', 'NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
   
   const defaultSegmentSettings = {
     enabled: false,
@@ -10469,7 +10838,11 @@ const AllUsersManagement = () => {
                                   minLots: segmentDefaults.minLots || 1, 
                                   perOrderLots: segmentDefaults.orderLots || 10 
                                 },
-                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                spread: { buy: 0, sell: 0 },
+                                block: { future: false, option: false }
                               };
                             }
                           });
@@ -10497,39 +10870,95 @@ const AllUsersManagement = () => {
                     </div>
                   </div>
                   
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {(segmentSymbols[selectedScriptSegment] || []).map(symbol => (
-                      <button
-                        key={symbol}
-                        type="button"
-                        onClick={() => {
-                          if (!editFormData.scriptSettings?.[symbol]) {
-                            setEditFormData(prev => ({
-                              ...prev,
-                              scriptSettings: {
-                                ...prev.scriptSettings,
-                                [symbol]: {
-                                  segment: selectedScriptSegment,
-                                  settingType: 'LOT',
-                                  lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
-                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
-                                }
-                              }
-                            }));
-                          }
-                          setSelectedScript(symbol);
-                        }}
-                        className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-                          selectedScript === symbol
-                            ? 'bg-yellow-600 text-white'
-                            : editFormData.scriptSettings?.[symbol]
-                              ? 'bg-purple-600/30 text-purple-400 border border-purple-600'
+                  {/* Search Filter */}
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      placeholder="Search symbols..."
+                      value={editFormData.scriptSearchTerm || ''}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, scriptSearchTerm: e.target.value }))}
+                      className="w-full bg-dark-600 border border-dark-500 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+                  
+                  {/* Symbol List with Checkboxes */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4 max-h-40 overflow-y-auto">
+                    {(segmentSymbols[selectedScriptSegment] || [])
+                      .filter(symbol => !editFormData.scriptSearchTerm || symbol.toLowerCase().includes(editFormData.scriptSearchTerm.toLowerCase()))
+                      .map(symbol => {
+                      const isCustomized = editFormData.scriptSettings?.[symbol];
+                      return (
+                        <div
+                          key={symbol}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium transition-all cursor-pointer ${
+                            isCustomized
+                              ? 'bg-purple-600 text-white'
                               : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
-                        }`}
-                      >
-                        {symbol}
-                      </button>
-                    ))}
+                          } ${selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
+                          onClick={() => {
+                            if (isCustomized) {
+                              setSelectedScript(symbol);
+                            } else {
+                              const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
+                              setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [symbol]: {
+                                    segment: selectedScriptSegment,
+                                    settingType: 'LOT',
+                                    lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                    quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                    fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                    brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                    spread: { buy: 0, sell: 0 },
+                                    block: { future: false, option: false }
+                                  }
+                                }
+                              }));
+                              setSelectedScript(symbol);
+                            }
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!isCustomized}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              if (isCustomized) {
+                                const updatedScripts = { ...editFormData.scriptSettings };
+                                delete updatedScripts[symbol];
+                                setEditFormData(prev => ({ 
+                                  ...prev, 
+                                  scriptSettings: updatedScripts
+                                }));
+                                if (selectedScript === symbol) setSelectedScript(null);
+                              } else {
+                                const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
+                                setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [symbol]: {
+                                      segment: selectedScriptSegment,
+                                      settingType: 'LOT',
+                                      lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                      quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                      fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                      brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                      spread: { buy: 0, sell: 0 },
+                                      block: { future: false, option: false }
+                                    }
+                                  }
+                                }));
+                              }
+                            }}
+                            className="w-3 h-3 accent-purple-500"
+                          />
+                          <span className="truncate">{symbol}</span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Selected Symbol Settings */}
@@ -11442,6 +11871,7 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [action, setAction] = useState('add');
+  const [walletType, setWalletType] = useState('main'); // 'main' or 'trading'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -11454,12 +11884,18 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
     }
     setLoading(true);
     try {
-      const endpoint = action === 'add' ? 'add-funds' : 'deduct-funds';
+      let endpoint;
+      if (walletType === 'trading') {
+        endpoint = action === 'add' ? 'add-trading-funds' : 'deduct-trading-funds';
+      } else {
+        endpoint = action === 'add' ? 'add-funds' : 'deduct-funds';
+      }
       await axios.post(`/api/admin/manage/users/${user._id}/${endpoint}`, 
         { amount: parseFloat(amount), description },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      alert(`Funds ${action === 'add' ? 'added' : 'deducted'} successfully`);
+      const walletName = walletType === 'trading' ? 'Trading Wallet' : 'Main Wallet';
+      alert(`${walletName}: Funds ${action === 'add' ? 'added' : 'deducted'} successfully`);
       onSuccess();
       onClose();
     } catch (error) {
@@ -11560,6 +11996,28 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Wallet Type Selection */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Select Wallet</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setWalletType('main')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${walletType === 'main' ? 'bg-blue-600 text-white' : 'bg-dark-600 text-gray-400'}`}
+              >
+                Main Wallet
+              </button>
+              <button
+                type="button"
+                onClick={() => setWalletType('trading')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${walletType === 'trading' ? 'bg-purple-600 text-white' : 'bg-dark-600 text-gray-400'}`}
+              >
+                Trading Wallet
+              </button>
+            </div>
+          </div>
+
+          {/* Action Selection */}
           <div className="flex gap-2">
             <button
               type="button"
@@ -11573,7 +12031,7 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
               onClick={() => setAction('deduct')}
               className={`flex-1 py-2 rounded-lg ${action === 'deduct' ? 'bg-red-600' : 'bg-dark-600'}`}
             >
-              Deduct Funds
+              {walletType === 'trading' ? 'Withdraw' : 'Deduct Funds'}
             </button>
           </div>
           <div>
@@ -11603,7 +12061,7 @@ const SuperAdminWalletModal = ({ user, onClose, onSuccess, token }) => {
               disabled={loading} 
               className={`flex-1 ${action === 'add' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-50 py-2 rounded-lg`}
             >
-              {loading ? 'Processing...' : action === 'add' ? 'Add Funds' : 'Deduct Funds'}
+              {loading ? 'Processing...' : action === 'add' ? 'Add Funds' : (walletType === 'trading' ? 'Withdraw' : 'Deduct Funds')}
             </button>
           </div>
         </form>
@@ -11738,7 +12196,7 @@ const UserManagement = () => {
     users, 20, searchTerm, ['username', 'fullName', 'email', 'phone']
   );
   
-  const defaultSegmentOptions = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ', 'NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
   const [marketSegments, setMarketSegments] = useState([]);
   const [marketScripts, setMarketScripts] = useState({});
   
@@ -12594,18 +13052,28 @@ const UserManagement = () => {
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-medium text-yellow-400">{selectedScriptSegment} Symbols</h4>
                     <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        {Object.keys(editFormData.scriptSettings || {}).filter(s => 
+                          editFormData.scriptSettings[s]?.segment === selectedScriptSegment
+                        ).length} customized
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
                           const symbols = segmentSymbols[selectedScriptSegment] || [];
+                          const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
                           const newScriptSettings = { ...editFormData.scriptSettings };
                           symbols.forEach(symbol => {
                             if (!newScriptSettings[symbol]) {
                               newScriptSettings[symbol] = {
                                 segment: selectedScriptSegment,
                                 settingType: 'LOT',
-                                lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
-                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
+                                lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                spread: { buy: 0, sell: 0 },
+                                block: { future: false, option: false }
                               };
                             }
                           });
@@ -12633,39 +13101,92 @@ const UserManagement = () => {
                     </div>
                   </div>
                   
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {(segmentSymbols[selectedScriptSegment] || []).map(symbol => (
-                      <button
-                        key={symbol}
-                        type="button"
-                        onClick={() => {
-                          if (!editFormData.scriptSettings?.[symbol]) {
-                            setEditFormData(prev => ({
-                              ...prev,
-                              scriptSettings: {
-                                ...prev.scriptSettings,
-                                [symbol]: {
-                                  segment: selectedScriptSegment,
-                                  settingType: 'LOT',
-                                  lotSettings: { maxLots: 50, minLots: 1, perOrderLots: 10 },
-                                  quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 }
-                                }
-                              }
-                            }));
-                          }
-                          setSelectedScript(symbol);
-                        }}
-                        className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-                          selectedScript === symbol
-                            ? 'bg-yellow-600 text-white'
-                            : editFormData.scriptSettings?.[symbol]
-                              ? 'bg-purple-600/30 text-purple-400 border border-purple-600'
+                  {/* Search Filter */}
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      placeholder="Search symbols..."
+                      value={editFormData.scriptSearchTerm || ''}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, scriptSearchTerm: e.target.value }))}
+                      className="w-full bg-dark-600 border border-dark-500 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+                  
+                  {/* Symbol List with Checkboxes */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4 max-h-40 overflow-y-auto">
+                    {(segmentSymbols[selectedScriptSegment] || [])
+                      .filter(symbol => !editFormData.scriptSearchTerm || symbol.toLowerCase().includes(editFormData.scriptSearchTerm.toLowerCase()))
+                      .map(symbol => {
+                      const isCustomized = editFormData.scriptSettings?.[symbol];
+                      return (
+                        <div
+                          key={symbol}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium transition-all cursor-pointer ${
+                            isCustomized
+                              ? 'bg-purple-600 text-white'
                               : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
-                        }`}
-                      >
-                        {symbol}
-                      </button>
-                    ))}
+                          } ${selectedScript === symbol ? 'ring-2 ring-yellow-500' : ''}`}
+                          onClick={() => {
+                            if (isCustomized) {
+                              setSelectedScript(symbol);
+                            } else {
+                              const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
+                              setEditFormData(prev => ({
+                                ...prev,
+                                scriptSettings: {
+                                  ...prev.scriptSettings,
+                                  [symbol]: {
+                                    segment: selectedScriptSegment,
+                                    settingType: 'LOT',
+                                    lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                    quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                    fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                    brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                    spread: { buy: 0, sell: 0 },
+                                    block: { future: false, option: false }
+                                  }
+                                }
+                              }));
+                              setSelectedScript(symbol);
+                            }
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!isCustomized}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              if (isCustomized) {
+                                const updatedScripts = { ...editFormData.scriptSettings };
+                                delete updatedScripts[symbol];
+                                setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
+                                if (selectedScript === symbol) setSelectedScript(null);
+                              } else {
+                                const segmentDefaults = editFormData.segmentPermissions?.[selectedScriptSegment] || {};
+                                setEditFormData(prev => ({
+                                  ...prev,
+                                  scriptSettings: {
+                                    ...prev.scriptSettings,
+                                    [symbol]: {
+                                      segment: selectedScriptSegment,
+                                      settingType: 'LOT',
+                                      lotSettings: { maxLots: segmentDefaults.maxLots || 50, minLots: segmentDefaults.minLots || 1, perOrderLots: segmentDefaults.orderLots || 10 },
+                                      quantitySettings: { maxQuantity: 1000, minQuantity: 1, perOrderQuantity: 100 },
+                                      fixedMargin: { intradayFuture: 0, carryFuture: 0, optionBuyIntraday: 0, optionBuyCarry: 0, optionSellIntraday: 0, optionSellCarry: 0 },
+                                      brokerage: { type: segmentDefaults.commissionType || 'PER_LOT', value: segmentDefaults.commissionLot || 0 },
+                                      spread: { buy: 0, sell: 0 },
+                                      block: { future: false, option: false }
+                                    }
+                                  }
+                                }));
+                              }
+                            }}
+                            className="w-3 h-3 accent-purple-500"
+                          />
+                          <span className="truncate">{symbol}</span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Selected Symbol Settings */}
@@ -13557,6 +14078,7 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
   const [success, setSuccess] = useState('');
   const [walletData, setWalletData] = useState(null);
   const [adminBalance, setAdminBalance] = useState(admin?.wallet?.balance || 0);
+  const [walletType, setWalletType] = useState('main'); // 'main' or 'trading'
 
   useEffect(() => {
     fetchWallet();
@@ -13621,9 +14143,16 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
     setError('');
     try {
       // Use the correct API that handles admin wallet deduction/credit
-      const endpoint = type === 'deposit' 
-        ? `/api/admin/manage/users/${user._id}/add-funds`
-        : `/api/admin/manage/users/${user._id}/deduct-funds`;
+      let endpoint;
+      if (walletType === 'trading') {
+        endpoint = type === 'deposit' 
+          ? `/api/admin/manage/users/${user._id}/add-trading-funds`
+          : `/api/admin/manage/users/${user._id}/deduct-trading-funds`;
+      } else {
+        endpoint = type === 'deposit' 
+          ? `/api/admin/manage/users/${user._id}/add-funds`
+          : `/api/admin/manage/users/${user._id}/deduct-funds`;
+      }
       
       const { data } = await axios.post(endpoint, 
         { amount: Number(amount), description },
@@ -13721,6 +14250,27 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
         )}
 
         <div className="space-y-4">
+          {/* Wallet Type Selection */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Select Wallet</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setWalletType('main')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${walletType === 'main' ? 'bg-blue-600 text-white' : 'bg-dark-600 text-gray-400'}`}
+              >
+                Main Wallet
+              </button>
+              <button
+                type="button"
+                onClick={() => setWalletType('trading')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${walletType === 'trading' ? 'bg-purple-600 text-white' : 'bg-dark-600 text-gray-400'}`}
+              >
+                Trading Wallet
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm text-gray-400 mb-1">Amount (₹)</label>
             <input
@@ -13751,7 +14301,7 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
             className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 py-2 rounded transition disabled:opacity-50"
           >
             <ArrowUpCircle size={18} />
-            Deposit
+            {walletType === 'trading' ? 'Add to Trading' : 'Deposit'}
           </button>
           <button
             onClick={() => handleTransaction('withdraw')}
@@ -13759,7 +14309,7 @@ const WalletModal = ({ user, onClose, onSuccess, token }) => {
             className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 py-2 rounded transition disabled:opacity-50"
           >
             <ArrowDownCircle size={18} />
-            Withdraw
+            {walletType === 'trading' ? 'Withdraw from Trading' : 'Withdraw'}
           </button>
         </div>
 

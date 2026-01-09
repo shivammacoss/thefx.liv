@@ -890,11 +890,26 @@ class TradingService {
     // BUY position closes at Bid price (you sell at bid)
     // SELL position closes at Ask price (you buy at ask)
     let price = exitPrice || trade.currentPrice || trade.entryPrice;
-    if (trade.side === 'BUY' && bidPrice) {
-      price = bidPrice;
-    } else if (trade.side === 'SELL' && askPrice) {
-      price = askPrice;
+    
+    // Priority for exit price:
+    // 1. Specific bid/ask based on position side
+    // 2. Explicit exitPrice parameter
+    // 3. Trade's current market price
+    // 4. Trade's entry price as last resort
+    if (trade.side === 'BUY') {
+      // Closing a BUY = selling, use bid price
+      price = bidPrice || exitPrice || trade.currentPrice || trade.entryPrice;
+    } else {
+      // Closing a SELL = buying, use ask price
+      price = askPrice || exitPrice || trade.currentPrice || trade.entryPrice;
     }
+    
+    // Validate price is reasonable (not zero or negative)
+    if (!price || price <= 0) {
+      throw new Error('Invalid exit price. Please try again with valid market data.');
+    }
+    
+    console.log(`Closing ${trade.side} position ${positionId}: exitPrice=${price}, bid=${bidPrice}, ask=${askPrice}, current=${trade.currentPrice}`);
     
     return this.closeTrade(positionId, price, reason);
   }

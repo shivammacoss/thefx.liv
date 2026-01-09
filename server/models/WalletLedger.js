@@ -32,6 +32,8 @@ const walletLedgerSchema = new mongoose.Schema({
     enum: [
       'FUND_ADD',           // Admin adds fund to user
       'FUND_WITHDRAW',      // User withdraws fund
+      'TRADING_FUND_ADD',   // Admin adds fund directly to trading wallet
+      'TRADING_FUND_WITHDRAW', // Admin withdraws from trading wallet
       'TRADE_PNL',          // Trading profit/loss
       'BROKERAGE',          // Brokerage charges
       'PROFIT_SHARE',       // Profit share to admin

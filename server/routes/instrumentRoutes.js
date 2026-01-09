@@ -1473,7 +1473,7 @@ router.post('/watchlist/sync', protectUser, async (req, res) => {
     
     // Update each segment
     for (const [segment, instruments] of Object.entries(watchlistBySegment)) {
-      if (!['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'FAVORITES'].includes(segment)) continue;
+      if (!['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO', 'CDS', 'FAVORITES'].includes(segment)) continue;
       
       await Watchlist.findOneAndUpdate(
         { userId, segment },

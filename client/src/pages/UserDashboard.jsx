@@ -661,10 +661,10 @@ const UserDashboard = () => {
           />
         )}
         {mobileView === 'positions' && (
-          <MobilePositionsPanel activeTab="positions" user={user} marketData={marketData} cryptoOnly={cryptoOnly} />
+          <MobilePositionsPanel activeTab="positions" user={user} marketData={marketData} cryptoOnly={cryptoOnly} walletData={walletData} />
         )}
         {mobileView === 'history' && (
-          <MobilePositionsPanel activeTab="history" user={user} marketData={marketData} cryptoOnly={cryptoOnly} />
+          <MobilePositionsPanel activeTab="history" user={user} marketData={marketData} cryptoOnly={cryptoOnly} walletData={walletData} />
         )}
         {mobileView === 'profile' && (
           <MobileProfilePanel user={user} walletData={walletData} onLogout={handleLogout} />
@@ -672,41 +672,41 @@ const UserDashboard = () => {
       </div>
 
       {/* Mobile Bottom Navigation - Fixed */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-800 border-t border-dark-600 flex items-center justify-around py-2 z-40">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-800 border-t border-dark-600 flex items-center justify-around py-1.5 z-40">
         <button 
           onClick={() => setMobileView('quotes')}
-          className={`flex flex-col items-center p-2 ${mobileView === 'quotes' ? 'text-green-400' : 'text-gray-400'}`}
+          className={`flex flex-col items-center p-1.5 ${mobileView === 'quotes' ? 'text-green-400' : 'text-gray-400'}`}
         >
-          <ListOrdered size={20} />
-          <span className="text-xs mt-1">Quotes</span>
+          <ListOrdered size={18} />
+          <span className="text-[10px] mt-0.5">Quotes</span>
         </button>
         <button 
           onClick={() => setMobileView('chart')}
-          className={`flex flex-col items-center p-2 ${mobileView === 'chart' ? 'text-green-400' : 'text-gray-400'}`}
+          className={`flex flex-col items-center p-1.5 ${mobileView === 'chart' ? 'text-green-400' : 'text-gray-400'}`}
         >
-          <BarChart2 size={20} />
-          <span className="text-xs mt-1">Chart</span>
+          <BarChart2 size={18} />
+          <span className="text-[10px] mt-0.5">Chart</span>
         </button>
         <button 
           onClick={() => openBuySell('buy')}
-          className="flex flex-col items-center p-2 bg-green-600 rounded-full -mt-4 px-4"
+          className="flex flex-col items-center p-2 bg-gradient-to-r from-green-600 to-green-500 rounded-full -mt-5 px-4 shadow-lg shadow-green-600/30"
         >
-          <TrendingUp size={24} />
-          <span className="text-xs mt-1">Trade</span>
+          <TrendingUp size={22} />
+          <span className="text-[10px] mt-0.5 font-medium">Trade</span>
         </button>
         <button 
           onClick={() => setMobileView('positions')}
-          className={`flex flex-col items-center p-2 ${mobileView === 'positions' ? 'text-green-400' : 'text-gray-400'}`}
+          className={`flex flex-col items-center p-1.5 ${mobileView === 'positions' || mobileView === 'history' ? 'text-green-400' : 'text-gray-400'}`}
         >
-          <Wallet size={20} />
-          <span className="text-xs mt-1">Positions</span>
+          <Wallet size={18} />
+          <span className="text-[10px] mt-0.5">Portfolio</span>
         </button>
         <button 
-          onClick={() => navigate('/user/orders')}
-          className="flex flex-col items-center p-2 text-gray-400"
+          onClick={() => setMobileView('profile')}
+          className={`flex flex-col items-center p-1.5 ${mobileView === 'profile' ? 'text-green-400' : 'text-gray-400'}`}
         >
-          <History size={20} />
-          <span className="text-xs mt-1">Orders</span>
+          <User size={18} />
+          <span className="text-[10px] mt-0.5">Profile</span>
         </button>
       </nav>
 
@@ -2073,16 +2073,17 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
       </div>
 
       {/* Table Header */}
-      <div className="grid grid-cols-9 gap-2 px-4 py-2 text-xs text-gray-400 border-b border-dark-700">
+      <div className={`grid ${activeTab === 'history' ? 'grid-cols-10' : 'grid-cols-9'} gap-2 px-4 py-2 text-xs text-gray-400 border-b border-dark-700`}>
         <div>User ID</div>
         <div>Symbol</div>
         <div>Side</div>
         <div className="text-right">Qty</div>
         <div className="text-right">Entry</div>
-        <div className="text-right">LTP</div>
+        <div className="text-right">{activeTab === 'history' ? 'Exit' : 'LTP'}</div>
         <div className="text-right">Charges</div>
         <div className="text-right">P&L</div>
-        <div className="text-center">Action</div>
+        {activeTab === 'history' && <div className="text-center">Duration</div>}
+        <div className="text-center">{activeTab === 'history' ? 'Reason' : 'Action'}</div>
       </div>
 
       {/* Content */}
@@ -2158,8 +2159,22 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
         {activeTab === 'history' && history.map(trade => {
           const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
           const currencySymbol = isCrypto ? '$' : '₹';
+          // Calculate trade duration
+          const getDuration = () => {
+            if (!trade.openedAt || !trade.closedAt) return '-';
+            const start = new Date(trade.openedAt);
+            const end = new Date(trade.closedAt);
+            const diffMs = end - start;
+            if (diffMs < 0) return '-';
+            const diffSecs = Math.floor(diffMs / 1000);
+            if (diffSecs < 60) return `${diffSecs}s`;
+            const diffMins = Math.floor(diffSecs / 60);
+            if (diffMins < 60) return `${diffMins}m ${diffSecs % 60}s`;
+            const diffHrs = Math.floor(diffMins / 60);
+            return `${diffHrs}h ${diffMins % 60}m`;
+          };
           return (
-            <div key={trade._id} className="grid grid-cols-9 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
+            <div key={trade._id} className="grid grid-cols-10 gap-2 px-4 py-2 text-sm border-b border-dark-700 hover:bg-dark-700">
               <div className="truncate text-purple-400 font-mono text-xs">{trade.userId || user?.userId || '-'}</div>
               <div className={`truncate font-medium ${isCrypto ? 'text-orange-400' : ''}`}>{trade.symbol}</div>
               <div className={trade.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>{trade.side}</div>
@@ -2170,6 +2185,7 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
               <div className={`text-right font-medium ${(trade.netPnL || trade.realizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {(trade.netPnL || trade.realizedPnL || 0) >= 0 ? '+' : ''}{currencySymbol}{(parseFloat(trade.netPnL || trade.realizedPnL) || 0).toFixed(2)}
               </div>
+              <div className="text-center text-xs text-blue-400" title={`Opened: ${trade.openedAt ? new Date(trade.openedAt).toLocaleString() : '-'}`}>{getDuration()}</div>
               <div className="text-center text-xs text-gray-400">{trade.closeReason || 'CLOSED'}</div>
             </div>
           );
@@ -3582,12 +3598,14 @@ const MobileChartPanel = ({ selectedInstrument, onBuySell, onBack, marketData = 
   );
 };
 
-const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false }) => {
-  const [tab, setTab] = useState(activeTab);
+const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false, walletData }) => {
+  const [tab, setTab] = useState(activeTab || 'positions');
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [history, setHistory] = useState([]);
+  const [cancelledOrders, setCancelledOrders] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [todayPnL, setTodayPnL] = useState({ realized: 0, unrealized: 0 });
 
   // Filter by crypto mode
   const filterByCryptoMode = (items) => {
@@ -3600,25 +3618,47 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
 
   useEffect(() => {
     if (user?.token) {
-      fetchData();
-      const interval = setInterval(fetchData, 15000); // Every 15 seconds
+      fetchAllData();
+      const interval = setInterval(fetchAllData, 3000);
       return () => clearInterval(interval);
     }
-  }, [user?.token, tab]);
+  }, [user?.token]);
 
-  const fetchData = async () => {
+  const fetchAllData = async () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      if (tab === 'positions') {
-        const { data } = await axios.get('/api/trading/positions?status=OPEN', { headers });
-        setPositions(filterByCryptoMode(data));
-      } else if (tab === 'pending') {
-        const { data } = await axios.get('/api/trading/pending-orders', { headers });
-        setPendingOrders(filterByCryptoMode(data));
-      } else {
-        const { data } = await axios.get('/api/trading/history', { headers });
-        setHistory(filterByCryptoMode(data));
-      }
+      const [posRes, pendingRes, historyRes] = await Promise.all([
+        axios.get('/api/trading/positions?status=OPEN', { headers }),
+        axios.get('/api/trading/pending-orders', { headers }),
+        axios.get('/api/trading/history?limit=100', { headers })
+      ]);
+      
+      const allPositions = filterByCryptoMode(posRes.data);
+      const allPending = filterByCryptoMode(pendingRes.data);
+      const allHistory = filterByCryptoMode(historyRes.data);
+      
+      setPositions(allPositions);
+      setPendingOrders(allPending.filter(o => o.status === 'PENDING'));
+      setCancelledOrders(allHistory.filter(o => o.status === 'CANCELLED' || o.closeReason === 'REJECTED'));
+      setHistory(allHistory.filter(o => o.status === 'CLOSED'));
+      
+      // Calculate Today's P&L
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayTrades = allHistory.filter(t => new Date(t.closedAt) >= today);
+      const realizedToday = todayTrades.reduce((sum, t) => sum + (t.realizedPnL || t.netPnL || 0), 0);
+      
+      // Calculate unrealized P&L from open positions
+      let unrealizedToday = 0;
+      allPositions.forEach(pos => {
+        const ltp = getCurrentPrice(pos) || pos.currentPrice || pos.entryPrice;
+        const pnl = pos.side === 'BUY' 
+          ? (ltp - pos.entryPrice) * pos.quantity 
+          : (pos.entryPrice - ltp) * pos.quantity;
+        unrealizedToday += pnl;
+      });
+      
+      setTodayPnL({ realized: realizedToday, unrealized: unrealizedToday });
     } catch (error) {
       console.error('Error:', error);
     }
@@ -3627,7 +3667,6 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
   const handleClose = async (id, item) => {
     try {
       setLoading(true);
-      // Get live bid/ask prices for the position
       const liveData = marketData[item?.token] || {};
       const bidPrice = liveData.bid || liveData.ltp || item?.currentPrice;
       const askPrice = liveData.ask || liveData.ltp || item?.currentPrice;
@@ -3636,7 +3675,7 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
         bidPrice,
         askPrice
       }, { headers: { Authorization: `Bearer ${user.token}` } });
-      fetchData();
+      fetchAllData();
     } catch (error) {
       alert(error.response?.data?.message || 'Error');
     } finally {
@@ -3644,7 +3683,20 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
     }
   };
 
-  // Indian Net Trading: BUY position uses Bid (sell) price, SELL position uses Ask (buy) price for P&L
+  const handleCancelOrder = async (id) => {
+    try {
+      setLoading(true);
+      await axios.post(`/api/trading/cancel/${id}`, {}, { 
+        headers: { Authorization: `Bearer ${user.token}` } 
+      });
+      fetchAllData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error cancelling order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getCurrentPrice = (position) => {
     const token = position.token;
     const symbol = position.symbol;
@@ -3666,9 +3718,6 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
     
     if (!data) return 0;
     
-    // Indian Net Trading Logic:
-    // BUY position: Show Bid price (price at which you can sell/exit)
-    // SELL position: Show Ask price (price at which you can buy/exit)
     if (side === 'BUY') {
       return data.bid || data.ltp || data.last_price || 0;
     } else {
@@ -3676,21 +3725,69 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
     }
   };
 
-  const currentData = tab === 'positions' ? positions : tab === 'pending' ? pendingOrders : history;
+  const tabs = [
+    { id: 'positions', label: 'Positions', count: positions.length, icon: '📊' },
+    { id: 'pending', label: 'Pending', count: pendingOrders.length, icon: '⏳' },
+    { id: 'history', label: 'History', count: history.length, icon: '📜' },
+    { id: 'cancelled', label: 'Cancelled', count: cancelledOrders.length, icon: '❌' }
+  ];
+
+  const currentData = tab === 'positions' ? positions 
+    : tab === 'pending' ? pendingOrders 
+    : tab === 'cancelled' ? cancelledOrders 
+    : history;
+
+  const totalPnL = todayPnL.realized + todayPnL.unrealized;
 
   return (
-    <div className="flex-1 flex flex-col bg-dark-800">
-      {/* Tabs */}
-      <div className="flex border-b border-dark-600">
-        {['positions', 'pending', 'history'].map(t => (
+    <div className="flex-1 flex flex-col bg-dark-900">
+      {/* Today's P&L Summary Card */}
+      <div className="bg-gradient-to-r from-dark-800 to-dark-700 p-4 border-b border-dark-600">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-gray-400 text-sm font-medium">Today's P&L</span>
+          <span className={`text-xl font-bold ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {totalPnL >= 0 ? '+' : ''}₹{totalPnL.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <div>
+            <span className="text-gray-500">Realized: </span>
+            <span className={todayPnL.realized >= 0 ? 'text-green-400' : 'text-red-400'}>
+              {todayPnL.realized >= 0 ? '+' : ''}₹{todayPnL.realized.toFixed(2)}
+            </span>
+          </div>
+          <div>
+            <span className="text-gray-500">Unrealized: </span>
+            <span className={todayPnL.unrealized >= 0 ? 'text-green-400' : 'text-red-400'}>
+              {todayPnL.unrealized >= 0 ? '+' : ''}₹{todayPnL.unrealized.toFixed(2)}
+            </span>
+          </div>
+          <div>
+            <span className="text-gray-500">Open: </span>
+            <span className="text-blue-400">{positions.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs - Professional Style */}
+      <div className="flex bg-dark-800 border-b border-dark-600 overflow-x-auto">
+        {tabs.map(t => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-3 text-sm capitalize ${
-              tab === t ? 'text-green-400 border-b-2 border-green-500' : 'text-gray-400'
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 min-w-max px-3 py-3 text-xs font-medium transition-all ${
+              tab === t.id 
+                ? 'text-green-400 border-b-2 border-green-500 bg-dark-700' 
+                : 'text-gray-400 hover:text-gray-300'
             }`}
           >
-            {t} ({t === 'positions' ? positions.length : t === 'pending' ? pendingOrders.length : history.length})
+            <span className="mr-1">{t.icon}</span>
+            {t.label}
+            <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${
+              tab === t.id ? 'bg-green-600 text-white' : 'bg-dark-600 text-gray-400'
+            }`}>
+              {t.count}
+            </span>
           </button>
         ))}
       </div>
@@ -3698,46 +3795,123 @@ const MobilePositionsPanel = ({ activeTab, user, marketData, cryptoOnly = false 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {currentData.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-gray-400 h-full">
+          <div className="flex-1 flex items-center justify-center text-gray-400 h-64">
             <div className="text-center py-8">
-              <Wallet size={48} className="mx-auto mb-4 opacity-30" />
-              <p>No {tab === 'positions' ? 'open positions' : tab === 'pending' ? 'pending orders' : 'trade history'}</p>
+              <div className="text-4xl mb-4 opacity-50">
+                {tab === 'positions' ? '📊' : tab === 'pending' ? '⏳' : tab === 'cancelled' ? '❌' : '📜'}
+              </div>
+              <p className="text-gray-500">
+                {tab === 'positions' ? 'No open positions' 
+                  : tab === 'pending' ? 'No pending orders' 
+                  : tab === 'cancelled' ? 'No cancelled orders'
+                  : 'No trade history'}
+              </p>
             </div>
           </div>
         ) : (
           <div className="divide-y divide-dark-700">
             {currentData.map(item => {
               const ltp = getCurrentPrice(item) || item.currentPrice || item.entryPrice;
-              const pnl = item.side === 'BUY' ? (ltp - item.entryPrice) * item.quantity : (item.entryPrice - ltp) * item.quantity;
+              const pnl = item.side === 'BUY' 
+                ? (ltp - item.entryPrice) * item.quantity 
+                : (item.entryPrice - ltp) * item.quantity;
+              const isCrypto = item.isCrypto || item.segment === 'CRYPTO';
+              const currencySymbol = isCrypto ? '$' : '₹';
+              const displayPnL = tab === 'history' || tab === 'cancelled' 
+                ? (item.realizedPnL || item.netPnL || 0) 
+                : pnl;
+              
+              // Calculate duration for history
+              const getDuration = () => {
+                if (!item.openedAt || !item.closedAt) return '';
+                const diffMs = new Date(item.closedAt) - new Date(item.openedAt);
+                if (diffMs < 0) return '';
+                const diffMins = Math.floor(diffMs / 60000);
+                if (diffMins < 60) return `${diffMins}m`;
+                const diffHrs = Math.floor(diffMins / 60);
+                return `${diffHrs}h ${diffMins % 60}m`;
+              };
+              
               return (
-                <div key={item._id} className="p-3">
+                <div key={item._id} className="p-3 bg-dark-800 hover:bg-dark-750 transition-colors">
                   <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <div className="font-medium">{item.symbol}</div>
-                      <div className={`text-xs ${item.side === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
-                        {item.side} • {item.quantity} qty
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${isCrypto ? 'text-orange-400' : 'text-white'}`}>
+                          {item.symbol}
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                          item.side === 'BUY' 
+                            ? 'bg-green-900/50 text-green-400' 
+                            : 'bg-red-900/50 text-red-400'
+                        }`}>
+                          {item.side}
+                        </span>
+                        {tab === 'cancelled' && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/30 text-red-400">
+                            {item.closeReason || 'CANCELLED'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {item.lots || Math.floor(item.quantity / (item.lotSize || 1))} lots • {item.quantity} qty
+                        {(tab === 'history' || tab === 'cancelled') && getDuration() && (
+                          <span className="text-blue-400 ml-2">⏱ {getDuration()}</span>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className={`font-medium ${(tab === 'history' ? item.realizedPnL : pnl) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {(tab === 'history' ? item.realizedPnL : pnl) >= 0 ? '+' : ''}₹{(tab === 'history' ? item.realizedPnL : pnl)?.toFixed(2)}
+                      <div className={`font-bold text-lg ${displayPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {displayPnL >= 0 ? '+' : ''}{currencySymbol}{Math.abs(displayPnL).toFixed(2)}
                       </div>
-                      <div className="text-xs text-gray-400">
-                        Entry: ₹{item.entryPrice?.toFixed(2)}
-                      </div>
+                      {tab === 'positions' && (
+                        <div className="text-xs text-gray-500">
+                          LTP: {currencySymbol}{(parseFloat(ltp) || 0).toFixed(2)}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <div className="text-yellow-400">
-                      Spread: {item.spread || 0} pts | Comm: ₹{(item.commission || 0).toFixed(2)}
+                  
+                  {/* Price Details */}
+                  <div className="flex justify-between items-center text-xs mb-2">
+                    <div className="flex gap-3">
+                      <span className="text-gray-400">
+                        Entry: <span className="text-white">{currencySymbol}{(item.entryPrice || 0).toFixed(2)}</span>
+                      </span>
+                      {(tab === 'history' || tab === 'cancelled') && item.exitPrice && (
+                        <span className="text-gray-400">
+                          Exit: <span className="text-white">{currencySymbol}{(item.exitPrice || 0).toFixed(2)}</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-yellow-400">
+                      Charges: {currencySymbol}{(item.commission || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  
+                  {/* Actions */}
+                  <div className="flex justify-between items-center">
+                    <div className="text-xs text-gray-500">
+                      {item.createdAt && new Date(item.closedAt || item.createdAt).toLocaleString('en-IN', {
+                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                      })}
                     </div>
                     {tab === 'positions' && (
                       <button 
                         onClick={() => handleClose(item._id, item)}
                         disabled={loading}
-                        className="px-3 py-1 bg-red-600 rounded text-white"
+                        className="px-4 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-white text-xs font-medium transition-colors disabled:opacity-50"
                       >
-                        Close
+                        {loading ? 'Closing...' : 'Close Position'}
+                      </button>
+                    )}
+                    {tab === 'pending' && (
+                      <button 
+                        onClick={() => handleCancelOrder(item._id)}
+                        disabled={loading}
+                        className="px-4 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-white text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        {loading ? 'Cancelling...' : 'Cancel Order'}
                       </button>
                     )}
                   </div>

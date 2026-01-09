@@ -828,29 +828,41 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
       { $set: { 'wallet.cashBalance': newUserCashBalance, 'wallet.balance': newUserCashBalance } }
     );
     
-    let newAdminBalance = req.admin.wallet.balance;
+    let userAdmin = null;
+    let newAdminBalance = 0;
     
-    // For ADMIN role, add back to admin wallet
-    if (req.admin.role === 'ADMIN') {
+    // Determine which admin's wallet to credit
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin: credit to user's admin wallet
+      userAdmin = await Admin.findOne({ adminCode: user.adminCode });
+      if (!userAdmin) {
+        return res.status(404).json({ message: 'User admin not found' });
+      }
+      newAdminBalance = userAdmin.wallet.balance + amount;
+    } else {
+      // Regular Admin: credit to their own wallet
+      userAdmin = req.admin;
       newAdminBalance = req.admin.wallet.balance + amount;
-      await Admin.updateOne(
-        { _id: req.admin._id },
-        { $set: { 'wallet.balance': newAdminBalance } }
-      );
-      
-      // Create admin ledger entry
-      await WalletLedger.create({
-        ownerType: 'ADMIN',
-        ownerId: req.admin._id,
-        adminCode: req.admin.adminCode,
-        type: 'CREDIT',
-        reason: 'FUND_WITHDRAW',
-        amount,
-        balanceAfter: newAdminBalance,
-        description: `Fund deducted from user ${user.userId}`,
-        performedBy: req.admin._id
-      });
     }
+    
+    // Credit to admin wallet
+    await Admin.updateOne(
+      { _id: userAdmin._id },
+      { $set: { 'wallet.balance': newAdminBalance } }
+    );
+    
+    // Create admin ledger entry
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: userAdmin._id,
+      adminCode: userAdmin.adminCode,
+      type: 'CREDIT',
+      reason: 'FUND_WITHDRAW',
+      amount,
+      balanceAfter: newAdminBalance,
+      description: `Fund deducted from user ${user.userId}${req.admin.role === 'SUPER_ADMIN' ? ' by Super Admin' : ''}`,
+      performedBy: req.admin._id
+    });
     
     // Create user ledger entry
     await WalletLedger.create({
@@ -868,7 +880,184 @@ router.post('/users/:id/deduct-funds', protectAdmin, async (req, res) => {
     res.json({ 
       message: 'Funds deducted successfully', 
       userWallet: { ...user.wallet, cashBalance: newUserCashBalance, balance: newUserCashBalance },
-      adminWallet: req.admin.role === 'ADMIN' ? { ...req.admin.wallet, balance: newAdminBalance } : null
+      adminWallet: { balance: newAdminBalance },
+      creditedToAdmin: userAdmin.adminCode
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== TRADING WALLET ROUTES ====================
+
+// Add funds directly to user's trading wallet
+router.post('/users/:id/add-trading-funds', protectAdmin, async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+    
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    let userAdmin = null;
+    let newAdminBalance = 0;
+    
+    // Determine which admin's wallet to deduct from
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin: deduct from user's admin wallet
+      userAdmin = await Admin.findOne({ adminCode: user.adminCode });
+      if (!userAdmin) {
+        return res.status(404).json({ message: 'User admin not found' });
+      }
+      if (userAdmin.wallet.balance < amount) {
+        return res.status(400).json({ 
+          message: `Insufficient balance in admin ${userAdmin.name || userAdmin.username}'s wallet. Available: ₹${userAdmin.wallet.balance}` 
+        });
+      }
+      newAdminBalance = userAdmin.wallet.balance - amount;
+    } else {
+      // Regular Admin: deduct from their own wallet
+      if (req.admin.wallet.balance < amount) {
+        return res.status(400).json({ message: 'Insufficient admin wallet balance' });
+      }
+      userAdmin = req.admin;
+      newAdminBalance = req.admin.wallet.balance - amount;
+    }
+    
+    // Deduct from admin wallet
+    await Admin.updateOne(
+      { _id: userAdmin._id },
+      { $set: { 'wallet.balance': newAdminBalance } }
+    );
+    
+    // Create admin ledger entry
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: userAdmin._id,
+      adminCode: userAdmin.adminCode,
+      type: 'DEBIT',
+      reason: 'TRADING_FUND_ADD',
+      amount,
+      balanceAfter: newAdminBalance,
+      description: `Trading fund added to user ${user.userId}${req.admin.role === 'SUPER_ADMIN' ? ' by Super Admin' : ''}`,
+      performedBy: req.admin._id
+    });
+    
+    // Add directly to trading balance
+    const newTradingBalance = (user.wallet.tradingBalance || 0) + amount;
+    
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'wallet.tradingBalance': newTradingBalance } }
+    );
+    
+    // Create user ledger entry
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: 'CREDIT',
+      reason: 'TRADING_FUND_ADD',
+      amount,
+      balanceAfter: newTradingBalance,
+      description: description || 'Trading funds added by admin',
+      performedBy: req.admin._id
+    });
+    
+    res.json({ 
+      message: 'Trading funds added successfully', 
+      userWallet: { ...user.wallet, tradingBalance: newTradingBalance },
+      adminWallet: { balance: newAdminBalance },
+      deductedFromAdmin: userAdmin.adminCode
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Deduct/Withdraw funds from user's trading wallet
+router.post('/users/:id/deduct-trading-funds', protectAdmin, async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+    
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const currentTradingBalance = user.wallet.tradingBalance || 0;
+    const usedMargin = user.wallet.usedMargin || 0;
+    const availableBalance = currentTradingBalance - usedMargin;
+    
+    if (availableBalance < amount) {
+      return res.status(400).json({ 
+        message: `Insufficient trading balance. Available: ₹${availableBalance.toLocaleString()} (Total: ₹${currentTradingBalance.toLocaleString()}, Margin Used: ₹${usedMargin.toLocaleString()})` 
+      });
+    }
+    
+    // Deduct from trading balance
+    const newTradingBalance = currentTradingBalance - amount;
+    
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { 'wallet.tradingBalance': newTradingBalance } }
+    );
+    
+    // Create user ledger entry
+    await WalletLedger.create({
+      ownerType: 'USER',
+      ownerId: user._id,
+      adminCode: user.adminCode,
+      type: 'DEBIT',
+      reason: 'TRADING_FUND_WITHDRAW',
+      amount,
+      balanceAfter: newTradingBalance,
+      description: description || 'Trading funds withdrawn by admin',
+      performedBy: req.admin._id
+    });
+    
+    let userAdmin = null;
+    let newAdminBalance = 0;
+    
+    // Determine which admin's wallet to credit
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin: credit to user's admin wallet
+      userAdmin = await Admin.findOne({ adminCode: user.adminCode });
+      if (!userAdmin) {
+        return res.status(404).json({ message: 'User admin not found' });
+      }
+      newAdminBalance = userAdmin.wallet.balance + amount;
+    } else {
+      // Regular Admin: credit to their own wallet
+      userAdmin = req.admin;
+      newAdminBalance = req.admin.wallet.balance + amount;
+    }
+    
+    // Credit to admin wallet
+    await Admin.updateOne(
+      { _id: userAdmin._id },
+      { $set: { 'wallet.balance': newAdminBalance } }
+    );
+    
+    // Create admin ledger entry
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: userAdmin._id,
+      adminCode: userAdmin.adminCode,
+      type: 'CREDIT',
+      reason: 'TRADING_FUND_WITHDRAW',
+      amount,
+      balanceAfter: newAdminBalance,
+      description: `Trading fund withdrawn from user ${user.userId}${req.admin.role === 'SUPER_ADMIN' ? ' by Super Admin' : ''}`,
+      performedBy: req.admin._id
+    });
+    
+    res.json({ 
+      message: 'Trading funds withdrawn successfully', 
+      userWallet: { ...user.wallet, tradingBalance: newTradingBalance },
+      adminWallet: { balance: newAdminBalance },
+      creditedToAdmin: userAdmin.adminCode
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

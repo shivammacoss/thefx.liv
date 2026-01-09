@@ -28,7 +28,7 @@ const watchlistSchema = new mongoose.Schema({
   segment: {
     type: String,
     required: true,
-    enum: ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'FAVORITES']
+    enum: ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO', 'CDS', 'FAVORITES']
   },
   instruments: [watchlistItemSchema]
 }, { timestamps: true });

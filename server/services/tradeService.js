@@ -177,6 +177,19 @@ class TradeService {
     const isOptionBuy = isOption && tradeData.side === 'BUY';
     const isOptionSell = isOption && tradeData.side === 'SELL';
     
+    // Calculate turnover for PER_CRORE calculation
+    const price = tradeData.price || tradeData.entryPrice || 0;
+    const lotSize = tradeData.lotSize || 1;
+    const turnover = price * lots * lotSize;
+    
+    // Helper to calculate brokerage based on commission type
+    const calcBrokerage = (commType, commission) => {
+      if (commType === 'PER_LOT') return commission * lots;
+      if (commType === 'PER_TRADE') return commission;
+      if (commType === 'PER_CRORE') return (turnover / 10000000) * commission; // Per crore = per 1 crore (10 million)
+      return commission;
+    };
+    
     // First check script-specific settings
     if (scriptSettings?.brokerage) {
       if (isOptionBuy) {
@@ -193,21 +206,15 @@ class TradeService {
     if (isOptionBuy && segmentSettings?.optionBuy) {
       const commType = segmentSettings.optionBuy.commissionType || 'PER_LOT';
       const commission = segmentSettings.optionBuy.commission || 0;
-      if (commType === 'PER_LOT') brokerage = commission * lots;
-      else if (commType === 'PER_TRADE') brokerage = commission;
-      else brokerage = commission; // PER_CRORE handled differently
+      brokerage = calcBrokerage(commType, commission);
     } else if (isOptionSell && segmentSettings?.optionSell) {
       const commType = segmentSettings.optionSell.commissionType || 'PER_LOT';
       const commission = segmentSettings.optionSell.commission || 0;
-      if (commType === 'PER_LOT') brokerage = commission * lots;
-      else if (commType === 'PER_TRADE') brokerage = commission;
-      else brokerage = commission;
+      brokerage = calcBrokerage(commType, commission);
     } else {
       const commType = segmentSettings?.commissionType || 'PER_LOT';
       const commission = segmentSettings?.commissionLot || 0;
-      if (commType === 'PER_LOT') brokerage = commission * lots;
-      else if (commType === 'PER_TRADE') brokerage = commission;
-      else brokerage = commission;
+      brokerage = calcBrokerage(commType, commission);
     }
     
     return brokerage;
