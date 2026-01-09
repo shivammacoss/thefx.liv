@@ -5459,6 +5459,12 @@ const AllTrades = () => {
       setMarketData(prev => ({ ...prev, ...data }));
     });
     
+    // Auto-refresh when new trades are created or closed
+    socketRef.current.on('trade_update', (data) => {
+      console.log('Admin AllTrades: Trade update received', data.type);
+      fetchTrades();
+    });
+    
     socketRef.current.on('disconnect', () => {
       console.log('Admin AllTrades: Disconnected from Socket.IO');
     });
@@ -6674,6 +6680,8 @@ const SuperAdminAllTrades = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editModal, setEditModal] = useState({ show: false, trade: null });
   const [editForm, setEditForm] = useState({ quantity: '', entryPrice: '', exitPrice: '' });
+  const [marketData, setMarketData] = useState({});
+  const socketRef = useRef(null);
 
   // Filter by selected admin
   const filteredTrades = selectedAdmin 
@@ -6703,7 +6711,73 @@ const SuperAdminAllTrades = () => {
   useEffect(() => {
     fetchAdmins();
     fetchTrades();
+    
+    // Connect to Socket.IO for live market data
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    socketRef.current = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+    
+    socketRef.current.on('connect', () => {
+      console.log('SuperAdmin AllTrades: Connected to Socket.IO for live market data');
+    });
+    
+    // Live ticks
+    socketRef.current.on('market_tick', (data) => {
+      setMarketData(prev => ({ ...prev, ...data }));
+    });
+    
+    // Auto-refresh when new trades are created or closed
+    socketRef.current.on('trade_update', (data) => {
+      console.log('SuperAdmin AllTrades: Trade update received', data.type);
+      fetchTrades();
+    });
+    
+    socketRef.current.on('disconnect', () => {
+      console.log('SuperAdmin AllTrades: Disconnected from Socket.IO');
+    });
+    
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
   }, []);
+  
+  // Update P&L in real-time when market data changes (use bid/ask per side)
+  useEffect(() => {
+    if (Object.keys(marketData).length === 0) return;
+    
+    setTrades(prevTrades => prevTrades.map(trade => {
+      if (trade.status !== 'OPEN') return trade;
+      
+      // Try multiple token formats for matching
+      const tokenStr = trade.token?.toString();
+      const liveData = marketData[tokenStr] || marketData[trade.token] || marketData[parseInt(trade.token)];
+      if (!liveData) return trade;
+      
+      // Align with user view: BUY uses best bid, SELL uses best ask
+      const sidePrice = trade.side === 'BUY'
+        ? (liveData.bid ?? liveData.ltp ?? liveData.last_price)
+        : (liveData.ask ?? liveData.ltp ?? liveData.last_price);
+      if (!sidePrice) return trade;
+      
+      // Calculate unrealized P&L with side-specific price
+      const currentPrice = sidePrice;
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
+      const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
+      
+      return {
+        ...trade,
+        currentPrice,
+        unrealizedPnL
+      };
+    }));
+  }, [marketData]);
 
   const fetchAdmins = async () => {
     try {

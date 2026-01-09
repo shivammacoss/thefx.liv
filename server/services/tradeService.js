@@ -4,6 +4,7 @@ import Admin from '../models/Admin.js';
 import MarketState from '../models/MarketState.js';
 import Charges from '../models/Charges.js';
 import WalletLedger from '../models/WalletLedger.js';
+import Instrument from '../models/Instrument.js';
 
 class TradeService {
   
@@ -262,8 +263,27 @@ class TradeService {
       }
     }
     
-    // 7. Calculate lot size and validate lots
-    const lotSize = tradeData.lotSize || 1;
+    // 7. Calculate lot size - fetch from database if not provided
+    let lotSize = tradeData.lotSize;
+    if (!lotSize || lotSize <= 0) {
+      // Try to get lot size from instrument database
+      try {
+        let instrument = null;
+        if (tradeData.token) {
+          instrument = await Instrument.findOne({ token: tradeData.token.toString() }).select('lotSize').lean();
+        }
+        if (!instrument && tradeData.symbol && tradeData.exchange) {
+          instrument = await Instrument.findOne({ 
+            symbol: { $regex: new RegExp(`^${tradeData.symbol}`, 'i') },
+            exchange: tradeData.exchange 
+          }).select('lotSize').lean();
+        }
+        lotSize = instrument?.lotSize > 0 ? instrument.lotSize : 1;
+      } catch (error) {
+        console.error('Error fetching lot size:', error.message);
+        lotSize = 1;
+      }
+    }
     const lots = tradeData.lots || Math.ceil(tradeData.quantity / lotSize);
     
     // Validate lot limits from user settings

@@ -2,6 +2,7 @@ import User from '../models/User.js';
 import Trade from '../models/Trade.js';
 import Admin from '../models/Admin.js';
 import TradeService from './tradeService.js';
+import Instrument from '../models/Instrument.js';
 
 // Lot sizes for different instruments
 const LOT_SIZES = {
@@ -12,7 +13,14 @@ const LOT_SIZES = {
   'MIDCPNIFTY': 50,
   'SENSEX': 10,
   'BANKEX': 15,
-  // MCX Commodities
+  // MCX Commodities - Mini variants (must be checked first)
+  'GOLDM': 10,
+  'GOLDGUINEA': 1,
+  'GOLDPETAL': 1,
+  'SILVERM': 5,
+  'SILVERMIC': 1,
+  'CRUDEOILM': 10,
+  // MCX Commodities - Standard
   'GOLD': 100,
   'SILVER': 30,
   'CRUDEOIL': 100,
@@ -39,23 +47,31 @@ const USD_TO_INR = 83;
 
 class TradingService {
   
-  // Get lot size for instrument
+  // Get lot size for instrument (sync fallback - prefer getLotSizeAsync)
   static getLotSize(symbol, category, exchange) {
     const sym = symbol?.toUpperCase() || '';
     const cat = category?.toUpperCase() || '';
     const exch = exchange?.toUpperCase() || '';
     
-    // MCX commodities
+    // MCX commodities - check mini variants FIRST (more specific matches)
     if (exch === 'MCX' || cat === 'MCX') {
-      if (sym.includes('GOLD') || cat.includes('GOLD')) return 100;
-      if (sym.includes('SILVER') || cat.includes('SILVER')) return 30;
-      if (sym.includes('CRUDEOIL') || cat.includes('CRUDEOIL')) return 100;
-      if (sym.includes('NATURALGAS') || cat.includes('NATURALGAS')) return 1250;
-      if (sym.includes('COPPER') || cat.includes('COPPER')) return 2500;
-      if (sym.includes('ZINC') || cat.includes('ZINC')) return 5000;
-      if (sym.includes('ALUMINIUM') || cat.includes('ALUMINIUM')) return 5000;
-      if (sym.includes('LEAD') || cat.includes('LEAD')) return 5000;
-      if (sym.includes('NICKEL') || cat.includes('NICKEL')) return 1500;
+      // Mini/Micro variants first
+      if (sym.includes('GOLDM') || sym.startsWith('GOLDM')) return 10;
+      if (sym.includes('GOLDGUINEA')) return 1;
+      if (sym.includes('GOLDPETAL')) return 1;
+      if (sym.includes('SILVERM') || sym.startsWith('SILVERM')) return 5;
+      if (sym.includes('SILVERMIC')) return 1;
+      if (sym.includes('CRUDEOILM') || sym.startsWith('CRUDEOILM')) return 10;
+      // Standard variants
+      if (sym.includes('GOLD')) return 100;
+      if (sym.includes('SILVER')) return 30;
+      if (sym.includes('CRUDEOIL')) return 100;
+      if (sym.includes('NATURALGAS')) return 1250;
+      if (sym.includes('COPPER')) return 2500;
+      if (sym.includes('ZINC')) return 5000;
+      if (sym.includes('ALUMINIUM')) return 5000;
+      if (sym.includes('LEAD')) return 5000;
+      if (sym.includes('NICKEL')) return 1500;
     }
     
     // NSE F&O by category
@@ -66,11 +82,37 @@ class TradingService {
       if (cat.includes('MIDCPNIFTY')) return 50;
     }
     
-    // Check by symbol
-    for (const [key, size] of Object.entries(LOT_SIZES)) {
-      if (sym.includes(key)) return size;
+    // Check by symbol - mini variants first
+    const sortedKeys = Object.keys(LOT_SIZES).sort((a, b) => b.length - a.length);
+    for (const key of sortedKeys) {
+      if (sym.includes(key)) return LOT_SIZES[key];
     }
     return 1;
+  }
+  
+  // Get lot size from database (preferred method)
+  static async getLotSizeAsync(symbol, token, exchange) {
+    try {
+      // Try to find instrument by token first (most accurate)
+      let instrument = null;
+      if (token) {
+        instrument = await Instrument.findOne({ token: token.toString() }).select('lotSize symbol').lean();
+      }
+      // Fallback to symbol + exchange
+      if (!instrument && symbol && exchange) {
+        instrument = await Instrument.findOne({ 
+          symbol: { $regex: new RegExp(`^${symbol}`, 'i') },
+          exchange: exchange 
+        }).select('lotSize symbol').lean();
+      }
+      if (instrument?.lotSize && instrument.lotSize > 0) {
+        return instrument.lotSize;
+      }
+    } catch (error) {
+      console.error('Error fetching lot size from DB:', error.message);
+    }
+    // Fallback to hardcoded
+    return this.getLotSize(symbol, null, exchange);
   }
 
   // Check if market is open
@@ -248,7 +290,11 @@ class TradingService {
       throw new Error(`Trading in ${orderData.symbol} is blocked for your account`);
     }
 
-    const lotSize = orderData.lotSize || this.getLotSize(orderData.symbol, orderData.category, orderData.exchange);
+    // Get lot size - prefer from order data, then database, then fallback to hardcoded
+    let lotSize = orderData.lotSize;
+    if (!lotSize || lotSize <= 0) {
+      lotSize = await this.getLotSizeAsync(orderData.symbol, orderData.token, orderData.exchange);
+    }
     const lots = orderData.lots || 1;
     const totalQuantity = lots * lotSize;
     

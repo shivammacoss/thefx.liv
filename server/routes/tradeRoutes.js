@@ -9,6 +9,12 @@ import Admin from '../models/Admin.js';
 
 const router = express.Router();
 
+// Socket.IO instance (set from index.js)
+let io = null;
+export const setTradeSocketIO = (socketIO) => {
+  io = socketIO;
+};
+
 // Auth middleware for users
 const protectUser = async (req, res, next) => {
   try {
@@ -159,6 +165,12 @@ router.post('/trade', protectUser, async (req, res) => {
     }
     
     const trade = await TradeService.openTrade(req.body, req.user._id);
+    
+    // Emit socket event for real-time admin updates
+    if (io) {
+      io.emit('trade_update', { type: 'NEW_TRADE', trade, adminCode: trade.adminCode });
+    }
+    
     res.status(201).json(trade);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -175,6 +187,12 @@ router.post('/trade/:id/close', protectUser, async (req, res) => {
     if (!trade) return res.status(404).json({ message: 'Trade not found' });
     
     const closedTrade = await TradeService.closeTrade(trade._id, exitPrice, 'MANUAL');
+    
+    // Emit socket event for real-time admin updates
+    if (io) {
+      io.emit('trade_update', { type: 'TRADE_CLOSED', trade: closedTrade, adminCode: closedTrade.adminCode });
+    }
+    
     res.json(closedTrade);
   } catch (error) {
     res.status(400).json({ message: error.message });

@@ -827,6 +827,64 @@ router.post('/reset-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =
   }
 });
 
+// Fix MCX lot sizes - updates all MCX instruments with correct lot sizes
+router.post('/fix-mcx-lot-sizes', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const Instrument = (await import('../models/Instrument.js')).default;
+    
+    // MCX lot size mapping - mini variants first
+    const mcxLotSizes = [
+      { pattern: /GOLDM/i, lotSize: 10 },
+      { pattern: /GOLDGUINEA/i, lotSize: 1 },
+      { pattern: /GOLDPETAL/i, lotSize: 1 },
+      { pattern: /SILVERM/i, lotSize: 5 },
+      { pattern: /SILVERMIC/i, lotSize: 1 },
+      { pattern: /CRUDEOILM/i, lotSize: 10 },
+      { pattern: /GOLD/i, lotSize: 100 },
+      { pattern: /SILVER/i, lotSize: 30 },
+      { pattern: /CRUDEOIL|CRUDE/i, lotSize: 100 },
+      { pattern: /NATURALGAS|NATGAS/i, lotSize: 1250 },
+      { pattern: /COPPER/i, lotSize: 2500 },
+      { pattern: /ZINC/i, lotSize: 5000 },
+      { pattern: /ALUMINIUM|ALUMINUM/i, lotSize: 5000 },
+      { pattern: /LEAD/i, lotSize: 5000 },
+      { pattern: /NICKEL/i, lotSize: 1500 },
+    ];
+    
+    const mcxInstruments = await Instrument.find({ exchange: 'MCX' });
+    let updated = 0;
+    const updates = [];
+    
+    for (const inst of mcxInstruments) {
+      const symbolOrName = inst.symbol || inst.name || inst.tradingSymbol || '';
+      let newLotSize = null;
+      
+      for (const { pattern, lotSize } of mcxLotSizes) {
+        if (pattern.test(symbolOrName)) {
+          newLotSize = lotSize;
+          break;
+        }
+      }
+      
+      if (newLotSize && inst.lotSize !== newLotSize) {
+        await Instrument.findByIdAndUpdate(inst._id, { lotSize: newLotSize });
+        updates.push({ symbol: inst.symbol, oldLotSize: inst.lotSize, newLotSize });
+        updated++;
+      }
+    }
+    
+    res.json({ 
+      message: `Fixed MCX lot sizes`, 
+      total: mcxInstruments.length,
+      updated,
+      samples: updates.slice(0, 20)
+    });
+  } catch (error) {
+    console.error('Fix MCX lot sizes error:', error.message);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Quick diagnostics for lot sizes (no writes)
 router.get('/lot-size-diagnostics', protectAdmin, superAdminOnly, async (req, res) => {
   try {
@@ -1495,6 +1553,30 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     
     console.log(`Found ${mcxOptions.length} MCX options`);
     
+    // Helper function to get correct MCX lot size based on commodity name
+    const getMcxLotSize = (name, zerodhaLotSize) => {
+      const upperName = (name || '').toUpperCase();
+      // Mini/Micro variants first (more specific)
+      if (upperName.includes('GOLDM') || upperName === 'GOLDM') return 10;
+      if (upperName.includes('GOLDGUINEA')) return 1;
+      if (upperName.includes('GOLDPETAL')) return 1;
+      if (upperName.includes('SILVERM') || upperName === 'SILVERM') return 5;
+      if (upperName.includes('SILVERMIC')) return 1;
+      if (upperName.includes('CRUDEOILM') || upperName === 'CRUDEOILM') return 10;
+      // Standard variants
+      if (upperName.includes('GOLD')) return 100;
+      if (upperName.includes('SILVER')) return 30;
+      if (upperName.includes('CRUDEOIL') || upperName.includes('CRUDE')) return 100;
+      if (upperName.includes('NATURALGAS') || upperName.includes('NATGAS')) return 1250;
+      if (upperName.includes('COPPER')) return 2500;
+      if (upperName.includes('ZINC')) return 5000;
+      if (upperName.includes('ALUMINIUM') || upperName.includes('ALUMINUM')) return 5000;
+      if (upperName.includes('LEAD')) return 5000;
+      if (upperName.includes('NICKEL')) return 1500;
+      // Fallback to Zerodha's lot_size or 1
+      return parseInt(zerodhaLotSize) || 1;
+    };
+    
     // Group MCX options by name and expiry
     const mcxOptionsByNameExpiry = {};
     for (const opt of mcxOptions) {
@@ -1533,7 +1615,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
               strike: parseFloat(opt.strike),
               category: 'MCX',
               tradingSymbol: opt.tradingsymbol,
-              lotSize: parseInt(opt.lot_size) || 1,
+              lotSize: getMcxLotSize(opt.name, opt.lot_size),
               tickSize: parseFloat(opt.tick_size) || 1,
               expiry: new Date(opt.expiry),
               isEnabled: true,

@@ -12,7 +12,7 @@ import userRoutes from './routes/userRoutes.js';
 import tradingRoutes from './routes/tradingRoutes.js';
 import adminManagementRoutes from './routes/adminManagementRoutes.js';
 import userFundRoutes from './routes/userFundRoutes.js';
-import tradeRoutes from './routes/tradeRoutes.js';
+import tradeRoutes, { setTradeSocketIO } from './routes/tradeRoutes.js';
 import instrumentRoutes from './routes/instrumentRoutes.js';
 import binanceRoutes from './routes/binanceRoutes.js';
 import zerodhaRoutes, { setSocketIO } from './routes/zerodhaRoutes.js';
@@ -46,6 +46,7 @@ const io = new Server(httpServer, {
 // Initialize Zerodha WebSocket service with Socket.IO
 initZerodhaWebSocket(io);
 setSocketIO(io);
+setTradeSocketIO(io);
 
 // Initialize Binance WebSocket for real-time crypto data
 initBinanceWebSocket(io);

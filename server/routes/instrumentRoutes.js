@@ -1342,8 +1342,30 @@ router.get('/watchlist', protectUser, async (req, res) => {
       'FAVORITES': []
     };
     
+    // Collect all tokens to fetch fresh lot sizes
+    const allTokens = [];
     for (const wl of watchlists) {
-      result[wl.segment] = wl.instruments || [];
+      for (const inst of (wl.instruments || [])) {
+        if (inst.token && !inst.isCrypto) allTokens.push(inst.token);
+      }
+    }
+    
+    // Fetch current lot sizes from Instrument database
+    const freshInstruments = await Instrument.find({ token: { $in: allTokens } }).select('token lotSize').lean();
+    const lotSizeMap = {};
+    for (const inst of freshInstruments) {
+      lotSizeMap[inst.token] = inst.lotSize;
+    }
+    
+    // Build result with refreshed lot sizes
+    for (const wl of watchlists) {
+      result[wl.segment] = (wl.instruments || []).map(inst => {
+        // Update lotSize from database if available (non-crypto)
+        if (inst.token && !inst.isCrypto && lotSizeMap[inst.token]) {
+          return { ...inst, lotSize: lotSizeMap[inst.token] };
+        }
+        return inst;
+      });
     }
     
     res.json(result);
