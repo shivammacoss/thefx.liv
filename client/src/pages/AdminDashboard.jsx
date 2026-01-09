@@ -5406,216 +5406,8 @@ const MarketControl = () => {
   );
 };
 
-// All Trades (Super Admin only)
+// All Trades (Admin - shows trades for their users with 4 tabs like SuperAdmin)
 const AllTrades = () => {
-  const { admin } = useAuth();
-  const [trades, setTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('');
-  const [marketData, setMarketData] = useState({});
-  const socketRef = useRef(null);
-
-  useEffect(() => {
-    fetchTrades();
-    
-    // Connect to Socket.IO for live market data
-    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
-    socketRef.current = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
-    });
-    
-    socketRef.current.on('connect', () => {
-      console.log('Super Admin: Connected to Socket.IO for live market data');
-    });
-    
-    socketRef.current.on('marketData', (data) => {
-      setMarketData(prev => ({ ...prev, ...data }));
-    });
-    
-    socketRef.current.on('disconnect', () => {
-      console.log('Super Admin: Disconnected from Socket.IO');
-    });
-    
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
-  }, [filter]);
-  
-  // Update P&L in real-time when market data changes
-  useEffect(() => {
-    if (Object.keys(marketData).length === 0) return;
-    
-    setTrades(prevTrades => prevTrades.map(trade => {
-      if (trade.status !== 'OPEN' || !trade.token) return trade;
-      
-      const liveData = marketData[trade.token];
-      if (!liveData || !liveData.ltp) return trade;
-      
-      // Calculate unrealized P&L
-      const currentPrice = liveData.ltp;
-      const multiplier = trade.side === 'BUY' ? 1 : -1;
-      const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
-      const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
-      
-      return {
-        ...trade,
-        currentPrice,
-        unrealizedPnL
-      };
-    }));
-  }, [marketData]);
-
-  const fetchTrades = async () => {
-    try {
-      const url = filter 
-        ? `/api/trade/admin/trades?status=${filter}`
-        : '/api/trade/admin/trades';
-      const { data } = await axios.get(url, {
-        headers: { Authorization: `Bearer ${admin.token}` }
-      });
-      setTrades(data);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForceClose = async (tradeId, currentPrice) => {
-    const exitPrice = prompt('Enter exit price:', currentPrice);
-    if (!exitPrice) return;
-    
-    try {
-      await axios.post(`/api/trade/admin/trade/${tradeId}/close`, {
-        exitPrice: Number(exitPrice)
-      }, {
-        headers: { Authorization: `Bearer ${admin.token}` }
-      });
-      fetchTrades();
-    } catch (error) {
-      alert(error.response?.data?.message || 'Error closing trade');
-    }
-  };
-
-  return (
-    <div className="p-4 md:p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">All Trades</h1>
-        {Object.keys(marketData).length > 0 && (
-          <div className="flex items-center gap-2 text-sm text-green-400">
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-            Live ({Object.keys(marketData).length} prices)
-          </div>
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-2 mb-6">
-        <button onClick={() => setFilter('')} className={`px-4 py-2 rounded ${!filter ? 'bg-yellow-600' : 'bg-dark-700'}`}>All</button>
-        <button onClick={() => setFilter('OPEN')} className={`px-4 py-2 rounded ${filter === 'OPEN' ? 'bg-green-600' : 'bg-dark-700'}`}>Open</button>
-        <button onClick={() => setFilter('CLOSED')} className={`px-4 py-2 rounded ${filter === 'CLOSED' ? 'bg-red-600' : 'bg-dark-700'}`}>Closed</button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Total Trades</div>
-          <div className="text-2xl font-bold">{trades.length}</div>
-        </div>
-        <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Open</div>
-          <div className="text-2xl font-bold text-green-400">{trades.filter(t => t.status === 'OPEN').length}</div>
-        </div>
-        <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Total P&L</div>
-          <div className={`text-2xl font-bold ${trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            ₹{trades.reduce((s, t) => s + (t.netPnL || t.unrealizedPnL || 0), 0).toLocaleString()}
-          </div>
-        </div>
-        <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Total Brokerage</div>
-          <div className="text-2xl font-bold text-purple-400">
-            ₹{trades.reduce((s, t) => s + (t.charges?.brokerage || 0), 0).toLocaleString()}
-          </div>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
-      ) : trades.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">No trades found</div>
-      ) : (
-        <div className="bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-dark-700">
-              <tr>
-                <th className="text-left px-4 py-3 text-gray-400">Trade ID</th>
-                <th className="text-left px-4 py-3 text-gray-400">User</th>
-                <th className="text-left px-4 py-3 text-gray-400">Symbol</th>
-                <th className="text-left px-4 py-3 text-gray-400">Side</th>
-                <th className="text-right px-4 py-3 text-gray-400">Qty</th>
-                <th className="text-right px-4 py-3 text-gray-400">Entry</th>
-                <th className="text-right px-4 py-3 text-gray-400">Exit/LTP</th>
-                <th className="text-right px-4 py-3 text-gray-400">P&L</th>
-                <th className="text-center px-4 py-3 text-gray-400">Status</th>
-                <th className="text-center px-4 py-3 text-gray-400">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trades.map(trade => (
-                <tr key={trade._id} className="border-t border-dark-600">
-                  <td className="px-4 py-3 font-mono text-xs">{trade.tradeId}</td>
-                  <td className="px-4 py-3">
-                    <div>{trade.user?.fullName || trade.user?.username}</div>
-                    <div className="text-xs text-gray-500">{trade.adminCode}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{trade.symbol}</div>
-                    <div className="text-xs text-gray-500">{trade.segment} • {trade.productType}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {trade.side}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">{trade.quantity}</td>
-                  <td className="px-4 py-3 text-right">₹{trade.entryPrice?.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right">₹{(trade.exitPrice || trade.currentPrice || trade.entryPrice)?.toFixed(2)}</td>
-                  <td className={`px-4 py-3 text-right font-bold ${(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {(trade.netPnL || trade.unrealizedPnL || 0) >= 0 ? '+' : ''}₹{(trade.netPnL || trade.unrealizedPnL || 0).toFixed(2)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-0.5 rounded text-xs ${trade.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                      {trade.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {trade.status === 'OPEN' && (
-                      <button
-                        onClick={() => handleForceClose(trade._id, trade.currentPrice || trade.entryPrice)}
-                        className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
-                      >
-                        Close
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Admin Position Management (Admin only - shows trades for their users)
-const TradeManagement = () => {
   const { admin } = useAuth();
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5643,7 +5435,7 @@ const TradeManagement = () => {
     : activeTab === 'pending' ? pendingTrades 
     : rejectedTrades;
   const { currentPage, setCurrentPage, totalPages, paginatedData, totalItems } = usePagination(
-    currentTrades, 20, searchTerm, ['symbol', 'userId', 'user.username', 'user.fullName']
+    currentTrades, 20, searchTerm, ['symbol', 'userId', 'user.username', 'user.fullName', 'tradeId']
   );
 
   useEffect(() => {
@@ -5659,15 +5451,16 @@ const TradeManagement = () => {
     });
     
     socketRef.current.on('connect', () => {
-      console.log('Admin: Connected to Socket.IO for live market data');
+      console.log('Admin AllTrades: Connected to Socket.IO for live market data');
     });
     
-    socketRef.current.on('marketData', (data) => {
+    // Live ticks
+    socketRef.current.on('market_tick', (data) => {
       setMarketData(prev => ({ ...prev, ...data }));
     });
     
     socketRef.current.on('disconnect', () => {
-      console.log('Admin: Disconnected from Socket.IO');
+      console.log('Admin AllTrades: Disconnected from Socket.IO');
     });
     
     return () => {
@@ -5677,18 +5470,26 @@ const TradeManagement = () => {
     };
   }, []);
   
-  // Update P&L in real-time when market data changes
+  // Update P&L in real-time when market data changes (use bid/ask per side)
   useEffect(() => {
     if (Object.keys(marketData).length === 0) return;
     
     setTrades(prevTrades => prevTrades.map(trade => {
-      if (trade.status !== 'OPEN' || !trade.token) return trade;
+      if (trade.status !== 'OPEN') return trade;
       
-      const liveData = marketData[trade.token];
-      if (!liveData || !liveData.ltp) return trade;
+      // Try multiple token formats for matching
+      const tokenStr = trade.token?.toString();
+      const liveData = marketData[tokenStr] || marketData[trade.token] || marketData[parseInt(trade.token)];
+      if (!liveData) return trade;
       
-      // Calculate unrealized P&L
-      const currentPrice = liveData.ltp;
+      // Align with user view: BUY uses best bid, SELL uses best ask
+      const sidePrice = trade.side === 'BUY'
+        ? (liveData.bid ?? liveData.ltp ?? liveData.last_price)
+        : (liveData.ask ?? liveData.ltp ?? liveData.last_price);
+      if (!sidePrice) return trade;
+      
+      // Calculate unrealized P&L with side-specific price
+      const currentPrice = sidePrice;
       const multiplier = trade.side === 'BUY' ? 1 : -1;
       const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
       const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
@@ -5703,7 +5504,6 @@ const TradeManagement = () => {
 
   const fetchTrades = async () => {
     try {
-      setLoading(true);
       const { data } = await axios.get('/api/trade/admin/trades', {
         headers: { Authorization: `Bearer ${admin.token}` }
       });
@@ -5788,7 +5588,7 @@ const TradeManagement = () => {
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${days}d;${hours}h;${mins}m`;
+    return `${days}d ${hours}h ${mins}m`;
   };
 
   const formatDateTime = (date) => {
@@ -5811,7 +5611,7 @@ const TradeManagement = () => {
             {Object.keys(marketData).length > 0 && (
               <span className="flex items-center gap-1 text-xs text-green-400">
                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
-                Live
+                Live ({Object.keys(marketData).length})
               </span>
             )}
           </div>
@@ -5982,8 +5782,11 @@ const TradeManagement = () => {
                     <th className="text-right px-2 py-3 text-gray-400">Qty</th>
                     <th className="text-left px-2 py-3 text-gray-400">Entry Time</th>
                     <th className="text-right px-2 py-3 text-gray-400">Entry</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Entry BKG</th>
                     <th className="text-left px-2 py-3 text-gray-400">Exit Time</th>
                     <th className="text-right px-2 py-3 text-gray-400">Exit</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Exit BKG</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Gross PNL</th>
                     <th className="text-right px-2 py-3 text-gray-400">Net PNL</th>
                     <th className="text-right px-2 py-3 text-gray-400">BKG</th>
                     <th className="text-left px-2 py-3 text-gray-400">Duration</th>
@@ -5994,8 +5797,11 @@ const TradeManagement = () => {
                 </thead>
                 <tbody>
                   {paginatedData.map(trade => {
-                    const netPnL = trade.netPnL || 0;
+                    const grossPnL = trade.realizedPnL || trade.pnl || 0;
                     const totalBkg = trade.charges?.total || trade.charges?.brokerage || 0;
+                    const netPnL = trade.netPnL || (grossPnL - totalBkg);
+                    const entryBkg = (trade.charges?.brokerage || 0) / 2;
+                    const exitBkg = (trade.charges?.brokerage || 0) / 2;
                     return (
                       <tr key={trade._id} className="border-t border-dark-600 hover:bg-dark-700/50">
                         <td className="px-2 py-3">
@@ -6014,8 +5820,642 @@ const TradeManagement = () => {
                         <td className="px-2 py-3 text-right text-xs">{trade.quantity}</td>
                         <td className="px-2 py-3 text-xs">{formatDateTime(trade.openedAt)}</td>
                         <td className="px-2 py-3 text-right text-xs">₹{trade.entryPrice?.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-right text-xs text-gray-400">₹{entryBkg.toFixed(2)}</td>
                         <td className="px-2 py-3 text-xs">{formatDateTime(trade.closedAt)}</td>
                         <td className="px-2 py-3 text-right text-xs">₹{trade.exitPrice?.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-right text-xs text-gray-400">₹{exitBkg.toFixed(2)}</td>
+                        <td className={`px-2 py-3 text-right text-xs font-bold ${grossPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {grossPnL >= 0 ? '+' : ''}₹{grossPnL.toFixed(2)}
+                        </td>
+                        <td className={`px-2 py-3 text-right text-xs font-bold ${netPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {netPnL >= 0 ? '+' : ''}₹{netPnL.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-3 text-right text-xs text-purple-400">₹{totalBkg.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-xs text-gray-400">{formatDuration(trade.openedAt, trade.closedAt)}</td>
+                        <td className="px-2 py-3 text-center">
+                          <button onClick={() => handleDelete(trade._id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs">Delete</button>
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <button onClick={() => openEditModal(trade)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">Edit</button>
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <button onClick={() => handleReopen(trade)} className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs">Reopen</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Pending Orders Table */}
+          {activeTab === 'pending' && (
+            <div className="bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-dark-700">
+                  <tr>
+                    <th className="text-left px-3 py-3 text-gray-400">UserID</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Trade Type</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Time</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Type</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Script</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Quantity</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Average Price</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Edit</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map(trade => (
+                    <tr key={trade._id} className="border-t border-dark-600 hover:bg-dark-700/50">
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-xs">{trade.userId}</div>
+                        <div className="text-xs text-gray-400">{trade.user?.fullName || trade.user?.username || '-'}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {trade.side}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs">{formatDateTime(trade.createdAt || trade.openedAt)}</td>
+                      <td className="px-3 py-3">
+                        <div className="text-xs">{trade.productType}</div>
+                        <div className="text-xs text-gray-500">{trade.orderType}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="font-medium">{trade.symbol}</div>
+                        <div className="text-xs text-gray-500">{trade.segment}</div>
+                      </td>
+                      <td className="px-3 py-3 text-right">{trade.quantity}</td>
+                      <td className="px-3 py-3 text-right">₹{(trade.limitPrice || trade.entryPrice)?.toFixed(2)}</td>
+                      <td className="px-3 py-3 text-center">
+                        <button onClick={() => openEditModal(trade)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">Edit</button>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button onClick={() => handleDelete(trade._id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Rejected Orders Table */}
+          {activeTab === 'rejected' && (
+            <div className="bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-dark-700">
+                  <tr>
+                    <th className="text-left px-3 py-3 text-gray-400">UserID</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Trade Type</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Time</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Type</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Script</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Quantity</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Rate</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Reason</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Edit</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map(trade => (
+                    <tr key={trade._id} className="border-t border-dark-600 hover:bg-dark-700/50">
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-xs">{trade.userId}</div>
+                        <div className="text-xs text-gray-400">{trade.user?.fullName || trade.user?.username || '-'}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {trade.side}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs">
+                        <div>{formatDateTime(trade.createdAt || trade.openedAt)}</div>
+                        {trade.closedAt && <div className="text-red-400">{formatDateTime(trade.closedAt)}</div>}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="text-xs">{trade.productType}</div>
+                        <div className="text-xs text-gray-500">{trade.orderType}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="font-medium">{trade.symbol}</div>
+                        <div className="text-xs text-gray-500">{trade.segment}</div>
+                      </td>
+                      <td className="px-3 py-3 text-right">{trade.quantity}</td>
+                      <td className="px-3 py-3 text-right">₹{(trade.limitPrice || trade.entryPrice)?.toFixed(2)}</td>
+                      <td className="px-3 py-3 text-xs">
+                        <span className={`px-2 py-0.5 rounded ${trade.status === 'CANCELLED' ? 'bg-gray-500/20 text-gray-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {trade.closeReason || trade.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button onClick={() => openEditModal(trade)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">Edit</button>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button onClick={() => handleDelete(trade._id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={totalItems}
+            itemsPerPage={20}
+          />
+        </>
+      )}
+
+      {/* Edit Modal */}
+      {editModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Edit Trade</h3>
+              <button onClick={() => setEditModal({ show: false, trade: null })} className="text-gray-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  value={editForm.quantity}
+                  onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Entry Price</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editForm.entryPrice}
+                  onChange={(e) => setEditForm({ ...editForm, entryPrice: e.target.value })}
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+                />
+              </div>
+              {editModal.trade?.status === 'CLOSED' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Exit Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editForm.exitPrice}
+                    onChange={(e) => setEditForm({ ...editForm, exitPrice: e.target.value })}
+                    className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setEditModal({ show: false, trade: null })} className="flex-1 px-4 py-2 bg-dark-600 hover:bg-dark-500 rounded-lg">
+                Cancel
+              </button>
+              <button onClick={handleSaveEdit} className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg">
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Admin Position Management (Admin only - shows trades for their users)
+const TradeManagement = () => {
+  const { admin } = useAuth();
+  const [trades, setTrades] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('open');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [editModal, setEditModal] = useState({ show: false, trade: null });
+  const [editForm, setEditForm] = useState({ quantity: '', entryPrice: '', exitPrice: '' });
+  const [marketData, setMarketData] = useState({});
+  const socketRef = useRef(null);
+
+  // Separate trades by status
+  const openTrades = trades.filter(t => t.status === 'OPEN');
+  const closedTrades = trades.filter(t => t.status === 'CLOSED');
+  const pendingTrades = trades.filter(t => t.status === 'PENDING' || t.status === 'TRIGGERED');
+  const rejectedTrades = trades.filter(t => t.status === 'CANCELLED' || t.status === 'REJECTED');
+
+  // Calculate totals
+  const totalOpenPnL = openTrades.reduce((sum, t) => sum + (t.unrealizedPnL || 0), 0);
+  const totalClosedPnL = closedTrades.reduce((sum, t) => sum + (t.netPnL || 0), 0);
+  const totalBrokerage = trades.reduce((sum, t) => sum + (t.charges?.brokerage || t.charges?.total || 0), 0);
+
+  // Pagination for active tab
+  const currentTrades = activeTab === 'open' ? openTrades 
+    : activeTab === 'closed' ? closedTrades 
+    : activeTab === 'pending' ? pendingTrades 
+    : rejectedTrades;
+  const { currentPage, setCurrentPage, totalPages, paginatedData, totalItems } = usePagination(
+    currentTrades, 20, searchTerm, ['symbol', 'userId', 'user.username', 'user.fullName', 'tradeId']
+  );
+
+  useEffect(() => {
+    fetchTrades();
+    
+    // Connect to Socket.IO for live market data
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    socketRef.current = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+    
+    socketRef.current.on('connect', () => {
+      console.log('Admin: Connected to Socket.IO for live market data');
+    });
+    
+    // Live ticks
+    socketRef.current.on('market_tick', (data) => {
+      setMarketData(prev => ({ ...prev, ...data }));
+    });
+    
+    socketRef.current.on('disconnect', () => {
+      console.log('Admin: Disconnected from Socket.IO');
+    });
+    
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, []);
+  
+  // Update P&L in real-time when market data changes (use bid/ask per side)
+  useEffect(() => {
+    if (Object.keys(marketData).length === 0) return;
+    
+    setTrades(prevTrades => prevTrades.map(trade => {
+      if (trade.status !== 'OPEN') return trade;
+      
+      // Try multiple token formats for matching
+      const tokenStr = trade.token?.toString();
+      const liveData = marketData[tokenStr] || marketData[trade.token] || marketData[parseInt(trade.token)];
+      if (!liveData) return trade;
+      
+      // Align with user view: BUY uses best bid, SELL uses best ask
+      const sidePrice = trade.side === 'BUY'
+        ? (liveData.bid ?? liveData.ltp ?? liveData.last_price)
+        : (liveData.ask ?? liveData.ltp ?? liveData.last_price);
+      if (!sidePrice) return trade;
+      
+      // Calculate unrealized P&L with side-specific price
+      const currentPrice = sidePrice;
+      const multiplier = trade.side === 'BUY' ? 1 : -1;
+      const priceDiff = (currentPrice - trade.entryPrice) * multiplier;
+      const unrealizedPnL = priceDiff * trade.quantity * (trade.lotSize || 1);
+      
+      return {
+        ...trade,
+        currentPrice,
+        unrealizedPnL
+      };
+    }));
+  }, [marketData]);
+
+  const fetchTrades = async () => {
+    try {
+      setLoading(true);
+      const { data } = await axios.get('/api/trade/admin/trades', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setTrades(data);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClose = async (trade) => {
+    const exitPrice = prompt('Enter exit price:', trade.currentPrice || trade.entryPrice);
+    if (!exitPrice) return;
+    
+    try {
+      await axios.post(`/api/trade/admin/trade/${trade._id}/close`, {
+        exitPrice: Number(exitPrice)
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchTrades();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error closing trade');
+    }
+  };
+
+  const handleDelete = async (tradeId) => {
+    if (!confirm('Are you sure you want to delete this trade?')) return;
+    
+    try {
+      await axios.delete(`/api/trade/admin/trade/${tradeId}`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchTrades();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error deleting trade');
+    }
+  };
+
+  const openEditModal = (trade) => {
+    setEditForm({
+      quantity: trade.quantity,
+      entryPrice: trade.entryPrice,
+      exitPrice: trade.exitPrice || ''
+    });
+    setEditModal({ show: true, trade });
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      await axios.put(`/api/trade/admin/trade/${editModal.trade._id}`, {
+        quantity: Number(editForm.quantity),
+        entryPrice: Number(editForm.entryPrice),
+        exitPrice: editForm.exitPrice ? Number(editForm.exitPrice) : undefined
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setEditModal({ show: false, trade: null });
+      fetchTrades();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error updating trade');
+    }
+  };
+
+  const handleReopen = async (trade) => {
+    if (!confirm('Reopen this position?')) return;
+    
+    try {
+      await axios.post(`/api/trade/admin/trade/${trade._id}/reopen`, {}, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchTrades();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error reopening trade');
+    }
+  };
+
+  const formatDuration = (entryTime, exitTime) => {
+    if (!entryTime || !exitTime) return '-';
+    const diff = new Date(exitTime) - new Date(entryTime);
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${days}d;${hours}h;${mins}m`;
+  };
+
+  const formatDateTime = (date) => {
+    if (!date) return '-';
+    const d = new Date(date);
+    return d.toLocaleString('en-IN', { 
+      day: '2-digit', month: 'short', year: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: true 
+    });
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      {/* Header with Admin Info and PNL Summary */}
+      <div className="bg-dark-800 rounded-lg p-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4 md:gap-8">
+          <div className="flex items-center gap-2">
+            <Shield className="text-purple-400" size={20} />
+            <span className="text-lg font-bold text-purple-400">{admin?.username || admin?.name}</span>
+            {Object.keys(marketData).length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-green-400">
+                <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
+                Live ({Object.keys(marketData).length})
+              </span>
+            )}
+          </div>
+          
+          <button
+            onClick={() => setActiveTab('open')}
+            className={`px-4 py-2 rounded-lg border-2 transition ${
+              activeTab === 'open' ? 'border-purple-500 bg-purple-500/10' : 'border-dark-600 hover:border-dark-500'
+            }`}
+          >
+            <div className="text-xs text-gray-400">Open PNL</div>
+            <div className={`text-lg font-bold ${totalOpenPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalOpenPnL >= 0 ? '+' : ''}₹{totalOpenPnL.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </div>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('closed')}
+            className={`px-4 py-2 rounded-lg border-2 transition ${
+              activeTab === 'closed' ? 'border-purple-500 bg-purple-500/10' : 'border-dark-600 hover:border-dark-500'
+            }`}
+          >
+            <div className="text-xs text-gray-400">Closed PNL</div>
+            <div className={`text-lg font-bold ${totalClosedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalClosedPnL >= 0 ? '+' : ''}₹{totalClosedPnL.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </div>
+          </button>
+
+          <div className="px-4 py-2 rounded-lg border-2 border-dark-600">
+            <div className="text-xs text-gray-400">Total Brokerage</div>
+            <div className="text-lg font-bold text-purple-400">
+              ₹{totalBrokerage.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </div>
+          </div>
+
+          <button onClick={fetchTrades} className="ml-auto p-2 bg-dark-700 hover:bg-dark-600 rounded-lg" title="Refresh">
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* Position Tabs */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => { setActiveTab('open'); setCurrentPage(1); }}
+          className={`px-4 py-2 rounded-lg font-medium transition text-sm ${
+            activeTab === 'open' ? 'bg-purple-600 text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+          }`}
+        >
+          Open Position ({openTrades.length})
+        </button>
+        <button
+          onClick={() => { setActiveTab('closed'); setCurrentPage(1); }}
+          className={`px-4 py-2 rounded-lg font-medium transition text-sm ${
+            activeTab === 'closed' ? 'bg-purple-600 text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+          }`}
+        >
+          Closed Position ({closedTrades.length})
+        </button>
+        <button
+          onClick={() => { setActiveTab('pending'); setCurrentPage(1); }}
+          className={`px-4 py-2 rounded-lg font-medium transition text-sm ${
+            activeTab === 'pending' ? 'bg-purple-600 text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+          }`}
+        >
+          Pending Orders ({pendingTrades.length})
+        </button>
+        <button
+          onClick={() => { setActiveTab('rejected'); setCurrentPage(1); }}
+          className={`px-4 py-2 rounded-lg font-medium transition text-sm ${
+            activeTab === 'rejected' ? 'bg-purple-600 text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+          }`}
+        >
+          Rejected Orders ({rejectedTrades.length})
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="mb-4">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <input
+            type="text"
+            placeholder="Search by User ID, Script..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2"
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+      ) : totalItems === 0 ? (
+        <div className="text-center py-8 text-gray-400">No {activeTab} positions found</div>
+      ) : (
+        <>
+          {/* Open Position Table */}
+          {activeTab === 'open' && (
+            <div className="bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-dark-700">
+                  <tr>
+                    <th className="text-left px-3 py-3 text-gray-400">UserID</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Script</th>
+                    <th className="text-center px-3 py-3 text-gray-400">B/S</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Qty</th>
+                    <th className="text-left px-3 py-3 text-gray-400">Entry Time</th>
+                    <th className="text-right px-3 py-3 text-gray-400">Entry</th>
+                    <th className="text-right px-3 py-3 text-gray-400">LTP</th>
+                    <th className="text-right px-3 py-3 text-gray-400">PNL</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Close</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Edit</th>
+                    <th className="text-center px-3 py-3 text-gray-400">Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map(trade => {
+                    const pnl = trade.unrealizedPnL || 0;
+                    return (
+                      <tr key={trade._id} className="border-t border-dark-600 hover:bg-dark-700/50">
+                        <td className="px-3 py-3">
+                          <div className="font-mono text-xs">{trade.userId}</div>
+                          <div className="text-xs text-gray-400">{trade.user?.fullName || trade.user?.username || '-'}</div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="font-medium">{trade.symbol}</div>
+                          <div className="text-xs text-gray-500">{trade.segment} • {trade.productType}</div>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {trade.side}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right">{trade.quantity}</td>
+                        <td className="px-3 py-3 text-xs">{formatDateTime(trade.openedAt)}</td>
+                        <td className="px-3 py-3 text-right">₹{trade.entryPrice?.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">₹{(trade.currentPrice || trade.entryPrice)?.toFixed(2)}</td>
+                        <td className={`px-3 py-3 text-right font-bold ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <button onClick={() => handleClose(trade)} className="px-2 py-1 bg-orange-600 hover:bg-orange-700 rounded text-xs">Close</button>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <button onClick={() => openEditModal(trade)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">Edit</button>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <button onClick={() => handleDelete(trade._id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs">Delete</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Closed Position Table */}
+          {activeTab === 'closed' && (
+            <div className="bg-dark-800 rounded-lg overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-dark-700">
+                  <tr>
+                    <th className="text-left px-2 py-3 text-gray-400">UserID</th>
+                    <th className="text-left px-2 py-3 text-gray-400">Script</th>
+                    <th className="text-center px-2 py-3 text-gray-400">B/S</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Qty</th>
+                    <th className="text-left px-2 py-3 text-gray-400">Entry Time</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Entry</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Entry BKG</th>
+                    <th className="text-left px-2 py-3 text-gray-400">Exit Time</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Exit</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Exit BKG</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Gross PNL</th>
+                    <th className="text-right px-2 py-3 text-gray-400">Net PNL</th>
+                    <th className="text-right px-2 py-3 text-gray-400">BKG</th>
+                    <th className="text-left px-2 py-3 text-gray-400">Duration</th>
+                    <th className="text-center px-2 py-3 text-gray-400">Delete</th>
+                    <th className="text-center px-2 py-3 text-gray-400">Edit</th>
+                    <th className="text-center px-2 py-3 text-gray-400">Reopen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map(trade => {
+                    const grossPnL = trade.realizedPnL || trade.pnl || 0;
+                    const totalBkg = trade.charges?.total || trade.charges?.brokerage || 0;
+                    const netPnL = trade.netPnL || (grossPnL - totalBkg);
+                    const entryBkg = (trade.charges?.brokerage || 0) / 2;
+                    const exitBkg = (trade.charges?.brokerage || 0) / 2;
+                    return (
+                      <tr key={trade._id} className="border-t border-dark-600 hover:bg-dark-700/50">
+                        <td className="px-2 py-3">
+                          <div className="font-mono text-xs">{trade.userId}</div>
+                          <div className="text-xs text-gray-400">{trade.user?.fullName || trade.user?.username || '-'}</div>
+                        </td>
+                        <td className="px-2 py-3">
+                          <div className="font-medium text-xs">{trade.symbol}</div>
+                          <div className="text-xs text-gray-500">{trade.segment}</div>
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {trade.side}
+                          </span>
+                        </td>
+                        <td className="px-2 py-3 text-right text-xs">{trade.quantity}</td>
+                        <td className="px-2 py-3 text-xs">{formatDateTime(trade.openedAt)}</td>
+                        <td className="px-2 py-3 text-right text-xs">₹{trade.entryPrice?.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-right text-xs text-gray-400">₹{entryBkg.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-xs">{formatDateTime(trade.closedAt)}</td>
+                        <td className="px-2 py-3 text-right text-xs">₹{trade.exitPrice?.toFixed(2)}</td>
+                        <td className="px-2 py-3 text-right text-xs text-gray-400">₹{exitBkg.toFixed(2)}</td>
+                        <td className={`px-2 py-3 text-right text-xs font-bold ${grossPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {grossPnL >= 0 ? '+' : ''}₹{grossPnL.toFixed(2)}
+                        </td>
                         <td className={`px-2 py-3 text-right text-xs font-bold ${netPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           {netPnL >= 0 ? '+' : ''}₹{netPnL.toFixed(2)}
                         </td>
