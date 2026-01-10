@@ -721,6 +721,32 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
     
     const Instrument = (await import('../models/Instrument.js')).default;
     
+    // MCX lot sizes - fallback when Zerodha doesn't provide correct lot size
+    const MCX_LOT_SIZES = {
+      'GOLDM': 10, 'GOLDGUINEA': 1, 'GOLDPETAL': 1, 'GOLD': 100,
+      'SILVERM': 5, 'SILVERMIC': 1, 'SILVER': 30,
+      'CRUDEOILM': 10, 'CRUDEOIL': 100,
+      'NATURALGAS': 1250, 'COPPER': 2500, 'ZINC': 5000,
+      'ALUMINIUM': 5000, 'LEAD': 5000, 'NICKEL': 1500,
+      'MENTHAOIL': 360, 'COTTON': 25, 'CPO': 10,
+    };
+    
+    // Helper to get correct lot size with MCX fallback
+    const getCorrectLotSize = (symbol, exchange, zerodhaLotSize) => {
+      const parsedLot = parseInt(zerodhaLotSize);
+      // If Zerodha provides valid lot size > 1, use it
+      if (parsedLot && parsedLot > 1) return parsedLot;
+      // For MCX, use hardcoded fallback
+      if (exchange === 'MCX') {
+        const upperSymbol = (symbol || '').toUpperCase();
+        const sortedKeys = Object.keys(MCX_LOT_SIZES).sort((a, b) => b.length - a.length);
+        for (const key of sortedKeys) {
+          if (upperSymbol.includes(key)) return MCX_LOT_SIZES[key];
+        }
+      }
+      return parsedLot || 1;
+    };
+    
     // Get all instruments from database
     const dbInstruments = await Instrument.find({});
     console.log(`Database instruments: ${dbInstruments.length}`);
@@ -751,7 +777,7 @@ router.post('/sync-lot-sizes', protectAdmin, superAdminOnly, async (req, res) =>
       }
       
       if (zerodhaInst) {
-        const newLotSize = parseInt(zerodhaInst.lot_size) || 1;
+        const newLotSize = getCorrectLotSize(dbInst.symbol, dbInst.exchange, zerodhaInst.lot_size);
         const newTickSize = parseFloat(zerodhaInst.tick_size) || 0.05;
         
         // Only update if lot size changed
@@ -1521,9 +1547,47 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     
     const mcxPriority = ['GOLD', 'GOLDM', 'SILVER', 'SILVERM', 'CRUDEOIL', 'NATURALGAS', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL'];
     
+    // MCX lot sizes - fallback when Zerodha doesn't provide correct lot size
+    const MCX_LOT_SIZES = {
+      'GOLDM': 10,
+      'GOLDGUINEA': 1,
+      'GOLDPETAL': 1,
+      'GOLD': 100,
+      'SILVERM': 5,
+      'SILVERMIC': 1,
+      'SILVER': 30,
+      'CRUDEOILM': 10,
+      'CRUDEOIL': 100,
+      'NATURALGAS': 1250,
+      'COPPER': 2500,
+      'ZINC': 5000,
+      'ALUMINIUM': 5000,
+      'LEAD': 5000,
+      'NICKEL': 1500,
+      'MENTHAOIL': 360,
+      'COTTON': 25,
+      'CPO': 10,
+    };
+    
+    // Helper to get MCX lot size
+    const getMcxLotSize = (symbol, zerodhaLotSize) => {
+      const parsedLot = parseInt(zerodhaLotSize);
+      // If Zerodha provides a valid lot size > 1, use it
+      if (parsedLot && parsedLot > 1) return parsedLot;
+      // Otherwise use hardcoded fallback
+      const upperSymbol = symbol?.toUpperCase() || '';
+      // Check mini variants first (longer names)
+      const sortedKeys = Object.keys(MCX_LOT_SIZES).sort((a, b) => b.length - a.length);
+      for (const key of sortedKeys) {
+        if (upperSymbol.includes(key)) return MCX_LOT_SIZES[key];
+      }
+      return 1;
+    };
+    
     for (const [baseSymbol, contract] of Object.entries(mcxBySymbol)) {
       try {
         const priorityIndex = mcxPriority.indexOf(baseSymbol);
+        const lotSize = getMcxLotSize(baseSymbol, contract.lot_size);
         await Instrument.create({
           token: contract.instrument_token,
           symbol: baseSymbol,
@@ -1534,7 +1598,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
           instrumentType: 'FUTURES',
           category: 'MCX',
           tradingSymbol: contract.tradingsymbol,
-          lotSize: parseInt(contract.lot_size) || 1,
+          lotSize: lotSize,
           tickSize: parseFloat(contract.tick_size) || 1,
           expiry: new Date(contract.expiry),
           isEnabled: true,
@@ -1553,31 +1617,7 @@ router.post('/reset-and-sync', protectAdmin, superAdminOnly, async (req, res) =>
     
     console.log(`Found ${mcxOptions.length} MCX options`);
     
-    // Helper function to get correct MCX lot size based on commodity name
-    const getMcxLotSize = (name, zerodhaLotSize) => {
-      const upperName = (name || '').toUpperCase();
-      // Mini/Micro variants first (more specific)
-      if (upperName.includes('GOLDM') || upperName === 'GOLDM') return 10;
-      if (upperName.includes('GOLDGUINEA')) return 1;
-      if (upperName.includes('GOLDPETAL')) return 1;
-      if (upperName.includes('SILVERM') || upperName === 'SILVERM') return 5;
-      if (upperName.includes('SILVERMIC')) return 1;
-      if (upperName.includes('CRUDEOILM') || upperName === 'CRUDEOILM') return 10;
-      // Standard variants
-      if (upperName.includes('GOLD')) return 100;
-      if (upperName.includes('SILVER')) return 30;
-      if (upperName.includes('CRUDEOIL') || upperName.includes('CRUDE')) return 100;
-      if (upperName.includes('NATURALGAS') || upperName.includes('NATGAS')) return 1250;
-      if (upperName.includes('COPPER')) return 2500;
-      if (upperName.includes('ZINC')) return 5000;
-      if (upperName.includes('ALUMINIUM') || upperName.includes('ALUMINUM')) return 5000;
-      if (upperName.includes('LEAD')) return 5000;
-      if (upperName.includes('NICKEL')) return 1500;
-      // Fallback to Zerodha's lot_size or 1
-      return parseInt(zerodhaLotSize) || 1;
-    };
-    
-    // Group MCX options by name and expiry
+    // Group MCX options by name and expiry (uses getMcxLotSize defined above)
     const mcxOptionsByNameExpiry = {};
     for (const opt of mcxOptions) {
       if (!mcxOptionsByNameExpiry[opt.name]) mcxOptionsByNameExpiry[opt.name] = {};
