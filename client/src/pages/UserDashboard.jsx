@@ -1970,6 +1970,18 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
     }
   };
 
+  // Recalculate total P&L using live market data
+  useEffect(() => {
+    const calculatedPnL = positions.reduce((sum, pos) => {
+      const ltp = getCurrentPrice(pos) || pos.currentPrice || pos.entryPrice;
+      const pnl = pos.side === 'BUY' 
+        ? (ltp - pos.entryPrice) * pos.quantity 
+        : (pos.entryPrice - ltp) * pos.quantity;
+      return sum + pnl;
+    }, 0);
+    setTotalPnL(calculatedPnL);
+  }, [positions, marketData]);
+
   return (
     <div className="h-48 bg-dark-800 border-t border-dark-600 flex flex-col">
       {/* Tabs */}
@@ -2771,31 +2783,6 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
           </div>
         </div>
 
-        {/* Leverage Selector */}
-        <div>
-          <label className="block text-xs text-gray-400 mb-2">Leverage (Buying Power)</label>
-          <div className="flex flex-wrap gap-2">
-            {[...new Set(availableLeverages)].map((lev, index) => (
-              <button
-                key={`leverage-${lev}-${index}`}
-                onClick={() => setLeverage(lev)}
-                className={`px-3 py-1.5 rounded text-sm transition ${
-                  leverage === lev 
-                    ? 'bg-purple-600 text-white' 
-                    : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
-                }`}
-              >
-                {lev}x
-              </button>
-            ))}
-          </div>
-          {leverage > 1 && (
-            <div className="text-xs text-purple-400 mt-1">
-              {leverage}x leverage = {leverage}x buying power, {leverage}x risk
-            </div>
-          )}
-        </div>
-
         {/* Lots / Quantity */}
         <div>
           <label className="block text-xs text-gray-400 mb-2">
@@ -2935,17 +2922,6 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
               }
             </span>
           </div>
-          {leverage > 1 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Buying Power ({leverage}x)</span>
-              <span className="text-purple-400">
-                {isCrypto 
-                  ? `$${convertToUsd((marginPreview?.availableBalance || 0) * leverage)}`
-                  : `₹${((marginPreview?.availableBalance || 0) * leverage).toLocaleString()}`
-                }
-              </span>
-            </div>
-          )}
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Required Margin</span>
             <span className={marginPreview?.canPlace === false ? 'text-red-400' : ''}>
@@ -5165,6 +5141,7 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [marginPreview, setMarginPreview] = useState(null);
 
   // Determine if crypto
   const isCrypto = instrument?.isCrypto || instrument?.segment === 'CRYPTO' || instrument?.exchange === 'BINANCE';
@@ -5188,6 +5165,40 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
   }
   const totalQuantity = isLotBased ? parseFloat(quantity || 1) * lotSize : parseFloat(quantity || 1);
   const orderValue = ltp * totalQuantity;
+
+  // Fetch margin preview when inputs change - same as desktop
+  useEffect(() => {
+    const fetchMarginPreview = async () => {
+      if (!instrument || !quantity || !ltp) return;
+      
+      try {
+        const { data } = await axios.post('/api/trading/margin-preview', {
+          symbol: instrument.symbol,
+          exchange: instrument.exchange,
+          segment: instrument.displaySegment || instrument.segment,
+          instrumentType: instrument.instrumentType,
+          optionType: instrument.optionType || null,
+          strikePrice: instrument.strike || null,
+          category: instrument.category,
+          productType,
+          side: orderType.toUpperCase(),
+          quantity: totalQuantity,
+          lots: parseInt(quantity),
+          lotSize: lotSize,
+          price: parseFloat(ltp),
+          leverage: 1
+        }, {
+          headers: { Authorization: `Bearer ${user?.token}` }
+        });
+        setMarginPreview(data);
+      } catch (err) {
+        console.error('Margin preview error:', err);
+      }
+    };
+
+    const debounce = setTimeout(fetchMarginPreview, 300);
+    return () => clearTimeout(debounce);
+  }, [instrument, quantity, ltp, productType, orderType, user, totalQuantity, lotSize]);
 
   // Product types based on segment
   const productTypes = isCrypto
@@ -5429,7 +5440,12 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-400">Required Margin</span>
-              <span className="font-medium">₹{(orderValue * (isMCX ? 0.05 : 0.15) / (productType === 'MIS' ? 2 : 1)).toLocaleString()}</span>
+              <span className={`font-medium ${marginPreview?.canPlace === false ? 'text-red-400' : ''}`}>
+                {isCrypto 
+                  ? `$${marginPreview?.marginRequired?.toLocaleString() || '--'}`
+                  : `₹${marginPreview?.marginRequired?.toLocaleString() || '--'}`
+                }
+              </span>
             </div>
             <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
               <span className="text-gray-400">Order Value</span>
