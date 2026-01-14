@@ -437,7 +437,7 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
               className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
             >
               <option value="UPI">UPI</option>
-              <option value="BANK_TRANSFER">Bank Transfer (NEFT/IMPS)</option>
+              <option value="BANK">Bank Transfer (NEFT/IMPS)</option>
               <option value="CASH">Cash</option>
             </select>
           </div>
@@ -685,7 +685,7 @@ const WithdrawModal = ({ user, balance, adminInfo, onClose, onSuccess }) => {
               className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-red-500"
             >
               <option value="UPI">UPI</option>
-              <option value="BANK_TRANSFER">Bank Transfer</option>
+              <option value="BANK">Bank Transfer</option>
             </select>
           </div>
 
