@@ -1397,14 +1397,17 @@ const SuperAdminCreateUser = () => {
       MCXOPT: { ...defaultSegmentSettings, enabled: true },
       'NSE-EQ': { ...defaultSegmentSettings, enabled: true },
       'BSE-FUT': { ...defaultSegmentSettings, enabled: false },
-      'BSE-OPT': { ...defaultSegmentSettings, enabled: false }
+      'BSE-OPT': { ...defaultSegmentSettings, enabled: false },
+      'CRYPTO': { ...defaultSegmentSettings, enabled: false }
     },
     // Global Script Settings - applies to all segments
     scriptSettings: {},
     // For script settings UI
     selectedScriptSegment: null,
     selectedScript: null,
-    segmentSymbols: {}
+    segmentSymbols: {
+      CRYPTO: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LTC', 'AVAX']
+    }
   });
 
   useEffect(() => {
@@ -1420,7 +1423,9 @@ const SuperAdminCreateUser = () => {
       });
       
       // Build segment symbols from scripts data
-      const segmentSymbols = {};
+      const segmentSymbols = {
+        CRYPTO: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LTC', 'AVAX']
+      };
       for (const [segKey, scripts] of Object.entries(data.scripts || {})) {
         segmentSymbols[segKey] = scripts.map(s => s.baseSymbol);
       }
@@ -1450,7 +1455,8 @@ const SuperAdminCreateUser = () => {
           NSEINDEX: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
           NSESTOCK: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
           BSE: ['SENSEX', 'BANKEX'],
-          EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT']
+          EQ: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
+          CRYPTO: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LTC', 'AVAX']
         }
       }));
     }
@@ -1547,7 +1553,8 @@ const SuperAdminCreateUser = () => {
           MCXOPT: { ...defaultSegmentSettings, enabled: true },
           'NSE-EQ': { ...defaultSegmentSettings, enabled: true },
           'BSE-FUT': { ...defaultSegmentSettings, enabled: false },
-          'BSE-OPT': { ...defaultSegmentSettings, enabled: false }
+          'BSE-OPT': { ...defaultSegmentSettings, enabled: false },
+          'CRYPTO': { ...defaultSegmentSettings, enabled: false }
         },
         scriptSettings: {},
         selectedScriptSegment: null,
@@ -1778,12 +1785,12 @@ const SuperAdminCreateUser = () => {
           <h2 className="text-lg font-semibold text-yellow-500 mb-4">Segment Settings</h2>
           <p className="text-gray-400 text-sm mb-4">Click on a segment to configure its settings. Green = Enabled, Gray = Disabled</p>
           
-          {/* Segment Buttons - Dynamic from market data */}
+          {/* Segment Buttons - Dynamic from market data + CRYPTO */}
           <div className="flex flex-wrap gap-3 mb-4">
-            {(formData.marketSegments?.length > 0 
+            {[...(formData.marketSegments?.length > 0 
               ? formData.marketSegments.map(s => s.id)
-              : ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ']
-            ).map(segment => (
+              : ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT']
+            ), 'CRYPTO'].filter((v, i, a) => a.indexOf(v) === i).map(segment => (
               <button
                 key={segment}
                 type="button"
@@ -2114,7 +2121,7 @@ const SuperAdminCreateUser = () => {
           
           {/* Segment Tabs for Script Settings */}
           <div className="flex flex-wrap gap-2 mb-4">
-            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].map(seg => (
+            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO'].map(seg => (
               <button
                 key={seg}
                 type="button"
@@ -2830,7 +2837,8 @@ const AdminCreateUser = () => {
       MCXOPT: { ...defaultSegmentSettings, enabled: true },
       'NSE-EQ': { ...defaultSegmentSettings, enabled: true },
       'BSE-FUT': { ...defaultSegmentSettings, enabled: false },
-      'BSE-OPT': { ...defaultSegmentSettings, enabled: false }
+      'BSE-OPT': { ...defaultSegmentSettings, enabled: false },
+      'CRYPTO': { ...defaultSegmentSettings, enabled: false }
     },
     scriptSettings: {},
     selectedScriptSegment: null,
@@ -3133,10 +3141,10 @@ const AdminCreateUser = () => {
           <p className="text-gray-400 text-sm mb-4">Click on a segment to configure its settings. Green = Enabled, Gray = Disabled</p>
           
           <div className="flex flex-wrap gap-3 mb-4">
-            {(formData.marketSegments?.length > 0 
+            {[...(formData.marketSegments?.length > 0 
               ? formData.marketSegments.map(s => s.id)
-              : ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ']
-            ).map(segment => (
+              : ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT']
+            ), 'CRYPTO'].filter((v, i, a) => a.indexOf(v) === i).map(segment => (
               <button
                 key={segment}
                 type="button"
@@ -3276,7 +3284,7 @@ const AdminCreateUser = () => {
           
           {/* Segment Tabs for Script Settings */}
           <div className="flex flex-wrap gap-2 mb-4">
-            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'].map(seg => (
+            {['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO'].map(seg => (
               <button
                 key={seg}
                 type="button"
@@ -5089,6 +5097,7 @@ const InstrumentManagement = () => {
             <option value="NSE-EQ">NSE-EQ</option>
             <option value="BSE-FUT">BSE-FUT</option>
             <option value="BSE-OPT">BSE-OPT</option>
+            <option value="CRYPTO">CRYPTO</option>
           </select>
           <select
             value={filter.category}
@@ -8188,7 +8197,7 @@ const TradingPanel = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [userSearch, setUserSearch] = useState('');
 
-  const segments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+  const segments = ['NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO'];
 
   useEffect(() => {
     fetchInstruments(activeSegment);
@@ -9932,7 +9941,7 @@ const AllUsersManagement = () => {
   const [selectedScript, setSelectedScript] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   
-  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ', 'NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT'];
+  const defaultSegmentOptions = ['MCX', 'NSEINDEX', 'NSESTOCK', 'BSE', 'EQ', 'NSEFUT', 'NSEOPT', 'MCXFUT', 'MCXOPT', 'NSE-EQ', 'BSE-FUT', 'BSE-OPT', 'CRYPTO'];
   
   const defaultSegmentSettings = {
     enabled: false,
@@ -9965,10 +9974,10 @@ const AllUsersManagement = () => {
   
   const [marketSegments, setMarketSegments] = useState([]);
   
-  // Dynamic segment options from market data
-  const segmentOptions = marketSegments.length > 0 
+  // Dynamic segment options from market data + CRYPTO always included
+  const segmentOptions = [...(marketSegments.length > 0 
     ? marketSegments.map(s => s.id) 
-    : defaultSegmentOptions;
+    : defaultSegmentOptions), 'CRYPTO'].filter((v, i, a) => a.indexOf(v) === i);
   const [marketScripts, setMarketScripts] = useState({});
   const [segmentSymbols, setSegmentSymbols] = useState({
     NSEFUT: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT'],
@@ -9977,7 +9986,8 @@ const AllUsersManagement = () => {
     MCXOPT: ['CRUDEOIL', 'GOLD', 'SILVER', 'NATURALGAS', 'COPPER'],
     'NSE-EQ': ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'],
     'BSE-FUT': ['SENSEX', 'BANKEX'],
-    'BSE-OPT': ['SENSEX', 'BANKEX']
+    'BSE-OPT': ['SENSEX', 'BANKEX'],
+    'CRYPTO': ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LTC', 'AVAX']
   });
 
   useEffect(() => {

@@ -299,11 +299,11 @@ const UserWalletPage = () => {
                         </div>
                         <div className="flex justify-between bg-dark-600 rounded p-2">
                           <span className="text-gray-400">IFSC Code</span>
-                          <span className="font-mono">{acc.ifscCode}</span>
+                          <span className="font-mono">{acc.ifsc}</span>
                         </div>
                         <div className="flex justify-between bg-dark-600 rounded p-2">
                           <span className="text-gray-400">Account Holder</span>
-                          <span>{acc.accountHolderName}</span>
+                          <span>{acc.holderName}</span>
                         </div>
                       </div>
                     )}
@@ -402,8 +402,8 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-dark-800 rounded-xl w-full max-w-md p-6 my-4">
+    <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-dark-800 rounded-xl w-full max-w-md p-6 my-8">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Deposit Funds</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
@@ -502,10 +502,10 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
                   <div className="flex justify-between items-center">
                     <span className="text-gray-400">IFSC Code</span>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-yellow-400">{selectedBankDetails.ifscCode}</span>
+                      <span className="font-mono text-yellow-400">{selectedBankDetails.ifsc}</span>
                       <button 
                         type="button"
-                        onClick={() => {navigator.clipboard.writeText(selectedBankDetails.ifscCode); alert('Copied!')}}
+                        onClick={() => {navigator.clipboard.writeText(selectedBankDetails.ifsc); alert('Copied!')}}
                         className="text-xs bg-dark-600 hover:bg-dark-500 px-2 py-1 rounded"
                       >
                         Copy
@@ -514,7 +514,7 @@ const DepositModal = ({ user, bankAccounts, onClose, onSuccess }) => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Account Holder</span>
-                    <span className="font-medium text-white">{selectedBankDetails.accountHolderName}</span>
+                    <span className="font-medium text-white">{selectedBankDetails.holderName}</span>
                   </div>
                   {selectedBankDetails.branch && (
                     <div className="flex justify-between">

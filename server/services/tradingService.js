@@ -290,32 +290,45 @@ class TradingService {
       throw new Error(`Trading in ${orderData.symbol} is blocked for your account`);
     }
 
+    // Determine if crypto trade early
+    const isCryptoTrade = orderData.segment === 'CRYPTO' || orderData.isCrypto || orderData.exchange === 'BINANCE';
+    
     // Get lot size - prefer from order data, then database, then fallback to hardcoded
-    let lotSize = orderData.lotSize;
-    if (!lotSize || lotSize <= 0) {
+    // For crypto: lot size is always 1 (fractional units allowed)
+    let lotSize = isCryptoTrade ? 1 : orderData.lotSize;
+    if (!isCryptoTrade && (!lotSize || lotSize <= 0)) {
       lotSize = await this.getLotSizeAsync(orderData.symbol, orderData.token, orderData.exchange);
     }
+    
+    // For crypto: use fractional quantity directly, for others: use lots * lotSize
     const lots = orderData.lots || 1;
-    const totalQuantity = lots * lotSize;
+    const totalQuantity = isCryptoTrade 
+      ? (orderData.quantity || orderData.cryptoAmount / orderData.price || 0) // Fractional crypto units
+      : (lots * lotSize);
     
-    // Validate lot limits from user settings
-    // Script settings override segment settings, segment settings are the default
-    const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
-    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
-    
-    console.log('Lot Validation:', {
-      requestedLots: lots,
-      maxLots, minLots,
-      fromScript: !!scriptSettings?.lotSettings?.maxLots,
-      fromSegment: segmentSettings?.maxLots,
-      segment: orderData.segment
-    });
-    
-    if (lots < minLots) {
-      throw new Error(`Minimum ${minLots} lots required for ${orderData.symbol}`);
-    }
-    if (lots > maxLots) {
-      throw new Error(`Maximum ${maxLots} lots allowed for ${orderData.symbol}. Your limit is ${maxLots} lots.`);
+    // Skip lot validation for crypto (uses USD amount, not lots)
+    if (!isCryptoTrade) {
+      // Validate lot limits from user settings
+      // Script settings override segment settings, segment settings are the default
+      const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
+      const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
+      
+      console.log('Lot Validation:', {
+        requestedLots: lots,
+        maxLots, minLots,
+        fromScript: !!scriptSettings?.lotSettings?.maxLots,
+        fromSegment: segmentSettings?.maxLots,
+        segment: orderData.segment
+      });
+      
+      if (lots < minLots) {
+        throw new Error(`Minimum ${minLots} lots required for ${orderData.symbol}`);
+      }
+      if (lots > maxLots) {
+        throw new Error(`Maximum ${maxLots} lots allowed for ${orderData.symbol}. Your limit is ${maxLots} lots.`);
+      }
+    } else {
+      console.log('Crypto trade:', { quantity: totalQuantity, price: orderData.price, cryptoAmount: orderData.cryptoAmount });
     }
 
     // Calculate spread from user's script settings
@@ -380,14 +393,18 @@ class TradingService {
     // Determine if crypto trade - check before balance validation
     const isCrypto = orderData.segment === 'CRYPTO' || orderData.isCrypto || orderData.exchange === 'BINANCE';
     
+    // For crypto spot trading, calculate trade cost (price × quantity)
+    const cryptoTradeCost = isCrypto ? (price * totalQuantity) : 0;
+    
     // Use appropriate wallet based on trade type
     let availableBalance;
     if (isCrypto) {
-      // Crypto trades use separate crypto wallet (no margin system)
+      // Crypto trades use separate crypto wallet (no margin system, spot trading)
       availableBalance = user.cryptoWallet?.balance || 0;
-      // For crypto, only commission is needed (no margin)
-      if (totalCommission > availableBalance) {
-        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCommission.toFixed(2)}, Available: $${availableBalance.toFixed(2)}`);
+      // For crypto spot trading, need full trade cost + commission
+      const totalCryptoRequired = cryptoTradeCost + totalCommission;
+      if (totalCryptoRequired > availableBalance) {
+        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCryptoRequired.toFixed(2)}, Available: $${availableBalance.toFixed(2)}`);
       }
     } else {
       // Regular trades use trading balance with margin system
@@ -491,20 +508,24 @@ class TradingService {
     let newTradingBalance, newUsedMargin, newBlocked, newCryptoBalance;
     
     if (isCrypto) {
-      // Crypto trades: Use separate crypto wallet, no margin blocking
+      // Crypto trades: Use separate crypto wallet, spot trading (full cost deducted)
       const cryptoBalance = user.cryptoWallet?.balance || 0;
-      newCryptoBalance = cryptoBalance - totalCommission;
+      const totalCryptoDeduction = cryptoTradeCost + totalCommission;
+      newCryptoBalance = cryptoBalance - totalCryptoDeduction;
       
       // Check if user has enough in crypto wallet
       if (newCryptoBalance < 0) {
-        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCommission.toFixed(2)}, Available: $${cryptoBalance.toFixed(2)}`);
+        throw new Error(`Insufficient crypto wallet balance. Required: $${totalCryptoDeduction.toFixed(2)}, Available: $${cryptoBalance.toFixed(2)}`);
       }
       
       // Regular wallet unchanged for crypto trades
       newTradingBalance = user.wallet.tradingBalance || 0;
       newUsedMargin = user.wallet.usedMargin || 0;
       newBlocked = user.wallet.blocked || 0;
-      console.log('Crypto trade: Using crypto wallet, no margin system');
+      console.log(`Crypto trade: Deducting $${totalCryptoDeduction.toFixed(2)} from crypto wallet (cost: $${cryptoTradeCost.toFixed(2)}, commission: $${totalCommission.toFixed(2)})`);
+      
+      // Store the trade cost as marginUsed for crypto (for tracking purposes)
+      marginRequired = cryptoTradeCost;
     } else {
       // Regular trades: Block margin and deduct commission
       newTradingBalance = (user.wallet.tradingBalance || 0) - marginRequired - totalCommission;
@@ -670,13 +691,16 @@ class TradingService {
     let newUsedMargin, newBlocked, newTradingBalance, newCryptoBalance, newCryptoRealizedPnL;
     
     if (trade.isCrypto) {
-      // Crypto trades: Add P&L to crypto wallet, no margin to release
+      // Crypto trades: Return trade cost (marginUsed) + P&L to crypto wallet
+      // marginUsed stores the original trade cost for crypto trades
+      const tradeCostReturned = trade.marginUsed || 0;
       newUsedMargin = user.wallet.usedMargin || 0; // No change to regular wallet
       newBlocked = user.wallet.blocked || 0; // No change
       newTradingBalance = user.wallet.tradingBalance || 0; // No change to regular trading balance
-      newCryptoBalance = (user.cryptoWallet?.balance || 0) + netPnL;
+      // Return the trade cost + add P&L (can be negative for loss)
+      newCryptoBalance = (user.cryptoWallet?.balance || 0) + tradeCostReturned + netPnL;
       newCryptoRealizedPnL = (user.cryptoWallet?.realizedPnL || 0) + netPnL;
-      console.log('Crypto trade closed: P&L added to crypto wallet');
+      console.log(`Crypto trade closed: Returning $${tradeCostReturned.toFixed(2)} + P&L $${netPnL.toFixed(2)} to crypto wallet`);
     } else {
       // Regular trades: Release margin and add P&L
       newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - trade.marginUsed);
@@ -886,6 +910,9 @@ class TradingService {
     const trade = await Trade.findById(positionId);
     if (!trade) throw new Error('Position not found');
     
+    // Check if this is a crypto trade
+    const isCrypto = trade.isCrypto || trade.segment === 'CRYPTO' || trade.exchange === 'BINANCE';
+    
     // Indian Net Trading: Use correct price based on position side
     // BUY position closes at Bid price (you sell at bid)
     // SELL position closes at Ask price (you buy at ask)
@@ -904,12 +931,18 @@ class TradingService {
       price = askPrice || exitPrice || trade.currentPrice || trade.entryPrice;
     }
     
+    // For crypto: always use entry price if no valid price (crypto prices may not be in marketData)
+    if (isCrypto && (!price || price <= 0)) {
+      price = trade.entryPrice;
+      console.log(`Crypto trade: Using entry price ${price} as exit price`);
+    }
+    
     // Validate price is reasonable (not zero or negative)
     if (!price || price <= 0) {
       throw new Error('Invalid exit price. Please try again with valid market data.');
     }
     
-    console.log(`Closing ${trade.side} position ${positionId}: exitPrice=${price}, bid=${bidPrice}, ask=${askPrice}, current=${trade.currentPrice}`);
+    console.log(`Closing ${trade.side} position ${positionId}: exitPrice=${price}, bid=${bidPrice}, ask=${askPrice}, current=${trade.currentPrice}, isCrypto=${isCrypto}`);
     
     return this.closeTrade(positionId, price, reason);
   }

@@ -386,38 +386,6 @@ const UserDashboard = () => {
             <span className="text-sm font-medium">Orders</span>
           </button>
           
-          {/* Market Indices - Live Data - Hide in crypto mode */}
-          {!cryptoOnly && (
-            <div className="hidden lg:flex items-center gap-6 text-sm">
-              <div>
-                <span className="text-gray-400">NIFTY</span>
-                {indicesData.nifty ? (
-                  <span className={`ml-2 ${indicesData.nifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {indicesData.nifty.ltp?.toLocaleString()} 
-                    <span className="text-xs ml-1">({indicesData.nifty.change >= 0 ? '+' : ''}{indicesData.nifty.changePercent}%)</span>
-                  </span>
-                ) : <span className="ml-2 text-gray-500">--</span>}
-              </div>
-              <div>
-                <span className="text-gray-400">BANKNIFTY</span>
-                {indicesData.banknifty ? (
-                  <span className={`ml-2 ${indicesData.banknifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {indicesData.banknifty.ltp?.toLocaleString()}
-                    <span className="text-xs ml-1">({indicesData.banknifty.change >= 0 ? '+' : ''}{indicesData.banknifty.changePercent}%)</span>
-                  </span>
-                ) : <span className="ml-2 text-gray-500">--</span>}
-              </div>
-              <div>
-                <span className="text-gray-400">FINNIFTY</span>
-                {indicesData.finnifty ? (
-                  <span className={`ml-2 ${indicesData.finnifty.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {indicesData.finnifty.ltp?.toLocaleString()}
-                    <span className="text-xs ml-1">({indicesData.finnifty.change >= 0 ? '+' : ''}{indicesData.finnifty.changePercent}%)</span>
-                  </span>
-                ) : <span className="ml-2 text-gray-500">--</span>}
-              </div>
-            </div>
-          )}
           {/* Crypto Mode Label */}
           {cryptoOnly && (
             <div className="hidden lg:flex items-center gap-2 text-sm">
@@ -770,7 +738,8 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
     'MCXOPT': [],
     'NSE-EQ': [],
     'BSE-FUT': [],
-    'BSE-OPT': []
+    'BSE-OPT': [],
+    'CRYPTO': []
   });
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   
@@ -854,7 +823,8 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
           'MCXOPT': [],
           'NSE-EQ': [],
           'BSE-FUT': [],
-          'BSE-OPT': []
+          'BSE-OPT': [],
+          'CRYPTO': []
         };
         setWatchlistBySegment({ ...defaults, ...(data || {}) });
         setWatchlistLoaded(true);
@@ -880,18 +850,27 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
   
   // Set default segment tabs - filter based on cryptoOnly mode
   useEffect(() => {
-    const allTabs = [
-      { id: 'FAVORITES', label: '★ Favorites' },
-      { id: 'NSEFUT', label: 'NSEFUT' },
-      { id: 'NSEOPT', label: 'NSEOPT' },
-      { id: 'MCXFUT', label: 'MCXFUT' },
-      { id: 'MCXOPT', label: 'MCXOPT' },
-      { id: 'NSE-EQ', label: 'NSE-EQ' },
-      { id: 'BSE-FUT', label: 'BSE-FUT' },
-      { id: 'BSE-OPT', label: 'BSE-OPT' }
-    ];
-    
-    setSegmentTabs(allTabs);
+    if (cryptoOnly) {
+      // Crypto-only mode: show only CRYPTO segment
+      const cryptoTabs = [
+        { id: 'CRYPTO', label: '₿ Crypto' }
+      ];
+      setSegmentTabs(cryptoTabs);
+      setActiveSegment('CRYPTO');
+    } else {
+      // Regular trading mode: show Indian market segments
+      const allTabs = [
+        { id: 'FAVORITES', label: '★ Favorites' },
+        { id: 'NSEFUT', label: 'NSEFUT' },
+        { id: 'NSEOPT', label: 'NSEOPT' },
+        { id: 'MCXFUT', label: 'MCXFUT' },
+        { id: 'MCXOPT', label: 'MCXOPT' },
+        { id: 'NSE-EQ', label: 'NSE-EQ' },
+        { id: 'BSE-FUT', label: 'BSE-FUT' },
+        { id: 'BSE-OPT', label: 'BSE-OPT' }
+      ];
+      setSegmentTabs(allTabs);
+    }
   }, [cryptoOnly]);
   
   // Market status derived from marketData
@@ -1010,11 +989,11 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
 
   // Add instrument to watchlist - auto-detect segment from exchange
   const addToWatchlist = async (instrument) => {
-    const segment = getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
-    console.log('Adding to watchlist:', instrument.symbol, 'segment:', segment, 'exchange:', instrument.exchange, 'instrumentType:', instrument.instrumentType);
+    // For crypto instruments, always use CRYPTO segment
+    const segment = instrument.isCrypto ? 'CRYPTO' : getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
     const currentList = watchlistBySegment[segment] || [];
     // Check if already exists
-    const identifier = instrument.token;
+    const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
     if (currentList.some(i => (i.isCrypto ? i.pair : i.token) === identifier)) return;
     
     // Update local state immediately
@@ -1072,12 +1051,12 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
 
   // Get watchlist for current segment
   const getWatchlistForSegment = () => {
-    if (false) {
-      // Crypto removed - this block is no longer used
-      return [];
+    if (cryptoOnly || activeSegment === 'CRYPTO') {
+      // Crypto mode: return crypto watchlist
+      const list = watchlistBySegment['CRYPTO'] || [];
+      return list;
     }
     const list = watchlistBySegment[activeSegment] || [];
-    console.log('getWatchlistForSegment - activeSegment:', activeSegment, 'count:', list.length, 'watchlistBySegment keys:', Object.keys(watchlistBySegment));
     return list;
   };
 
@@ -1206,10 +1185,70 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
           /* Watchlist for Current Segment */
           <div>
             <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0 z-10">
-              {activeSegment} Watchlist ({getSegmentCount(activeSegment)})
+              {activeSegment === 'CRYPTO' ? '₿ Crypto' : activeSegment} Watchlist ({getSegmentCount(activeSegment)})
             </div>
             
-            {getWatchlistForSegment().length === 0 ? (
+            {/* Show default crypto list when in crypto mode and watchlist is empty */}
+            {cryptoOnly && getWatchlistForSegment().length === 0 ? (
+              <div>
+                <div className="px-3 py-2 text-xs text-orange-400 bg-dark-750">
+                  Popular Cryptocurrencies - Click to add to watchlist
+                </div>
+                {[
+                  { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
+                  { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
+                  { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
+                  { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
+                  { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
+                  { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
+                  { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
+                  { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
+                  { symbol: 'LTC', name: 'Litecoin', exchange: 'BINANCE', pair: 'LTCUSDT', isCrypto: true },
+                  { symbol: 'AVAX', name: 'Avalanche', exchange: 'BINANCE', pair: 'AVAXUSDT', isCrypto: true },
+                ].map(crypto => {
+                  const priceData = cryptoData[crypto.pair] || marketData[crypto.pair] || { ltp: 0, changePercent: 0 };
+                  return (
+                    <div
+                      key={crypto.pair}
+                      className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
+                    >
+                      <div className="flex-1 min-w-0 mr-2">
+                        <div className="font-bold text-sm text-orange-400">{crypto.symbol}</div>
+                        <div className="text-xs text-gray-500">{crypto.name}</div>
+                      </div>
+                      <div className="text-right mr-2">
+                        <div className="text-sm font-medium text-gray-300">
+                          ${(priceData.ltp || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className={`text-xs ${parseFloat(priceData.changePercent || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {parseFloat(priceData.changePercent || 0) >= 0 ? '+' : ''}{parseFloat(priceData.changePercent || 0).toFixed(2)}%
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => addToWatchlist(crypto)}
+                          className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+                        >
+                          <Plus size={12} /> Add
+                        </button>
+                        <button
+                          onClick={() => onBuySell('sell', crypto)}
+                          className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center text-white text-xs font-bold"
+                        >
+                          S
+                        </button>
+                        <button
+                          onClick={() => onBuySell('buy', crypto)}
+                          className="w-7 h-7 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white text-xs font-bold"
+                        >
+                          B
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : getWatchlistForSegment().length === 0 ? (
               <div className="p-4 text-center text-gray-500 text-sm">
                 <p>No instruments in {activeSegment} watchlist</p>
                 <p className="mt-2 text-xs text-gray-600">
@@ -1747,12 +1786,25 @@ const PositionsPanel = ({ activeTab, setActiveTab, walletData, user, marketData,
       setLoading(true);
       // Get live bid/ask prices for the position
       const liveData = marketData[position?.token] || {};
-      const bidPrice = liveData.bid || liveData.ltp || position?.currentPrice;
-      const askPrice = liveData.ask || liveData.ltp || position?.currentPrice;
+      const isCrypto = position?.isCrypto || position?.segment === 'CRYPTO' || position?.exchange === 'BINANCE';
+      
+      // For crypto: use entry price as fallback since crypto prices come from different source
+      // For regular: use marketData
+      let bidPrice, askPrice;
+      if (isCrypto) {
+        // Crypto positions: use entry price as exit price (will be updated by server with live price if available)
+        const cryptoPrice = position?.currentPrice || position?.entryPrice || 0;
+        bidPrice = cryptoPrice;
+        askPrice = cryptoPrice;
+      } else {
+        bidPrice = liveData.bid || liveData.ltp || position?.currentPrice || position?.entryPrice;
+        askPrice = liveData.ask || liveData.ltp || position?.currentPrice || position?.entryPrice;
+      }
       
       await axios.post(`/api/trading/close/${tradeId}`, {
         bidPrice,
-        askPrice
+        askPrice,
+        isCrypto
       }, {
         headers: { Authorization: `Bearer ${user.token}` }
       });
@@ -2237,10 +2289,19 @@ const PortfolioPanel = ({ walletData, onOpenWallet, user, marketData }) => {
   const handleClosePosition = async (tradeId, position) => {
     try {
       const liveData = marketData?.[position?.token] || {};
-      const bidPrice = liveData.bid || liveData.ltp || position?.currentPrice;
-      const askPrice = liveData.ask || liveData.ltp || position?.currentPrice;
+      const isCrypto = position?.isCrypto || position?.segment === 'CRYPTO' || position?.exchange === 'BINANCE';
       
-      await axios.post(`/api/trading/close/${tradeId}`, { bidPrice, askPrice }, {
+      let bidPrice, askPrice;
+      if (isCrypto) {
+        const cryptoPrice = position?.currentPrice || position?.entryPrice || 0;
+        bidPrice = cryptoPrice;
+        askPrice = cryptoPrice;
+      } else {
+        bidPrice = liveData.bid || liveData.ltp || position?.currentPrice || position?.entryPrice;
+        askPrice = liveData.ask || liveData.ltp || position?.currentPrice || position?.entryPrice;
+      }
+      
+      await axios.post(`/api/trading/close/${tradeId}`, { bidPrice, askPrice, isCrypto }, {
         headers: { Authorization: `Bearer ${user.token}` }
       });
       fetchData();
@@ -2446,6 +2507,10 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [usdRate, setUsdRate] = useState(83.50); // Default USD/INR rate
+  
+  // Crypto-specific: Binance-style USD amount input
+  const [cryptoAmount, setCryptoAmount] = useState('100'); // USD amount to spend
+  const [cryptoInputMode, setCryptoInputMode] = useState('amount'); // 'amount' (USD) or 'units' (crypto units)
 
   // Determine if crypto
   const isCrypto = instrument?.isCrypto || instrument?.segment === 'CRYPTO' || instrument?.exchange === 'BINANCE';
@@ -2455,6 +2520,15 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const livePrice = isCrypto ? (instrument?.ltp || 0) : (liveData.ltp || instrument?.ltp || 0);
   const liveBid = isCrypto ? livePrice : (liveData.bid || livePrice);
   const liveAsk = isCrypto ? livePrice : (liveData.ask || livePrice);
+  
+  // For crypto: Calculate quantity from USD amount or vice versa
+  const cryptoUnitPrice = livePrice || 1;
+  const cryptoUnits = cryptoInputMode === 'amount' 
+    ? (parseFloat(cryptoAmount) || 0) / cryptoUnitPrice 
+    : parseFloat(cryptoAmount) || 0;
+  const cryptoTotalCost = cryptoInputMode === 'amount'
+    ? parseFloat(cryptoAmount) || 0
+    : (parseFloat(cryptoAmount) || 0) * cryptoUnitPrice;
   
   // Price symbol for display
   const priceSymbol = isCrypto ? '$' : '₹';
@@ -2511,6 +2585,13 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
       setLimitPrice(livePrice.toString());
     }
   }, [instrument?.token]);
+  
+  // Update price state continuously for crypto from live price
+  useEffect(() => {
+    if (isCrypto && livePrice) {
+      setPrice(livePrice.toString());
+    }
+  }, [livePrice, isCrypto]);
 
   // Determine segment type from database fields
   const isEquity = instrument?.segment === 'EQUITY' && instrument?.instrumentType === 'STOCK';
@@ -2528,7 +2609,8 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
     setError(`Lot size missing for ${instrument?.symbol || 'instrument'}`);
     return null;
   }
-  const totalQuantity = isFnO ? parseInt(lots || 0) * lotSize : parseInt(lots || 0);
+  // For crypto: use calculated units, for others: use lots
+  const totalQuantity = isCrypto ? cryptoUnits : (isFnO ? parseInt(lots || 0) * lotSize : parseInt(lots || 0));
 
   // Fetch margin preview when inputs change
   useEffect(() => {
@@ -2598,15 +2680,16 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
         productType,
         orderType: orderMode,
         side: orderType.toUpperCase(),
-        quantity: totalQuantity,
-        lots: parseInt(lots),
+        quantity: isCrypto ? cryptoUnits : totalQuantity, // For crypto: fractional units
+        lots: isCrypto ? 1 : parseInt(lots),
         lotSize: lotSize,
-        price: parseFloat(price),
+        price: isCrypto ? livePrice : parseFloat(price), // Use live price for crypto
         bidPrice: liveBid, // Send bid price for SELL orders
         askPrice: liveAsk, // Send ask price for BUY orders
         leverage: leverage,
         stopLoss: stopLoss ? parseFloat(stopLoss) : null,
-        target: target ? parseFloat(target) : null
+        target: target ? parseFloat(target) : null,
+        cryptoAmount: isCrypto ? cryptoTotalCost : null // USD amount for crypto
       };
       
       console.log('Placing order:', orderData);
@@ -2626,7 +2709,9 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
 
       const statusMsg = data.trade?.status === 'PENDING' 
         ? `Order placed! Waiting for price to reach ${priceSymbol}${limitPrice}` 
-        : `Order executed! Margin: ₹${data.marginBlocked?.toLocaleString()}`;
+        : isCrypto 
+          ? `✅ Bought ${cryptoUnits.toFixed(6)} ${instrument.symbol} for $${cryptoTotalCost.toFixed(2)}`
+          : `Order executed! Margin: ₹${data.marginBlocked?.toLocaleString()}`;
       
       setSuccess(statusMsg);
       // Refresh wallet and positions after successful order
@@ -2783,49 +2868,120 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
           </div>
         </div>
 
-        {/* Lots / Quantity */}
-        <div>
-          <label className="block text-xs text-gray-400 mb-2">
-            {isFnO ? 'Lots' : 'Quantity'} {isFnO && <span className="text-yellow-400">(1 Lot = {lotSize} qty)</span>}
-          </label>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setLots(Math.max(1, parseInt(lots || 1) - 1).toString())}
-              className="w-10 h-10 bg-dark-600 hover:bg-dark-500 rounded text-xl font-bold"
-            >-</button>
-            <input
-              type="number"
-              value={lots}
-              onChange={(e) => setLots(e.target.value)}
-              className="w-16 bg-dark-700 border border-dark-600 rounded px-2 py-2 text-center text-lg font-bold focus:outline-none focus:border-green-500"
-              min="1"
-            />
-            <button 
-              onClick={() => setLots((parseInt(lots || 1) + 1).toString())}
-              className="w-10 h-10 bg-dark-600 hover:bg-dark-500 rounded text-xl font-bold"
-            >+</button>
-          </div>
-          {isFnO && (
-            <div className="flex justify-between text-xs mt-2">
-              <span className="text-gray-500">Total Qty: <span className="text-white font-medium">{totalQuantity}</span></span>
-              <span className="text-gray-500">Value: <span className="text-white">{priceSymbol}{(totalQuantity * parseFloat(price || 0)).toLocaleString()}</span></span>
+        {/* Crypto: Binance-style Amount Input */}
+        {isCrypto ? (
+          <div>
+            {/* Toggle between USD Amount and Crypto Units */}
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setCryptoInputMode('amount')}
+                className={`flex-1 py-2 rounded text-sm font-medium transition ${
+                  cryptoInputMode === 'amount' ? 'bg-orange-600 text-white' : 'bg-dark-700 text-gray-400'
+                }`}
+              >
+                💵 USD Amount
+              </button>
+              <button
+                onClick={() => setCryptoInputMode('units')}
+                className={`flex-1 py-2 rounded text-sm font-medium transition ${
+                  cryptoInputMode === 'units' ? 'bg-orange-600 text-white' : 'bg-dark-700 text-gray-400'
+                }`}
+              >
+                ₿ {instrument?.symbol} Units
+              </button>
             </div>
-          )}
-          {/* Quick lot buttons */}
-          {isFnO && (
+            
+            <label className="block text-xs text-gray-400 mb-2">
+              {cryptoInputMode === 'amount' ? 'Amount (USD)' : `${instrument?.symbol} Units`}
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                {cryptoInputMode === 'amount' ? '$' : ''}
+              </span>
+              <input
+                type="number"
+                value={cryptoAmount}
+                onChange={(e) => setCryptoAmount(e.target.value)}
+                placeholder={cryptoInputMode === 'amount' ? 'Enter USD amount' : 'Enter units'}
+                className={`w-full bg-dark-700 border border-dark-600 rounded px-3 py-3 text-lg font-bold focus:outline-none focus:border-orange-500 ${cryptoInputMode === 'amount' ? 'pl-8' : ''}`}
+                step="any"
+              />
+            </div>
+            
+            {/* Quick amount buttons */}
             <div className="flex gap-1 mt-2">
-              {[1, 2, 5, 10, 20].map(l => (
+              {[50, 100, 250, 500, 1000].map(amt => (
                 <button
-                  key={l}
-                  onClick={() => setLots(l.toString())}
-                  className={`flex-1 py-1 text-xs rounded ${lots === l.toString() ? 'bg-green-600' : 'bg-dark-600 hover:bg-dark-500'}`}
+                  key={amt}
+                  onClick={() => { setCryptoInputMode('amount'); setCryptoAmount(amt.toString()); }}
+                  className={`flex-1 py-1 text-xs rounded ${cryptoAmount === amt.toString() && cryptoInputMode === 'amount' ? 'bg-orange-600' : 'bg-dark-600 hover:bg-dark-500'}`}
                 >
-                  {l}L
+                  ${amt}
                 </button>
               ))}
             </div>
-          )}
-        </div>
+            
+            {/* Show conversion */}
+            <div className="bg-dark-600 rounded p-3 mt-3 space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">You {orderType === 'buy' ? 'Buy' : 'Sell'}</span>
+                <span className="text-orange-400 font-bold">{cryptoUnits.toFixed(6)} {instrument?.symbol}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">@ Price</span>
+                <span className="text-white">${cryptoUnitPrice.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm border-t border-dark-500 pt-1">
+                <span className="text-gray-400">Total Cost</span>
+                <span className="text-green-400 font-bold">${cryptoTotalCost.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Indian Trading: Lots/Quantity */
+          <div>
+            <label className="block text-xs text-gray-400 mb-2">
+              {isFnO ? 'Lots' : 'Quantity'} {isFnO && <span className="text-yellow-400">(1 Lot = {lotSize} qty)</span>}
+            </label>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setLots(Math.max(1, parseInt(lots || 1) - 1).toString())}
+                className="w-10 h-10 bg-dark-600 hover:bg-dark-500 rounded text-xl font-bold"
+              >-</button>
+              <input
+                type="number"
+                value={lots}
+                onChange={(e) => setLots(e.target.value)}
+                className="w-16 bg-dark-700 border border-dark-600 rounded px-2 py-2 text-center text-lg font-bold focus:outline-none focus:border-green-500"
+                min="1"
+              />
+              <button 
+                onClick={() => setLots((parseInt(lots || 1) + 1).toString())}
+                className="w-10 h-10 bg-dark-600 hover:bg-dark-500 rounded text-xl font-bold"
+              >+</button>
+            </div>
+            {isFnO && (
+              <div className="flex justify-between text-xs mt-2">
+                <span className="text-gray-500">Total Qty: <span className="text-white font-medium">{totalQuantity}</span></span>
+                <span className="text-gray-500">Value: <span className="text-white">{priceSymbol}{(totalQuantity * parseFloat(price || 0)).toLocaleString()}</span></span>
+              </div>
+            )}
+            {/* Quick lot buttons */}
+            {isFnO && (
+              <div className="flex gap-1 mt-2">
+                {[1, 2, 5, 10, 20].map(l => (
+                  <button
+                    key={l}
+                    onClick={() => setLots(l.toString())}
+                    className={`flex-1 py-1 text-xs rounded ${lots === l.toString() ? 'bg-green-600' : 'bg-dark-600 hover:bg-dark-500'}`}
+                  >
+                    {l}L
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Limit Price - Only for LIMIT and SL orders */}
         {(orderMode === 'LIMIT' || orderMode === 'SL') && (
@@ -2893,44 +3049,64 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
           </div>
         )}
 
-        {/* Margin Info */}
+        {/* Balance Info - Different for Crypto vs Indian Trading */}
         <div className="bg-dark-700 rounded p-3 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Trading Balance</span>
-            <span className="text-green-400">
-              {isCrypto 
-                ? `$${convertToUsd(marginPreview?.tradingBalance || walletData?.tradingBalance || 0)}`
-                : `₹${(marginPreview?.tradingBalance || walletData?.tradingBalance || 0).toLocaleString()}`
-              }
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Used Margin</span>
-            <span className="text-yellow-400">
-              {isCrypto 
-                ? `$${convertToUsd(walletData?.usedMargin || 0)}`
-                : `₹${(walletData?.usedMargin || 0).toLocaleString()}`
-              }
-            </span>
-          </div>
-          <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
-            <span className="text-gray-400">Available</span>
-            <span className="text-green-400 font-medium">
-              {isCrypto 
-                ? `$${convertToUsd(marginPreview?.availableBalance || (walletData?.tradingBalance - walletData?.usedMargin) || 0)}`
-                : `₹${(marginPreview?.availableBalance || ((walletData?.tradingBalance || 0) - (walletData?.usedMargin || 0))).toLocaleString()}`
-              }
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Required Margin</span>
-            <span className={marginPreview?.canPlace === false ? 'text-red-400' : ''}>
-              {isCrypto 
-                ? `$${convertToUsd(marginPreview?.marginRequired || 0)}`
-                : `₹${marginPreview?.marginRequired?.toLocaleString() || '--'}`
-              }
-            </span>
-          </div>
+          {isCrypto ? (
+            /* Crypto Wallet - No margin system, spot trading only */
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Crypto Wallet</span>
+                <span className="text-orange-400 font-medium">
+                  ${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
+                <span className="text-gray-400">Available</span>
+                <span className="text-green-400 font-medium">
+                  ${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Trade Cost</span>
+                <span className={cryptoTotalCost > (walletData?.cryptoWallet?.balance || 0) ? 'text-red-400' : 'text-white'}>
+                  ${cryptoTotalCost.toFixed(2)}
+                </span>
+              </div>
+              {cryptoTotalCost > (walletData?.cryptoWallet?.balance || 0) && (
+                <div className="text-xs text-red-400">
+                  ⚠️ Insufficient balance. Need ${(cryptoTotalCost - (walletData?.cryptoWallet?.balance || 0)).toFixed(2)} more
+                </div>
+              )}
+            </>
+          ) : (
+            /* Indian Trading - Margin based system */
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Trading Balance</span>
+                <span className="text-green-400">
+                  ₹{(marginPreview?.tradingBalance || walletData?.tradingBalance || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Used Margin</span>
+                <span className="text-yellow-400">
+                  ₹{(walletData?.usedMargin || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
+                <span className="text-gray-400">Available</span>
+                <span className="text-green-400 font-medium">
+                  ₹{(marginPreview?.availableBalance || ((walletData?.tradingBalance || 0) - (walletData?.usedMargin || 0))).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Required Margin</span>
+                <span className={marginPreview?.canPlace === false ? 'text-red-400' : ''}>
+                  ₹{marginPreview?.marginRequired?.toLocaleString() || '--'}
+                </span>
+              </div>
+            </>
+          )}
           {marginPreview?.lotsError && (
             <div className="text-xs text-red-400 mt-2">
               ⚠️ {marginPreview.lotsError}
@@ -2938,7 +3114,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
           )}
           {marginPreview && !marginPreview.canPlace && !marginPreview.lotsError && marginPreview.shortfall > 0 && (
             <div className="text-xs text-red-400 mt-2">
-              ⚠️ Insufficient funds. Need ₹{marginPreview.shortfall?.toLocaleString()} more
+              ⚠️ Insufficient funds. Need {isCrypto ? '$' : '₹'}{isCrypto ? marginPreview.shortfall?.toFixed(2) : marginPreview.shortfall?.toLocaleString()} more
             </div>
           )}
           {marginPreview?.maxLots && (
@@ -2996,22 +3172,30 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
     'MCXOPT': [],
     'NSE-EQ': [],
     'BSE-FUT': [],
-    'BSE-OPT': []
+    'BSE-OPT': [],
+    'CRYPTO': []
   });
   
-  // Segment tabs
-  const allSegmentTabs = [
-    { id: 'FAVORITES', label: '★ Favorites' },
-    { id: 'NSEFUT', label: 'NSEFUT' },
-    { id: 'NSEOPT', label: 'NSEOPT' },
-    { id: 'MCXFUT', label: 'MCXFUT' },
-    { id: 'MCXOPT', label: 'MCXOPT' },
-    { id: 'NSE-EQ', label: 'NSE-EQ' },
-    { id: 'BSE-FUT', label: 'BSE-FUT' },
-    { id: 'BSE-OPT', label: 'BSE-OPT' }
-  ];
+  // Segment tabs - filter based on cryptoOnly mode
+  const segmentTabs = cryptoOnly 
+    ? [{ id: 'CRYPTO', label: '₿ Crypto' }]
+    : [
+        { id: 'FAVORITES', label: '★ Favorites' },
+        { id: 'NSEFUT', label: 'NSEFUT' },
+        { id: 'NSEOPT', label: 'NSEOPT' },
+        { id: 'MCXFUT', label: 'MCXFUT' },
+        { id: 'MCXOPT', label: 'MCXOPT' },
+        { id: 'NSE-EQ', label: 'NSE-EQ' },
+        { id: 'BSE-FUT', label: 'BSE-FUT' },
+        { id: 'BSE-OPT', label: 'BSE-OPT' }
+      ];
   
-  const segmentTabs = allSegmentTabs;
+  // Set active segment to CRYPTO when in crypto mode
+  useEffect(() => {
+    if (cryptoOnly) {
+      setActiveSegment('CRYPTO');
+    }
+  }, [cryptoOnly]);
   
   // Load watchlist from server
   useEffect(() => {
@@ -3126,7 +3310,8 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
 
   // Add to watchlist - auto-detect segment and sync to server
   const addToWatchlist = async (instrument) => {
-    const segment = getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
+    // For crypto instruments, always use CRYPTO segment
+    const segment = instrument.isCrypto ? 'CRYPTO' : getSegmentFromExchange(instrument.exchange, instrument.instrumentType);
     const currentList = watchlistBySegment[segment] || [];
     // Check if already exists - use pair for crypto, token for others
     const identifier = instrument.isCrypto ? instrument.pair : instrument.token;
@@ -3180,7 +3365,12 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
   };
   
   // Get watchlist for current segment
-  const getWatchlist = () => watchlistBySegment[activeSegment] || [];
+  const getWatchlist = () => {
+    if (cryptoOnly || activeSegment === 'CRYPTO') {
+      return watchlistBySegment['CRYPTO'] || [];
+    }
+    return watchlistBySegment[activeSegment] || [];
+  };
   
   // Get price
   const getPrice = (token) => marketData[token] || { ltp: 0, change: 0, changePercent: 0 };
@@ -3283,9 +3473,54 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
         /* Watchlist for current segment */
         <div className="flex-1 overflow-y-auto">
           <div className="px-3 py-2 text-xs text-gray-400 bg-dark-700 sticky top-0">
-            {activeSegment} Watchlist ({getWatchlist().length})
+            {activeSegment === 'CRYPTO' ? '₿ Crypto' : activeSegment} Watchlist ({getWatchlist().length})
           </div>
-          {getWatchlist().length === 0 ? (
+          {/* Show default crypto list when in crypto mode and watchlist is empty */}
+          {cryptoOnly && getWatchlist().length === 0 ? (
+            <div>
+              <div className="px-3 py-2 text-xs text-orange-400 bg-dark-750">
+                Popular Cryptocurrencies - Click to add
+              </div>
+              {[
+                { symbol: 'BTC', name: 'Bitcoin', exchange: 'BINANCE', pair: 'BTCUSDT', isCrypto: true },
+                { symbol: 'ETH', name: 'Ethereum', exchange: 'BINANCE', pair: 'ETHUSDT', isCrypto: true },
+                { symbol: 'BNB', name: 'Binance Coin', exchange: 'BINANCE', pair: 'BNBUSDT', isCrypto: true },
+                { symbol: 'XRP', name: 'Ripple', exchange: 'BINANCE', pair: 'XRPUSDT', isCrypto: true },
+                { symbol: 'SOL', name: 'Solana', exchange: 'BINANCE', pair: 'SOLUSDT', isCrypto: true },
+                { symbol: 'DOGE', name: 'Dogecoin', exchange: 'BINANCE', pair: 'DOGEUSDT', isCrypto: true },
+                { symbol: 'ADA', name: 'Cardano', exchange: 'BINANCE', pair: 'ADAUSDT', isCrypto: true },
+                { symbol: 'MATIC', name: 'Polygon', exchange: 'BINANCE', pair: 'MATICUSDT', isCrypto: true },
+              ].map(crypto => {
+                const priceData = cryptoData[crypto.pair] || marketData[crypto.pair] || { ltp: 0, changePercent: 0 };
+                return (
+                  <div
+                    key={crypto.pair}
+                    className="flex items-center justify-between px-3 py-2.5 border-b border-dark-700 hover:bg-dark-750"
+                  >
+                    <div className="flex-1 min-w-0 mr-2">
+                      <div className="font-bold text-sm text-orange-400">{crypto.symbol}</div>
+                      <div className="text-xs text-gray-500">{crypto.name}</div>
+                    </div>
+                    <div className="text-right mr-2">
+                      <div className="text-sm font-medium text-gray-300">
+                        ${(priceData.ltp || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => addToWatchlist(crypto)}
+                        className="bg-green-600 text-white text-xs px-2 py-1 rounded"
+                      >
+                        + Add
+                      </button>
+                      <button onClick={() => onBuySell('sell', crypto)} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold">S</button>
+                      <button onClick={() => onBuySell('buy', crypto)} className="w-6 h-6 rounded-full bg-green-500 text-white text-xs font-bold">B</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : getWatchlist().length === 0 ? (
             <div className="p-4 text-center text-gray-500 text-sm">
               <p>No instruments in {activeSegment} watchlist</p>
               <p className="mt-2 text-xs text-gray-600">Search to add instruments</p>
@@ -5427,30 +5662,50 @@ const BuySellModal = ({ instrument, orderType, setOrderType, onClose, walletData
             <div className="flex justify-between items-center">
               <span className="text-gray-400 text-sm">Last Traded Price</span>
               <span className="text-xl font-bold">
-                ₹{ltp?.toLocaleString() || '--'}
+                {isCrypto ? '$' : '₹'}{ltp?.toLocaleString() || '--'}
               </span>
             </div>
           </div>
 
-          {/* Margin Info */}
+          {/* Balance Info - Different for Crypto vs Indian Trading */}
           <div className="bg-dark-700 rounded-lg p-3 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Available Margin</span>
-              <span className="text-green-400 font-medium">₹{walletData?.marginAvailable?.toLocaleString() || '0'}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Required Margin</span>
-              <span className={`font-medium ${marginPreview?.canPlace === false ? 'text-red-400' : ''}`}>
-                {isCrypto 
-                  ? `$${marginPreview?.marginRequired?.toLocaleString() || '--'}`
-                  : `₹${marginPreview?.marginRequired?.toLocaleString() || '--'}`
-                }
-              </span>
-            </div>
-            <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
-              <span className="text-gray-400">Order Value</span>
-              <span className="font-medium">₹{orderValue.toLocaleString()}</span>
-            </div>
+            {isCrypto ? (
+              /* Crypto Wallet - No margin system */
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Crypto Wallet</span>
+                  <span className="text-orange-400 font-medium">${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Trade Cost</span>
+                  <span className={`font-medium ${marginPreview?.canPlace === false ? 'text-red-400' : ''}`}>
+                    ${(ltp * parseFloat(quantity || 1)).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
+                  <span className="text-gray-400">Available</span>
+                  <span className="text-green-400 font-medium">${(walletData?.cryptoWallet?.balance || 0).toFixed(2)}</span>
+                </div>
+              </>
+            ) : (
+              /* Indian Trading - Margin based system */
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Available Margin</span>
+                  <span className="text-green-400 font-medium">₹{walletData?.marginAvailable?.toLocaleString() || '0'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Required Margin</span>
+                  <span className={`font-medium ${marginPreview?.canPlace === false ? 'text-red-400' : ''}`}>
+                    ₹{marginPreview?.marginRequired?.toLocaleString() || '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-dark-600 pt-2">
+                  <span className="text-gray-400">Order Value</span>
+                  <span className="font-medium">₹{orderValue.toLocaleString()}</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Error/Success Messages */}
