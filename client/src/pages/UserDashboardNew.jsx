@@ -892,7 +892,7 @@ const UserDashboardNew = () => {
 
   const navItems = [
     { path: '/user/home', icon: Home, label: 'Dashboard' },
-    { path: '/user/accounts', icon: Users, label: 'Accounts' },
+    { path: '/user/accounts', icon: Users, label: 'Market' },
     { path: '/user/wallet', icon: Wallet, label: 'Wallet' },
     { path: '/user/profile', icon: User, label: 'Profile' },
     { path: '/user/support', icon: HelpCircle, label: 'Support' },
@@ -901,7 +901,7 @@ const UserDashboardNew = () => {
   // Mobile bottom nav items (Orders is in Trader Room, not here)
   const mobileNavItems = [
     { path: '/user/home', icon: Home, label: 'Home' },
-    { path: '/user/accounts', icon: Users, label: 'Accounts' },
+    { path: '/user/accounts', icon: Users, label: 'Market' },
     { path: '/user/wallet', icon: Wallet, label: 'Wallet' },
   ];
 

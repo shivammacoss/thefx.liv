@@ -1628,22 +1628,44 @@ const ChartPanel = ({ selectedInstrument, marketData, sidebarOpen }) => {
     const loadData = async () => {
       if (!selectedInstrument || !candlestickSeriesRef.current) return;
       
-      const candles = await fetchCandleData(selectedInstrument, chartInterval);
-      if (candles && candles.length > 0) {
-        candlestickSeriesRef.current.setData(candles);
+      const rawCandles = await fetchCandleData(selectedInstrument, chartInterval);
+      if (rawCandles && rawCandles.length > 0) {
+        // Validate, deduplicate, and sort candles by time
+        const seenTimes = new Set();
+        const candles = rawCandles
+          .filter(c => {
+            // Ensure time is a valid number
+            const time = typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000);
+            if (isNaN(time) || seenTimes.has(time)) return false;
+            seenTimes.add(time);
+            return true;
+          })
+          .map(c => ({
+            time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000),
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume || 0
+          }))
+          .sort((a, b) => a.time - b.time);
         
-        // Set last candle for real-time updates
-        lastCandleRef.current = candles[candles.length - 1];
-        
-        // Generate volume data
-        const volumeData = candles.map(c => ({
-          time: c.time,
-          value: c.volume || 0,
-          color: c.close >= c.open ? '#22c55e80' : '#ef444480'
-        }));
-        volumeSeriesRef.current.setData(volumeData);
-        
-        chartRef.current?.timeScale().fitContent();
+        if (candles.length > 0) {
+          candlestickSeriesRef.current.setData(candles);
+          
+          // Set last candle for real-time updates
+          lastCandleRef.current = candles[candles.length - 1];
+          
+          // Generate volume data
+          const volumeData = candles.map(c => ({
+            time: c.time,
+            value: c.volume || 0,
+            color: c.close >= c.open ? '#22c55e80' : '#ef444480'
+          }));
+          volumeSeriesRef.current.setData(volumeData);
+          
+          chartRef.current?.timeScale().fitContent();
+        }
       }
     };
     
@@ -5796,3 +5818,4 @@ function generateVolumeData() {
 }
 
 export default UserDashboard;
+  
