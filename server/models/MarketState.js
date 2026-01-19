@@ -21,7 +21,8 @@ const marketStateSchema = new mongoose.Schema({
       tradingEndTime: { type: String, default: '15:30' }, // When trading ends
       dataEndTime: { type: String, default: '15:30' }, // When market data ends
       intradaySquareOffTime: { type: String, default: '15:15' },
-      preMarketDataOnly: { type: Boolean, default: true } // Show data but no trading before tradingStartTime
+      preMarketDataOnly: { type: Boolean, default: true }, // Show data but no trading before tradingStartTime
+      closedDays: { type: [Number], default: [0, 6] } // 0=Sunday, 6=Saturday - days when market is closed
     },
     FNO: {
       isOpen: { type: Boolean, default: false },
@@ -30,7 +31,8 @@ const marketStateSchema = new mongoose.Schema({
       tradingEndTime: { type: String, default: '15:30' },
       dataEndTime: { type: String, default: '15:30' },
       intradaySquareOffTime: { type: String, default: '15:25' },
-      preMarketDataOnly: { type: Boolean, default: true }
+      preMarketDataOnly: { type: Boolean, default: true },
+      closedDays: { type: [Number], default: [0, 6] } // 0=Sunday, 6=Saturday
     },
     MCX: {
       isOpen: { type: Boolean, default: false },
@@ -39,7 +41,8 @@ const marketStateSchema = new mongoose.Schema({
       tradingEndTime: { type: String, default: '23:30' },
       dataEndTime: { type: String, default: '23:30' },
       intradaySquareOffTime: { type: String, default: '23:25' },
-      preMarketDataOnly: { type: Boolean, default: false }
+      preMarketDataOnly: { type: Boolean, default: false },
+      closedDays: { type: [Number], default: [0] } // 0=Sunday - MCX closed only on Sunday
     },
     CRYPTO: {
       isOpen: { type: Boolean, default: true }, // Crypto is 24/7
@@ -48,7 +51,8 @@ const marketStateSchema = new mongoose.Schema({
       tradingEndTime: { type: String, default: '23:59' },
       dataEndTime: { type: String, default: '23:59' },
       intradaySquareOffTime: { type: String, default: '23:59' },
-      preMarketDataOnly: { type: Boolean, default: false }
+      preMarketDataOnly: { type: Boolean, default: false },
+      closedDays: { type: [Number], default: [] } // Crypto is 24/7, no closed days
     }
   },
   
@@ -126,6 +130,14 @@ marketStateSchema.statics.isTradingAllowed = async function(segment = 'EQUITY') 
   // Check if global market is open
   if (!state.isMarketOpen) {
     return { allowed: false, reason: 'Market is closed' };
+  }
+  
+  // Check if today is a closed day for this segment
+  const today = new Date().getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+  const closedDays = segmentState.closedDays || [];
+  if (closedDays.includes(today)) {
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return { allowed: false, reason: `${segment} is closed on ${dayNames[today]}` };
   }
   
   // Check trading time window

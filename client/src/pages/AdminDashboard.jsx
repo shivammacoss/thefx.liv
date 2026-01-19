@@ -6151,9 +6151,19 @@ const MarketControl = () => {
       tradingEndTime: seg.tradingEndTime || '15:30',
       dataEndTime: seg.dataEndTime || '15:30',
       intradaySquareOffTime: seg.intradaySquareOffTime || '15:15',
-      preMarketDataOnly: seg.preMarketDataOnly !== false
+      preMarketDataOnly: seg.preMarketDataOnly !== false,
+      closedDays: seg.closedDays || [0, 6] // Default: Sunday and Saturday closed
     });
     setEditingSegment(segment);
+  };
+
+  const toggleClosedDay = (day) => {
+    const currentDays = segmentForm.closedDays || [];
+    if (currentDays.includes(day)) {
+      setSegmentForm({ ...segmentForm, closedDays: currentDays.filter(d => d !== day) });
+    } else {
+      setSegmentForm({ ...segmentForm, closedDays: [...currentDays, day].sort() });
+    }
   };
 
   const connectZerodha = async () => {
@@ -6409,6 +6419,21 @@ const MarketControl = () => {
                   Square-off: {seg.intradaySquareOffTime || '15:15'} | 
                   Pre-market data: {seg.preMarketDataOnly !== false ? 'Yes' : 'No'}
                 </div>
+                <div className="mt-2 flex items-center gap-1">
+                  <span className="text-xs text-gray-500">Closed:</span>
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                    <span
+                      key={index}
+                      className={`w-5 h-5 flex items-center justify-center rounded text-xs ${
+                        (seg.closedDays || [0, 6]).includes(index)
+                          ? 'bg-red-600/30 text-red-400'
+                          : 'bg-dark-600 text-gray-500'
+                      }`}
+                    >
+                      {day}
+                    </span>
+                  ))}
+                </div>
               </div>
             );
           })}
@@ -6523,6 +6548,27 @@ const MarketControl = () => {
                 <label htmlFor="preMarketDataOnly" className="text-sm text-gray-400">
                   Enable pre-market data only mode (show data but no trading before trading start)
                 </label>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Closed Days (Market closed on these days)</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleClosedDay(index)}
+                      className={`px-3 py-1.5 rounded text-sm font-medium transition ${
+                        (segmentForm.closedDays || []).includes(index)
+                          ? 'bg-red-600 text-white'
+                          : 'bg-dark-600 text-gray-400 hover:bg-dark-500'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Click to toggle. Red = Market closed on that day</p>
               </div>
               
               <div className="flex gap-3 mt-6">

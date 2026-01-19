@@ -94,7 +94,7 @@ router.put('/market-state', protectAdmin, superAdminOnly, async (req, res) => {
 router.put('/market-state/segment/:segment', protectAdmin, superAdminOnly, async (req, res) => {
   try {
     const { segment } = req.params;
-    const { isOpen, dataStartTime, tradingStartTime, tradingEndTime, dataEndTime, intradaySquareOffTime, preMarketDataOnly } = req.body;
+    const { isOpen, dataStartTime, tradingStartTime, tradingEndTime, dataEndTime, intradaySquareOffTime, preMarketDataOnly, closedDays } = req.body;
     
     const validSegments = ['EQUITY', 'FNO', 'MCX', 'CRYPTO'];
     if (!validSegments.includes(segment)) {
@@ -111,6 +111,7 @@ router.put('/market-state/segment/:segment', protectAdmin, superAdminOnly, async
     if (dataEndTime) state.segments[segment].dataEndTime = dataEndTime;
     if (intradaySquareOffTime) state.segments[segment].intradaySquareOffTime = intradaySquareOffTime;
     if (preMarketDataOnly !== undefined) state.segments[segment].preMarketDataOnly = preMarketDataOnly;
+    if (closedDays !== undefined) state.segments[segment].closedDays = closedDays;
     
     state.lastUpdatedAt = new Date();
     state.updatedBy = req.admin._id;
