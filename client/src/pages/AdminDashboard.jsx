@@ -796,8 +796,8 @@ const AdminManagement = () => {
   
   // Get create button label
   const getCreateLabel = () => {
-    if (isSuperAdmin) return 'Create Admin/Broker';
-    if (isAdmin) return 'Create Broker';
+    if (isSuperAdmin) return 'Create Admin/Broker/SubBroker';
+    if (isAdmin) return 'Create Broker/SubBroker';
     if (isBroker) return 'Create Sub Broker';
     return 'Create';
   };
@@ -1261,12 +1261,11 @@ const AdminManagement = () => {
 // Create Admin Modal - Supports role selection based on creator's role
 const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
   // Get allowed roles based on creator's role
-  // Sub-Broker can ONLY be created by Broker, not by Admin or Super Admin
   const getAllowedRoles = () => {
     switch(creatorRole) {
-      case 'SUPER_ADMIN': return ['ADMIN', 'BROKER']; // Super Admin creates Admin or Broker only
-      case 'ADMIN': return ['BROKER']; // Admin creates Broker only
-      case 'BROKER': return ['SUB_BROKER']; // Only Broker can create Sub-Broker
+      case 'SUPER_ADMIN': return ['ADMIN', 'BROKER', 'SUB_BROKER']; // Can create all with parent selection
+      case 'ADMIN': return ['BROKER', 'SUB_BROKER']; // Can create broker and sub-broker under their brokers
+      case 'BROKER': return ['SUB_BROKER']; // Only Broker can create Sub-Broker directly
       default: return [];
     }
   };
@@ -1279,10 +1278,51 @@ const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
     phone: '', 
     password: '', 
     pin: '',
-    role: allowedRoles[0] || 'ADMIN'
+    role: allowedRoles[0] || 'ADMIN',
+    parentAdminId: '' // For assigning broker/sub-broker under specific parent
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [adminsList, setAdminsList] = useState([]); // List of ADMINs
+  const [brokersList, setBrokersList] = useState([]); // List of BROKERs (filtered by selected admin)
+  const [allBrokers, setAllBrokers] = useState([]); // All brokers for filtering
+  const [selectedAdminFilter, setSelectedAdminFilter] = useState(''); // Admin filter for SUB_BROKER creation
+  
+  // Fetch admins and brokers list based on role selection
+  useEffect(() => {
+    if (['SUPER_ADMIN', 'ADMIN'].includes(creatorRole) && ['BROKER', 'SUB_BROKER'].includes(formData.role)) {
+      fetchHierarchyList();
+    }
+  }, [formData.role, creatorRole]);
+  
+  // Filter brokers when admin filter changes
+  useEffect(() => {
+    if (formData.role === 'SUB_BROKER' && selectedAdminFilter) {
+      const filtered = allBrokers.filter(b => b.parentId?._id === selectedAdminFilter || b.parentId === selectedAdminFilter);
+      setBrokersList(filtered);
+      // Reset broker selection if current selection is not in filtered list
+      if (formData.parentAdminId && !filtered.find(b => b._id === formData.parentAdminId)) {
+        setFormData(prev => ({ ...prev, parentAdminId: '' }));
+      }
+    } else if (formData.role === 'SUB_BROKER' && !selectedAdminFilter) {
+      setBrokersList(allBrokers);
+    }
+  }, [selectedAdminFilter, allBrokers, formData.role]);
+  
+  const fetchHierarchyList = async () => {
+    try {
+      const res = await axios.get('/api/admin/manage/admins', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const admins = res.data.filter(a => a.role === 'ADMIN');
+      const brokers = res.data.filter(a => a.role === 'BROKER');
+      setAdminsList(admins);
+      setAllBrokers(brokers);
+      setBrokersList(brokers);
+    } catch (err) {
+      console.error('Error fetching hierarchy:', err);
+    }
+  };
   
   const getRoleLabel = (role) => {
     switch(role) {
@@ -1307,7 +1347,12 @@ const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
     setLoading(true);
     setError('');
     try {
-      await axios.post('/api/admin/manage/admins', formData, {
+      // Prepare payload - include parentAdminId only if selected
+      const payload = { ...formData };
+      if (!payload.parentAdminId) {
+        delete payload.parentAdminId;
+      }
+      await axios.post('/api/admin/manage/admins', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       onSuccess();
@@ -1336,7 +1381,7 @@ const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
                   <button
                     key={role}
                     type="button"
-                    onClick={() => setFormData({...formData, role})}
+                    onClick={() => { setFormData({...formData, role, parentAdminId: ''}); setSelectedAdminFilter(''); }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                       formData.role === role ? getRoleBadgeColor(role) + ' text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
                     }`}
@@ -1347,6 +1392,82 @@ const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
               </div>
             </div>
           )}
+          
+          {/* Parent Selection - For SUPER_ADMIN/ADMIN creating BROKER */}
+          {['SUPER_ADMIN', 'ADMIN'].includes(creatorRole) && formData.role === 'BROKER' && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Assign Under Admin (Optional)</label>
+              <select
+                value={formData.parentAdminId}
+                onChange={e => setFormData({...formData, parentAdminId: e.target.value})}
+                className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+              >
+                <option value="">-- Direct under {creatorRole === 'SUPER_ADMIN' ? 'Super Admin' : 'You'} --</option>
+                {adminsList.map(adm => (
+                  <option key={adm._id} value={adm._id}>
+                    {adm.name || adm.username} ({adm.adminCode})
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Leave empty to create broker directly under you, or select an admin.
+              </p>
+            </div>
+          )}
+          
+          {/* Two-step Selection for SUB_BROKER: First Admin filter, then Broker */}
+          {['SUPER_ADMIN', 'ADMIN'].includes(creatorRole) && formData.role === 'SUB_BROKER' && (
+            <>
+              {/* Step 1: Filter by Admin (Optional) */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Filter by Admin (Optional)</label>
+                <select
+                  value={selectedAdminFilter}
+                  onChange={e => setSelectedAdminFilter(e.target.value)}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                >
+                  <option value="">-- All Admins --</option>
+                  {adminsList.map(adm => (
+                    <option key={adm._id} value={adm._id}>
+                      {adm.name || adm.username} ({adm.adminCode})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select an admin to show only brokers under that admin.
+                </p>
+              </div>
+              
+              {/* Step 2: Select Parent Broker */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Select Parent Broker *</label>
+                <select
+                  value={formData.parentAdminId}
+                  onChange={e => setFormData({...formData, parentAdminId: e.target.value})}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  required
+                >
+                  <option value="">-- Select a Broker --</option>
+                  {brokersList.map(broker => (
+                    <option key={broker._id} value={broker._id}>
+                      {broker.name || broker.username} ({broker.adminCode}) {broker.parentId?.name ? `- Under ${broker.parentId.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {brokersList.length === 0 && selectedAdminFilter && (
+                  <p className="text-xs text-yellow-500 mt-1">
+                    No brokers found under this admin.
+                  </p>
+                )}
+                {!selectedAdminFilter && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Sub-broker must be created under a broker.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+          
           <input type="text" placeholder="Username *" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" required />
           <input type="text" placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" />
           <input type="email" placeholder="Email *" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" required />
@@ -10732,6 +10853,10 @@ const AllUsersManagement = () => {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [targetAdminId, setTargetAdminId] = useState('');
   const [targetUserId, setTargetUserId] = useState('');
+  const [transferAdminFilter, setTransferAdminFilter] = useState(''); // Filter admins in transfer modal
+  const [transferBrokerFilter, setTransferBrokerFilter] = useState(''); // Filter brokers in transfer modal
+  const [filteredBrokers, setFilteredBrokers] = useState([]); // Brokers filtered by admin
+  const [filteredSubBrokers, setFilteredSubBrokers] = useState([]); // SubBrokers filtered by broker
   const [transferring, setTransferring] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -10842,6 +10967,55 @@ const AllUsersManagement = () => {
     }
   };
 
+  // Filter brokers when admin filter changes
+  useEffect(() => {
+    if (transferAdminFilter) {
+      const brokers = admins.filter(a => 
+        a.role === 'BROKER' && 
+        (a.parentId?._id === transferAdminFilter || a.parentId === transferAdminFilter)
+      );
+      setFilteredBrokers(brokers);
+      setTransferBrokerFilter('');
+      setFilteredSubBrokers([]);
+      // Reset target if not in filtered list
+      if (targetAdminId && !brokers.find(b => b._id === targetAdminId)) {
+        const selectedAdmin = admins.find(a => a._id === transferAdminFilter);
+        if (selectedAdmin && targetAdminId !== transferAdminFilter) {
+          setTargetAdminId('');
+        }
+      }
+    } else {
+      setFilteredBrokers(admins.filter(a => a.role === 'BROKER'));
+      setFilteredSubBrokers(admins.filter(a => a.role === 'SUB_BROKER'));
+    }
+  }, [transferAdminFilter, admins]);
+
+  // Filter sub-brokers when broker filter changes
+  useEffect(() => {
+    if (transferBrokerFilter) {
+      const subBrokers = admins.filter(a => 
+        a.role === 'SUB_BROKER' && 
+        (a.parentId?._id === transferBrokerFilter || a.parentId === transferBrokerFilter)
+      );
+      setFilteredSubBrokers(subBrokers);
+      // Reset target if it's a sub-broker not in filtered list
+      const currentTarget = admins.find(a => a._id === targetAdminId);
+      if (currentTarget?.role === 'SUB_BROKER' && !subBrokers.find(s => s._id === targetAdminId)) {
+        setTargetAdminId('');
+      }
+    } else if (transferAdminFilter) {
+      // Show all sub-brokers under brokers of selected admin
+      const brokerIds = filteredBrokers.map(b => b._id);
+      const subBrokers = admins.filter(a => 
+        a.role === 'SUB_BROKER' && 
+        brokerIds.includes(a.parentId?._id || a.parentId)
+      );
+      setFilteredSubBrokers(subBrokers);
+    } else {
+      setFilteredSubBrokers(admins.filter(a => a.role === 'SUB_BROKER'));
+    }
+  }, [transferBrokerFilter, transferAdminFilter, filteredBrokers, admins]);
+
   const handleTransfer = async () => {
     if (!selectedUser || !targetAdminId) return;
     
@@ -10855,6 +11029,8 @@ const AllUsersManagement = () => {
       setShowTransferModal(false);
       setSelectedUser(null);
       setTargetAdminId('');
+      setTransferAdminFilter('');
+      setTransferBrokerFilter('');
       fetchAllUsers();
     } catch (error) {
       alert(error.response?.data?.message || 'Error transferring user');
@@ -11173,7 +11349,7 @@ const AllUsersManagement = () => {
       {/* Transfer Modal */}
       {showTransferModal && selectedUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">Transfer User</h2>
             
             <div className="mb-4 p-3 bg-dark-700 rounded-lg">
@@ -11183,23 +11359,99 @@ const AllUsersManagement = () => {
               <div className="text-sm text-gray-400 mt-1">Current Admin: {selectedUser.adminCode}</div>
             </div>
 
+            {/* Step 1: Filter by Admin (Optional) */}
+            <div className="mb-3">
+              <label className="block text-sm text-gray-400 mb-2">Filter by Admin (Optional)</label>
+              <select
+                value={transferAdminFilter}
+                onChange={(e) => setTransferAdminFilter(e.target.value)}
+                className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
+              >
+                <option value="">-- All Admins --</option>
+                {admins.filter(a => a.role === 'ADMIN').map(a => (
+                  <option key={a._id} value={a._id}>
+                    {a.name || a.username} ({a.adminCode})
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Select an admin to filter brokers/sub-brokers</p>
+            </div>
+
+            {/* Step 2: Filter by Broker (Optional) */}
+            {(transferAdminFilter || filteredBrokers.length > 0) && (
+              <div className="mb-3">
+                <label className="block text-sm text-gray-400 mb-2">Filter by Broker (Optional)</label>
+                <select
+                  value={transferBrokerFilter}
+                  onChange={(e) => setTransferBrokerFilter(e.target.value)}
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
+                >
+                  <option value="">-- All Brokers --</option>
+                  {filteredBrokers.map(b => (
+                    <option key={b._id} value={b._id}>
+                      {b.name || b.username} ({b.adminCode})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Select a broker to filter sub-brokers</p>
+              </div>
+            )}
+
+            {/* Step 3: Select Target */}
             <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-2">Transfer to Admin</label>
+              <label className="block text-sm text-gray-400 mb-2">Transfer to *</label>
               <select
                 value={targetAdminId}
                 onChange={(e) => setTargetAdminId(e.target.value)}
                 className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white"
               >
-                <option value="">Select Admin</option>
-                {admins.filter(a => a.adminCode !== selectedUser.adminCode).map(a => (
-                  <option key={a._id} value={a._id}>
-                    {a.name} ({a.adminCode}) - {a.stats?.totalUsers || 0} users
+                <option value="">-- Select Target --</option>
+                
+                {/* Super Admin option */}
+                <optgroup label="Super Admin">
+                  <option value={admin._id}>
+                    Super Admin ({admin.adminCode})
                   </option>
-                ))}
-                {/* Also include Super Admin option */}
-                <option value={admin._id}>
-                  Super Admin ({admin.adminCode})
-                </option>
+                </optgroup>
+                
+                {/* Admins - always show all admins */}
+                {admins.filter(a => a.role === 'ADMIN' && a.adminCode !== selectedUser.adminCode).length > 0 && (
+                  <optgroup label="Admins">
+                    {admins
+                      .filter(a => a.role === 'ADMIN' && a.adminCode !== selectedUser.adminCode)
+                      .map(a => (
+                        <option key={a._id} value={a._id}>
+                          {a.name || a.username} ({a.adminCode})
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+                
+                {/* Brokers - filtered */}
+                {filteredBrokers.filter(b => b.adminCode !== selectedUser.adminCode).length > 0 && (
+                  <optgroup label="Brokers">
+                    {filteredBrokers
+                      .filter(b => b.adminCode !== selectedUser.adminCode)
+                      .map(b => (
+                        <option key={b._id} value={b._id}>
+                          {b.name || b.username} ({b.adminCode}) {b.parentId?.name ? `- Under ${b.parentId.name}` : ''}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+                
+                {/* Sub-Brokers - filtered */}
+                {filteredSubBrokers.filter(s => s.adminCode !== selectedUser.adminCode).length > 0 && (
+                  <optgroup label="Sub Brokers">
+                    {filteredSubBrokers
+                      .filter(s => s.adminCode !== selectedUser.adminCode)
+                      .map(s => (
+                        <option key={s._id} value={s._id}>
+                          {s.name || s.username} ({s.adminCode}) {s.parentId?.name ? `- Under ${s.parentId.name}` : ''}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 
@@ -11209,6 +11461,8 @@ const AllUsersManagement = () => {
                   setShowTransferModal(false);
                   setSelectedUser(null);
                   setTargetAdminId('');
+                  setTransferAdminFilter('');
+                  setTransferBrokerFilter('');
                 }}
                 className="flex-1 bg-dark-600 hover:bg-dark-500 text-white py-2 rounded-lg"
               >

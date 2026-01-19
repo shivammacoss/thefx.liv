@@ -50,15 +50,15 @@ const HIERARCHY_LEVELS = {
 };
 
 // Get allowed child roles for a given role
-// SUPER_ADMIN can create ADMIN, BROKER only (not SUB_BROKER directly)
-// ADMIN can create BROKER only (not SUB_BROKER directly)
-// BROKER can create SUB_BROKER (SUB_BROKER must be under a BROKER)
+// SUPER_ADMIN can create ADMIN, BROKER, SUB_BROKER (must specify parent for BROKER/SUB_BROKER)
+// ADMIN can create BROKER, SUB_BROKER (must specify parent broker for SUB_BROKER)
+// BROKER can create SUB_BROKER
 // All roles (except SUPER_ADMIN) can create Users
 const getAllowedChildRoles = (role) => {
   const childRoles = {
-    'SUPER_ADMIN': ['ADMIN', 'BROKER'], // Cannot create SUB_BROKER directly
-    'ADMIN': ['BROKER'], // Cannot create SUB_BROKER directly
-    'BROKER': ['SUB_BROKER'], // Only BROKER can create SUB_BROKER
+    'SUPER_ADMIN': ['ADMIN', 'BROKER', 'SUB_BROKER'], // Can create all, but must specify parent for SUB_BROKER
+    'ADMIN': ['BROKER', 'SUB_BROKER'], // Can create SUB_BROKER under their brokers
+    'BROKER': ['SUB_BROKER'], // Only BROKER can create SUB_BROKER directly
     'SUB_BROKER': []
   };
   return childRoles[role] || [];
@@ -151,7 +151,7 @@ router.get('/admins', protectAdmin, async (req, res) => {
 // Create new subordinate (ADMIN creates BROKER, BROKER creates SUB_BROKER, etc.)
 router.post('/admins', protectAdmin, async (req, res) => {
   try {
-    const { username, name, email, phone, password, pin, charges, role: requestedRole } = req.body;
+    const { username, name, email, phone, password, pin, charges, role: requestedRole, parentAdminId } = req.body;
     
     // Determine the role to create
     const allowedChildRoles = getAllowedChildRoles(req.admin.role);
@@ -178,8 +178,45 @@ router.post('/admins', protectAdmin, async (req, res) => {
       return res.status(400).json({ message: 'User with this email or username already exists' });
     }
     
-    // Build hierarchy path
-    const hierarchyPath = [...(req.admin.hierarchyPath || []), req.admin._id];
+    // Determine the actual parent for hierarchy
+    let actualParent = req.admin;
+    
+    // SUPER_ADMIN or ADMIN can specify a different parent for the new broker/sub-broker
+    if (['SUPER_ADMIN', 'ADMIN'].includes(req.admin.role) && parentAdminId) {
+      const specifiedParent = await Admin.findById(parentAdminId);
+      if (!specifiedParent) {
+        return res.status(400).json({ message: 'Specified parent not found' });
+      }
+      
+      // For ADMIN, verify they can only assign under their own hierarchy
+      if (req.admin.role === 'ADMIN') {
+        const isInHierarchy = specifiedParent.hierarchyPath?.some(id => id.toString() === req.admin._id.toString()) 
+                            || specifiedParent.parentId?.toString() === req.admin._id.toString();
+        if (!isInHierarchy && specifiedParent._id.toString() !== req.admin._id.toString()) {
+          return res.status(403).json({ message: 'You can only assign under your own hierarchy' });
+        }
+      }
+      
+      // Validate parent role based on what we're creating
+      // BROKER should be under ADMIN or SUPER_ADMIN
+      // SUB_BROKER should be under BROKER
+      if (roleToCreate === 'BROKER' && !['SUPER_ADMIN', 'ADMIN'].includes(specifiedParent.role)) {
+        return res.status(400).json({ message: 'Broker can only be created under Super Admin or Admin' });
+      }
+      if (roleToCreate === 'SUB_BROKER' && specifiedParent.role !== 'BROKER') {
+        return res.status(400).json({ message: 'Sub-broker can only be created under a Broker' });
+      }
+      
+      actualParent = specifiedParent;
+    }
+    
+    // SUB_BROKER requires a parent broker - enforce this
+    if (roleToCreate === 'SUB_BROKER' && actualParent.role !== 'BROKER') {
+      return res.status(400).json({ message: 'Sub-broker must be created under a Broker. Please select a parent broker.' });
+    }
+    
+    // Build hierarchy path based on actual parent
+    const hierarchyPath = [...(actualParent.hierarchyPath || []), actualParent._id];
     
     const admin = await Admin.create({
       role: roleToCreate,
@@ -191,7 +228,7 @@ router.post('/admins', protectAdmin, async (req, res) => {
       pin: normalizedPin,
       charges: charges || {},
       createdBy: req.admin._id,
-      parentId: req.admin._id,
+      parentId: actualParent._id,
       hierarchyPath,
       hierarchyLevel: HIERARCHY_LEVELS[roleToCreate]
     });
