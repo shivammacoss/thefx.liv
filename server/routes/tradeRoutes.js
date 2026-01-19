@@ -6,6 +6,7 @@ import TradeService from '../services/tradeService.js';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
+import WalletLedger from '../models/WalletLedger.js';
 
 const router = express.Router();
 
@@ -468,7 +469,81 @@ router.delete('/admin/trade/:id', protectAdmin, async (req, res) => {
     const trade = await Trade.findOne(query);
     if (!trade) return res.status(404).json({ message: 'Trade not found' });
     
+    // Get user to reverse wallet changes
+    const user = await User.findById(trade.user);
+    if (user) {
+      if (trade.status === 'OPEN') {
+        // For open trades: Release the blocked margin back to user
+        const marginToRelease = trade.marginUsed || 0;
+        
+        if (trade.isCrypto) {
+          // Crypto trades don't have margin, nothing to release
+        } else {
+          // Regular trade: Release margin
+          const newUsedMargin = Math.max(0, (user.wallet.usedMargin || 0) - marginToRelease);
+          const newBlocked = Math.max(0, (user.wallet.blocked || 0) - marginToRelease);
+          const newTradingBalance = (user.wallet.tradingBalance || 0) + marginToRelease;
+          
+          await User.updateOne(
+            { _id: user._id },
+            { 
+              $set: { 
+                'wallet.usedMargin': newUsedMargin,
+                'wallet.blocked': newBlocked,
+                'wallet.tradingBalance': newTradingBalance
+              } 
+            }
+          );
+        }
+      } else if (trade.status === 'CLOSED') {
+        // For closed trades: Reverse the realized P&L
+        const pnlToReverse = trade.netPnL || 0;
+        
+        if (trade.isCrypto) {
+          // Crypto trade: Reverse P&L from crypto wallet
+          const newCryptoBalance = Math.max(0, (user.cryptoWallet?.balance || 0) - pnlToReverse);
+          const newCryptoRealizedPnL = (user.cryptoWallet?.realizedPnL || 0) - pnlToReverse;
+          
+          await User.updateOne(
+            { _id: user._id },
+            { 
+              $set: { 
+                'cryptoWallet.balance': newCryptoBalance,
+                'cryptoWallet.realizedPnL': newCryptoRealizedPnL
+              } 
+            }
+          );
+        } else {
+          // Regular trade: Reverse P&L from wallet
+          const newCashBalance = Math.max(0, (user.wallet.cashBalance || 0) - pnlToReverse);
+          const newRealizedPnL = (user.wallet.realizedPnL || 0) - pnlToReverse;
+          
+          await User.updateOne(
+            { _id: user._id },
+            { 
+              $set: { 
+                'wallet.cashBalance': newCashBalance,
+                'wallet.realizedPnL': newRealizedPnL
+              } 
+            }
+          );
+        }
+      }
+    }
+    
+    // Delete all wallet ledger entries related to this trade
+    await WalletLedger.deleteMany({ 
+      'reference.type': 'Trade', 
+      'reference.id': trade._id 
+    });
+    
     await Trade.findByIdAndDelete(req.params.id);
+    
+    // Emit socket event to notify all clients about the trade deletion
+    if (io) {
+      io.emit('trade_update', { type: 'TRADE_DELETED', tradeId: req.params.id, userId: trade.user });
+    }
+    
     res.json({ message: 'Trade deleted successfully' });
   } catch (error) {
     res.status(400).json({ message: error.message });

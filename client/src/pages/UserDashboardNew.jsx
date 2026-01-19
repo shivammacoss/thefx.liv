@@ -869,10 +869,49 @@ const UserDashboardNew = () => {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
   const [darkMode, setDarkMode] = useState(true);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     fetchWalletBalance();
+    fetchNotifications();
   }, []);
+
+  const fetchNotifications = async () => {
+    try {
+      const { data } = await axios.get('/api/user/notifications', {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unreadCount || 0);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+
+  const markAsRead = async (notificationId) => {
+    try {
+      await axios.put(`/api/user/notifications/${notificationId}/read`, {}, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      fetchNotifications();
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      await axios.put('/api/user/notifications/read-all', {}, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      fetchNotifications();
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
 
   const fetchWalletBalance = async () => {
     try {
@@ -979,11 +1018,29 @@ const UserDashboardNew = () => {
             </button>
           </div>
 
-          {/* Right - Settings, Profile */}
+          {/* Right - Settings, Notifications, Profile */}
           <div className="flex items-center gap-4">
             {/* Settings */}
-            <button className="text-gray-400 hover:text-white">
+            <button 
+              onClick={() => setShowSettingsModal(true)}
+              className="text-gray-400 hover:text-white"
+              title="Settings"
+            >
               <Settings size={20} />
+            </button>
+
+            {/* Notifications */}
+            <button 
+              onClick={() => setShowNotifications(true)}
+              className="relative text-gray-400 hover:text-white"
+              title="Notifications"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-xs flex items-center justify-center">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {/* User Menu */}
@@ -1140,6 +1197,118 @@ const UserDashboardNew = () => {
                   <LogOut size={22} />
                   <span className="font-medium">Logout</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Modal */}
+        {showSettingsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-dark-800 rounded-lg w-full max-w-md">
+              <div className="flex justify-between items-center p-4 border-b border-dark-600">
+                <h2 className="text-xl font-bold">Settings</h2>
+                <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div className="flex items-center justify-between py-3 border-b border-dark-600">
+                  <div>
+                    <div className="font-medium">Dark Mode</div>
+                    <div className="text-sm text-gray-400">Toggle dark/light theme</div>
+                  </div>
+                  <button 
+                    onClick={() => setDarkMode(!darkMode)}
+                    className={`w-12 h-6 rounded-full transition ${darkMode ? 'bg-green-600' : 'bg-dark-600'}`}
+                  >
+                    <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${darkMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between py-3 border-b border-dark-600">
+                  <div>
+                    <div className="font-medium">Notifications</div>
+                    <div className="text-sm text-gray-400">Enable push notifications</div>
+                  </div>
+                  <button className="w-12 h-6 rounded-full bg-green-600">
+                    <span className="block w-5 h-5 rounded-full bg-white translate-x-6" />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between py-3">
+                  <div>
+                    <div className="font-medium">Sound Effects</div>
+                    <div className="text-sm text-gray-400">Play sounds on trades</div>
+                  </div>
+                  <button className="w-12 h-6 rounded-full bg-dark-600">
+                    <span className="block w-5 h-5 rounded-full bg-white translate-x-1" />
+                  </button>
+                </div>
+              </div>
+              <div className="p-4 border-t border-dark-600">
+                <button 
+                  onClick={() => setShowSettingsModal(false)}
+                  className="w-full py-2 bg-green-600 hover:bg-green-700 rounded-lg"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Notifications Modal */}
+        {showNotifications && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-dark-800 rounded-lg w-full max-w-lg max-h-[80vh] flex flex-col">
+              <div className="flex justify-between items-center p-4 border-b border-dark-600">
+                <div>
+                  <h2 className="text-xl font-bold">Notifications</h2>
+                  {unreadCount > 0 && (
+                    <p className="text-sm text-gray-400">{unreadCount} unread</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={markAllAsRead}
+                      className="text-sm text-green-400 hover:text-green-300"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                  <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white">
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400">
+                    <Bell size={48} className="mx-auto mb-4 opacity-50" />
+                    <p>No notifications yet</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-dark-600">
+                    {notifications.map(notif => (
+                      <div 
+                        key={notif._id} 
+                        className={`p-4 hover:bg-dark-700 cursor-pointer ${!notif.isRead ? 'bg-dark-700/50' : ''}`}
+                        onClick={() => !notif.isRead && markAsRead(notif._id)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${!notif.isRead ? 'bg-green-500' : 'bg-gray-600'}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium">{notif.title}</div>
+                            <div className="text-sm text-gray-400 mt-1">{notif.message}</div>
+                            <div className="text-xs text-gray-500 mt-2">
+                              {new Date(notif.createdAt).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

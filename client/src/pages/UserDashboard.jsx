@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronRight, Settings, Bell, User, X,
   BarChart2, History, ListOrdered, UserCircle, Menu,
   ArrowDownCircle, ArrowUpCircle, CreditCard, Copy, Check, Building2,
-  Home, ArrowLeft, ClipboardList, Star
+  Home, ArrowLeft, ClipboardList, Star, Info
 } from 'lucide-react';
 import MarketWatch from '../components/MarketWatch';
 
@@ -927,9 +927,10 @@ const InstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuySell, u
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto, segment-specific search
+            // Regular trading search - search ALL instruments globally (no segment filter)
+            // Users can search any instrument and add to their watchlist
             const { data } = await axios.get(
-              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}`,
               { headers }
             );
             // Filter out crypto results from regular search
@@ -2529,6 +2530,7 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [usdRate, setUsdRate] = useState(83.50); // Default USD/INR rate
+  const [showSettingsInfo, setShowSettingsInfo] = useState(false);
   
   // Crypto-specific: Binance-style USD amount input
   const [cryptoAmount, setCryptoAmount] = useState('100'); // USD amount to spend
@@ -2797,16 +2799,93 @@ const TradingPanel = ({ instrument, orderType, setOrderType, walletData, onClose
     <aside className="w-full h-full bg-dark-800 border-l border-dark-600 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-dark-600">
-        <div>
-          <div className={`font-bold ${isCrypto ? 'text-orange-400' : isCall ? 'text-green-400' : isPut ? 'text-red-400' : isFutures ? 'text-yellow-400' : ''}`}>
-            {instrument?.symbol}
+        <div className="flex items-center gap-2">
+          <div>
+            <div className={`font-bold ${isCrypto ? 'text-orange-400' : isCall ? 'text-green-400' : isPut ? 'text-red-400' : isFutures ? 'text-yellow-400' : ''}`}>
+              {instrument?.symbol}
+            </div>
+            <div className="text-xs text-gray-400">{instrument?.exchange} • {isCrypto ? 'CRYPTO' : getSegmentLabel()}</div>
           </div>
-          <div className="text-xs text-gray-400">{instrument?.exchange} • {isCrypto ? 'CRYPTO' : getSegmentLabel()}</div>
+          {!isCrypto && (
+            <button 
+              onClick={() => setShowSettingsInfo(!showSettingsInfo)}
+              className="text-blue-400 hover:text-blue-300 p-1"
+              title="View trading settings"
+            >
+              <Info size={18} />
+            </button>
+          )}
         </div>
         <button onClick={onClose} className="text-gray-400 hover:text-white">
           <X size={20} />
         </button>
       </div>
+
+      {/* Settings Info Popup */}
+      {showSettingsInfo && !isCrypto && (
+        <div className="absolute top-14 left-2 right-2 z-50 bg-dark-700 border border-dark-500 rounded-lg shadow-xl p-4 max-h-80 overflow-y-auto">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-bold text-sm text-blue-400">Trading Settings</h3>
+            <button onClick={() => setShowSettingsInfo(false)} className="text-gray-400 hover:text-white">
+              <X size={16} />
+            </button>
+          </div>
+          
+          {/* Segment Settings */}
+          <div className="mb-3">
+            <div className="text-xs text-gray-500 uppercase mb-2">Segment: {instrument?.displaySegment || instrument?.segment}</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Max Lots:</span>
+                <span className="float-right text-white">{marginPreview?.maxLots || '--'}</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Min Lots:</span>
+                <span className="float-right text-white">{marginPreview?.minLots || 1}</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Per Order:</span>
+                <span className="float-right text-white">{marginPreview?.perOrderLots || '--'}</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Lot Size:</span>
+                <span className="float-right text-white">{lotSize}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Script Specific Settings */}
+          <div className="mb-3">
+            <div className="text-xs text-gray-500 uppercase mb-2">Script: {instrument?.symbol}</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Exposure Intraday:</span>
+                <span className="float-right text-white">{marginPreview?.exposureIntraday || '--'}x</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Exposure CF:</span>
+                <span className="float-right text-white">{marginPreview?.exposureCarryForward || '--'}x</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Commission:</span>
+                <span className="float-right text-white">₹{marginPreview?.commission || 0}</span>
+              </div>
+              <div className="bg-dark-800 p-2 rounded">
+                <span className="text-gray-400">Brokerage:</span>
+                <span className="float-right text-white">₹{marginPreview?.brokerage || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Trading Limits */}
+          {(marginPreview?.maxLots || marginPreview?.minLots) && (
+            <div className="bg-blue-900/20 border border-blue-500/30 rounded p-2 text-xs">
+              <span className="text-blue-400">ℹ️ Lot Range:</span>
+              <span className="text-white ml-2">{marginPreview?.minLots || 1} - {marginPreview?.maxLots || 'Unlimited'} lots per order</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Buy/Sell Toggle with Live Bid/Ask Prices - Indian Standard: SELL left, BUY right */}
       <div className="flex border-b border-dark-600">
@@ -3295,9 +3374,10 @@ const MobileInstrumentsPanel = ({ selectedInstrument, onSelectInstrument, onBuyS
             );
             setSearchResults(filtered);
           } else {
-            // Regular trading search - exclude crypto, segment-specific search
+            // Regular trading search - search ALL instruments globally (no segment filter)
+            // Users can search any instrument and add to their watchlist
             const { data } = await axios.get(
-              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}&displaySegment=${encodeURIComponent(activeSegment)}`,
+              `/api/instruments/user?search=${encodeURIComponent(debouncedSearch)}`,
               { headers }
             );
             const nonCryptoResults = (data || []).filter(item => !item.isCrypto && item.exchange !== 'BINANCE');

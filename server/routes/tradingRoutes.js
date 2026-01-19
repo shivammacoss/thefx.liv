@@ -125,20 +125,23 @@ router.post('/margin-preview', protect, async (req, res) => {
     const segmentSettings = TradeService.getUserSegmentSettings(req.user, segment, instrumentType);
     const scriptSettings = TradeService.getUserScriptSettings(req.user, symbol, category);
     
-    // Debug logging
+    // Debug logging - Check raw segment permissions
+    let rawSegmentPerms = req.user.segmentPermissions;
+    if (rawSegmentPerms && typeof rawSegmentPerms.toObject === 'function') {
+      rawSegmentPerms = rawSegmentPerms.toObject();
+    }
+    const segmentData = rawSegmentPerms?.[segment] || rawSegmentPerms?.[segment?.toUpperCase()];
+    
     console.log('Margin Preview Debug:', {
-      symbol, category, segment, instrumentType,
+      symbol, segment, instrumentType,
       segmentSettingsFound: !!segmentSettings,
+      rawSegmentFound: !!segmentData,
       exposureIntraday: segmentSettings?.exposureIntraday,
       exposureCarryForward: segmentSettings?.exposureCarryForward,
-      hasScriptSettings: !!scriptSettings,
-      fixedMargin: scriptSettings?.fixedMargin,
-      userSegmentKeys: req.user.segmentPermissions instanceof Map 
-        ? Array.from(req.user.segmentPermissions.keys()) 
-        : Object.keys(req.user.segmentPermissions || {}),
-      userScriptSettingsKeys: req.user.scriptSettings instanceof Map 
-        ? Array.from(req.user.scriptSettings.keys()) 
-        : Object.keys(req.user.scriptSettings || {})
+      commissionLot: segmentSettings?.commissionLot,
+      rawExposureIntraday: segmentData?.exposureIntraday,
+      rawCommissionLot: segmentData?.commissionLot,
+      availableKeys: Object.keys(rawSegmentPerms || {})
     });
     
     let marginRequired = 0;
@@ -212,6 +215,10 @@ router.post('/margin-preview', protect, async (req, res) => {
     // Check if lots exceed limit
     const lotsValid = lots >= minLots && lots <= maxLots;
     
+    // Get commission from segment settings
+    const commission = segmentSettings?.commissionLot || segmentSettings?.commission || 0;
+    const perOrderLots = scriptSettings?.lotSettings?.orderLots || segmentSettings?.orderLots || maxLots;
+    
     res.json({
       marginRequired: Math.round(marginRequired * 100) / 100,
       tradeValue: Math.round(tradeValue * 100) / 100,
@@ -223,12 +230,17 @@ router.post('/margin-preview', protect, async (req, res) => {
       usedFixedMargin,
       marginSource,
       brokerage: Math.round(brokerage * 100) / 100,
+      commission: Math.round(commission * 100) / 100,
       spread,
       maxLots,
       minLots,
+      perOrderLots,
       lotsValid,
       lotsError: !lotsValid ? `Lots must be between ${minLots} and ${maxLots}` : null,
-      shortfall: (marginRequired + brokerage) > availableBalance ? (marginRequired + brokerage) - availableBalance : 0
+      shortfall: (marginRequired + brokerage) > availableBalance ? (marginRequired + brokerage) - availableBalance : 0,
+      // Include segment settings for info display
+      exposureIntraday: segmentSettings?.exposureIntraday || null,
+      exposureCarryForward: segmentSettings?.exposureCarryForward || null
     });
   } catch (error) {
     res.status(400).json({ message: error.message });

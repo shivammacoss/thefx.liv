@@ -14,7 +14,7 @@ const adminFundRequestSchema = new mongoose.Schema({
     unique: true
   },
   
-  // Admin making the request
+  // Admin/Broker/SubBroker making the request
   admin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Admin',
@@ -24,6 +24,31 @@ const adminFundRequestSchema = new mongoose.Schema({
     type: String,
     required: true,
     index: true
+  },
+  
+  // Role of the requestor (ADMIN, BROKER, SUB_BROKER)
+  requestorRole: {
+    type: String,
+    enum: ['ADMIN', 'BROKER', 'SUB_BROKER'],
+    required: true
+  },
+  
+  // Target admin who should approve (parent in hierarchy)
+  // For ADMIN -> SUPER_ADMIN, for BROKER -> ADMIN/SUPER_ADMIN, for SUB_BROKER -> BROKER/ADMIN/SUPER_ADMIN
+  targetAdmin: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  targetAdminCode: {
+    type: String,
+    required: true,
+    index: true
+  },
+  targetRole: {
+    type: String,
+    enum: ['SUPER_ADMIN', 'ADMIN', 'BROKER'],
+    required: true
   },
   
   // Amount requested
@@ -46,7 +71,7 @@ const adminFundRequestSchema = new mongoose.Schema({
     default: 'PENDING'
   },
   
-  // Super Admin action details
+  // Processed by admin (should be targetAdmin or higher)
   processedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Admin',
@@ -79,5 +104,8 @@ adminFundRequestSchema.pre('save', async function(next) {
 // Index for faster queries
 adminFundRequestSchema.index({ status: 1, createdAt: -1 });
 adminFundRequestSchema.index({ admin: 1, status: 1 });
+adminFundRequestSchema.index({ targetAdmin: 1, status: 1 });
+adminFundRequestSchema.index({ targetAdminCode: 1, status: 1 });
+adminFundRequestSchema.index({ requestorRole: 1, status: 1 });
 
 export default mongoose.model('AdminFundRequest', adminFundRequestSchema);

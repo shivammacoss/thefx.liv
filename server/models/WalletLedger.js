@@ -39,6 +39,7 @@ const walletLedgerSchema = new mongoose.Schema({
       'PROFIT_SHARE',       // Profit share to admin
       'ADMIN_DEPOSIT',      // Super admin deposits to admin
       'ADMIN_WITHDRAW',     // Admin withdraws
+      'ADMIN_TRANSFER',     // Admin to admin fund transfer
       'REFUND',             // Refund
       'ADJUSTMENT',         // Manual adjustment
       'BONUS',              // Bonus credit

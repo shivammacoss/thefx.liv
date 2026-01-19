@@ -39,19 +39,33 @@ const userSchema = new mongoose.Schema({
     unique: true
   },
   
-  // Admin code - links user to admin (can be changed by Super Admin for transfers)
+  // Admin code - links user to their creator (can be changed by Super Admin for transfers)
   adminCode: {
     type: String,
     required: false,
     index: true
   },
   
-  // Reference to admin
+  // Reference to the admin/broker/sub-broker who directly manages this user
   admin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Admin',
     required: true
   },
+  
+  // Role of the creator (ADMIN, BROKER, or SUB_BROKER)
+  creatorRole: {
+    type: String,
+    enum: ['SUPER_ADMIN', 'ADMIN', 'BROKER', 'SUB_BROKER'],
+    default: 'ADMIN'
+  },
+  
+  // Hierarchy path - array of all ancestor admin IDs (for efficient queries)
+  // e.g., [superAdminId, adminId, brokerId] for a user created by broker
+  hierarchyPath: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin'
+  }],
   
   username: {
     type: String,
@@ -457,6 +471,9 @@ userSchema.pre('save', async function(next) {
 // Index for faster queries
 userSchema.index({ adminCode: 1, isActive: 1 });
 userSchema.index({ adminCode: 1, tradingStatus: 1 });
+userSchema.index({ hierarchyPath: 1 });
+userSchema.index({ creatorRole: 1 });
+userSchema.index({ admin: 1, creatorRole: 1 });
 
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);

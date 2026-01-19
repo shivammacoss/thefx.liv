@@ -4,6 +4,7 @@ import Admin from '../models/Admin.js';
 import BankSettings from '../models/BankSettings.js';
 import BankAccount from '../models/BankAccount.js';
 import FundRequest from '../models/FundRequest.js';
+import Notification from '../models/Notification.js';
 import { protectUser, generateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -92,13 +93,16 @@ router.post('/login', async (req, res) => {
     if (await user.comparePassword(password)) {
       res.json({
         _id: user._id,
+        userId: user.userId,
         username: user.username,
         email: user.email,
         fullName: user.fullName,
+        phone: user.phone,
         role: user.role,
         wallet: user.wallet,
         marginAvailable: user.marginAvailable,
         isReadOnly: user.isReadOnly || false,
+        createdAt: user.createdAt,
         token: generateToken(user._id)
       });
     } else {
@@ -406,6 +410,106 @@ router.post('/change-password', protectUser, async (req, res) => {
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     console.error('Change password error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== NOTIFICATIONS ====================
+
+// Get user notifications
+router.get('/notifications', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userAdminCode = req.user.adminCode;
+    
+    // Find notifications targeted to this user
+    const notifications = await Notification.find({
+      isActive: true,
+      $or: [
+        { targetType: 'ALL_USERS' },
+        { targetType: 'ALL_ADMINS_USERS' },
+        { targetType: 'SINGLE_USER', targetUserId: userId },
+        { targetType: 'SELECTED_USERS', targetUserIds: userId },
+        { targetType: 'ADMIN_USERS', targetAdminCode: userAdminCode }
+      ]
+    }).sort({ createdAt: -1 }).limit(50);
+    
+    // Format notifications with read status
+    const formattedNotifications = notifications.map(notif => {
+      const readEntry = notif.readBy.find(r => r.userId.toString() === userId.toString());
+      return {
+        _id: notif._id,
+        title: notif.title,
+        subject: notif.subject,
+        message: notif.description,
+        image: notif.image,
+        isRead: !!readEntry,
+        readAt: readEntry?.readAt,
+        createdAt: notif.createdAt
+      };
+    });
+    
+    const unreadCount = formattedNotifications.filter(n => !n.isRead).length;
+    
+    res.json({
+      notifications: formattedNotifications,
+      unreadCount,
+      total: formattedNotifications.length
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Mark notification as read
+router.put('/notifications/:id/read', protectUser, async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+    
+    // Check if already read
+    const alreadyRead = notification.readBy.some(r => r.userId.toString() === req.user._id.toString());
+    if (!alreadyRead) {
+      notification.readBy.push({ userId: req.user._id, readAt: new Date() });
+      await notification.save();
+    }
+    
+    res.json({ message: 'Marked as read' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Mark all notifications as read
+router.put('/notifications/read-all', protectUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userAdminCode = req.user.adminCode;
+    
+    // Find all unread notifications for this user
+    const notifications = await Notification.find({
+      isActive: true,
+      'readBy.userId': { $ne: userId },
+      $or: [
+        { targetType: 'ALL_USERS' },
+        { targetType: 'ALL_ADMINS_USERS' },
+        { targetType: 'SINGLE_USER', targetUserId: userId },
+        { targetType: 'SELECTED_USERS', targetUserIds: userId },
+        { targetType: 'ADMIN_USERS', targetAdminCode: userAdminCode }
+      ]
+    });
+    
+    // Mark all as read
+    for (const notif of notifications) {
+      notif.readBy.push({ userId, readAt: new Date() });
+      await notif.save();
+    }
+    
+    res.json({ message: 'All notifications marked as read', count: notifications.length });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });

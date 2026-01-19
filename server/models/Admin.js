@@ -25,10 +25,10 @@ const generateAdminCode = () => {
 };
 
 const adminSchema = new mongoose.Schema({
-  // Role: SUPER_ADMIN or ADMIN
+  // Role hierarchy: SUPER_ADMIN > ADMIN > BROKER > SUB_BROKER
   role: {
     type: String,
-    enum: ['SUPER_ADMIN', 'ADMIN'],
+    enum: ['SUPER_ADMIN', 'ADMIN', 'BROKER', 'SUB_BROKER'],
     default: 'ADMIN'
   },
   
@@ -279,12 +279,32 @@ const adminSchema = new mongoose.Schema({
     }
   },
   
-  // Created by (for ADMIN, reference to SUPER_ADMIN)
+  // Created by - reference to parent in hierarchy
+  // SUPER_ADMIN: null, ADMIN: SUPER_ADMIN, BROKER: ADMIN, SUB_BROKER: BROKER
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Admin',
     default: null
   },
+  
+  // Parent ID for hierarchy chain (same as createdBy but clearer naming)
+  parentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    default: null
+  },
+  
+  // Hierarchy level (0 = SUPER_ADMIN, 1 = ADMIN, 2 = BROKER, 3 = SUB_BROKER)
+  hierarchyLevel: {
+    type: Number,
+    default: 1
+  },
+  
+  // Hierarchy path - array of ancestor IDs for efficient queries
+  hierarchyPath: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin'
+  }],
   referralCode: {
     type: String,
     unique: true,
@@ -362,6 +382,23 @@ adminSchema.pre('save', async function(next) {
     this.referralUrl = `${base}/login?ref=${this.referralCode}`;
   }
   
+  // Set hierarchy level based on role
+  const hierarchyLevels = { 'SUPER_ADMIN': 0, 'ADMIN': 1, 'BROKER': 2, 'SUB_BROKER': 3 };
+  this.hierarchyLevel = hierarchyLevels[this.role] || 1;
+  
+  // Set parentId same as createdBy for consistency
+  if (this.isNew && this.createdBy && !this.parentId) {
+    this.parentId = this.createdBy;
+  }
+  
+  // Build hierarchy path for new admins
+  if (this.isNew && this.parentId) {
+    const parent = await mongoose.model('Admin').findById(this.parentId);
+    if (parent) {
+      this.hierarchyPath = [...(parent.hierarchyPath || []), parent._id];
+    }
+  }
+  
   next();
 });
 
@@ -381,6 +418,46 @@ adminSchema.methods.isSuperAdmin = function() {
   return this.role === 'SUPER_ADMIN';
 };
 
+// Check if admin
+adminSchema.methods.isAdmin = function() {
+  return this.role === 'ADMIN';
+};
+
+// Check if broker
+adminSchema.methods.isBroker = function() {
+  return this.role === 'BROKER';
+};
+
+// Check if sub broker
+adminSchema.methods.isSubBroker = function() {
+  return this.role === 'SUB_BROKER';
+};
+
+// Get hierarchy level number
+adminSchema.methods.getHierarchyLevel = function() {
+  const levels = { 'SUPER_ADMIN': 0, 'ADMIN': 1, 'BROKER': 2, 'SUB_BROKER': 3 };
+  return levels[this.role] || 1;
+};
+
+// Check if this admin can manage another admin (based on hierarchy)
+adminSchema.methods.canManage = function(targetRole) {
+  const hierarchy = ['SUPER_ADMIN', 'ADMIN', 'BROKER', 'SUB_BROKER'];
+  const myLevel = hierarchy.indexOf(this.role);
+  const targetLevel = hierarchy.indexOf(targetRole);
+  return myLevel < targetLevel; // Can only manage roles below in hierarchy
+};
+
+// Get allowed child roles that this admin can create
+adminSchema.methods.getAllowedChildRoles = function() {
+  const childRoles = {
+    'SUPER_ADMIN': ['ADMIN', 'BROKER', 'SUB_BROKER'],
+    'ADMIN': ['BROKER', 'SUB_BROKER'],
+    'BROKER': ['SUB_BROKER'],
+    'SUB_BROKER': []
+  };
+  return childRoles[this.role] || [];
+};
+
 // Get available balance
 adminSchema.methods.getAvailableBalance = function() {
   return this.wallet.balance - this.wallet.blocked;
@@ -389,5 +466,8 @@ adminSchema.methods.getAvailableBalance = function() {
 // Index for faster queries
 adminSchema.index({ adminCode: 1 });
 adminSchema.index({ role: 1, status: 1 });
+adminSchema.index({ parentId: 1 });
+adminSchema.index({ hierarchyPath: 1 });
+adminSchema.index({ createdBy: 1, role: 1 });
 
 export default mongoose.model('Admin', adminSchema);

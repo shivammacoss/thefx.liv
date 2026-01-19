@@ -7,7 +7,7 @@ import {
   Users, LogOut, Plus, Search, Edit, Trash2, TrendingUp,
   Key, Wallet, Eye, EyeOff, X, ArrowUpCircle, ArrowDownCircle,
   RefreshCw, Menu, Shield, CreditCard, FileText, BarChart3, Building2, Settings, UserPlus, Copy,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, ArrowRightLeft
 } from 'lucide-react';
 
 // Reusable Pagination Component
@@ -110,6 +110,42 @@ const AdminDashboard = () => {
   const [walletBalance, setWalletBalance] = useState(admin?.wallet?.balance || 0);
 
   const isSuperAdmin = admin?.role === 'SUPER_ADMIN';
+  const isAdmin = admin?.role === 'ADMIN';
+  const isBroker = admin?.role === 'BROKER';
+  const isSubBroker = admin?.role === 'SUB_BROKER';
+  
+  // Get role display name
+  const getRoleDisplayName = () => {
+    switch(admin?.role) {
+      case 'SUPER_ADMIN': return 'Super Admin';
+      case 'ADMIN': return 'Admin';
+      case 'BROKER': return 'Broker';
+      case 'SUB_BROKER': return 'Sub Broker';
+      default: return 'Admin';
+    }
+  };
+  
+  // Get role color
+  const getRoleColor = () => {
+    switch(admin?.role) {
+      case 'SUPER_ADMIN': return 'text-yellow-400';
+      case 'ADMIN': return 'text-purple-400';
+      case 'BROKER': return 'text-blue-400';
+      case 'SUB_BROKER': return 'text-green-400';
+      default: return 'text-purple-400';
+    }
+  };
+  
+  // Get role button color
+  const getRoleButtonColor = () => {
+    switch(admin?.role) {
+      case 'SUPER_ADMIN': return 'bg-yellow-600';
+      case 'ADMIN': return 'bg-purple-600';
+      case 'BROKER': return 'bg-blue-600';
+      case 'SUB_BROKER': return 'bg-green-600';
+      default: return 'bg-purple-600';
+    }
+  };
 
   // Refresh admin data on mount to get latest wallet balance
   useEffect(() => {
@@ -138,33 +174,82 @@ const AdminDashboard = () => {
   };
 
   // Navigation items based on role
-  // SUPER ADMIN: Admin Management, Wallet, Create Admin, Instruments, Charges, Market Open/Close
-  // ADMIN: User Management, Trade Management, Charges, Deposit/Withdrawal, Fund Management, Bank Management, Transactions
-  const navItems = isSuperAdmin ? [
-    { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
-    { path: '/admin/admins', icon: Shield, label: 'Admin Management' },
-    { path: '/admin/all-users', icon: Users, label: 'All Users' },
-    { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-    { path: '/admin/all-trades', icon: FileText, label: 'All Position' },
-    { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
-    { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-    { path: '/admin/instruments', icon: Settings, label: 'Instruments' },
+  // SUPER_ADMIN: Sees ALL - Admin/Broker/SubBroker Management, All Users, Instruments, Market Control
+  // ADMIN: Can create Broker, SubBroker, Users - sees subordinates
+  // BROKER: Can create SubBroker, Users - sees subordinates  
+  // SUB_BROKER: Can only create Users - sees only users
+  const getNavItems = () => {
+    const baseItems = [
+      { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
+    ];
+    
+    if (isSuperAdmin) {
+      return [
+        ...baseItems,
+        { path: '/admin/admins', icon: Shield, label: 'Hierarchy Management' },
+        { path: '/admin/all-users', icon: Users, label: 'All Users' },
+        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
+        { path: '/admin/all-trades', icon: FileText, label: 'All Position' },
+        { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
+        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
+        { path: '/admin/instruments', icon: Settings, label: 'Instruments' },
         { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
-    { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
-    { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
-    { path: '/admin/profile', icon: Settings, label: 'Profile' },
-  ] : [
-    { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
-    { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
-    { path: '/admin/users', icon: Users, label: 'User Management' },
-    { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-    { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-    { path: '/admin/trades', icon: FileText, label: 'Position' },
-    { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
-    { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
-    { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
-    { path: '/admin/profile', icon: Settings, label: 'Profile' },
-  ];
+        { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
+        { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
+        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+      ];
+    }
+    
+    if (isAdmin) {
+      return [
+        ...baseItems,
+        { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
+        { path: '/admin/admins', icon: Shield, label: 'Broker/SubBroker' },
+        { path: '/admin/subordinate-fund-requests', icon: CreditCard, label: 'Subordinate Requests' },
+        { path: '/admin/users', icon: Users, label: 'User Management' },
+        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
+        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
+        { path: '/admin/trades', icon: FileText, label: 'Position' },
+        { path: '/admin/fund-requests', icon: CreditCard, label: 'User Fund Requests' },
+        { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
+        { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
+        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+      ];
+    }
+    
+    if (isBroker) {
+      return [
+        ...baseItems,
+        { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
+        { path: '/admin/admins', icon: Shield, label: 'Sub Brokers' },
+        { path: '/admin/subordinate-fund-requests', icon: CreditCard, label: 'SubBroker Requests' },
+        { path: '/admin/users', icon: Users, label: 'User Management' },
+        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
+        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
+        { path: '/admin/trades', icon: FileText, label: 'Position' },
+        { path: '/admin/fund-requests', icon: CreditCard, label: 'User Fund Requests' },
+        { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
+        { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
+        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+      ];
+    }
+    
+    // SUB_BROKER - only users, no subordinates
+    return [
+      ...baseItems,
+      { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
+      { path: '/admin/users', icon: Users, label: 'User Management' },
+      { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
+      { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
+      { path: '/admin/trades', icon: FileText, label: 'Position' },
+      { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
+      { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
+      { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
+      { path: '/admin/profile', icon: Settings, label: 'Profile' },
+    ];
+  };
+  
+  const navItems = getNavItems();
 
   return (
     <div className="min-h-screen bg-dark-900 flex flex-col md:flex-row">
@@ -172,8 +257,8 @@ const AdminDashboard = () => {
       <header className="md:hidden bg-dark-800 border-b border-dark-600 px-4 py-3 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2">
           <span className="text-lg font-bold">THEFX</span>
-          <span className={`text-xs ml-1 ${isSuperAdmin ? 'text-yellow-400' : 'text-purple-400'}`}>
-            {isSuperAdmin ? 'Super Admin' : 'Admin'}
+          <span className={`text-xs ml-1 ${getRoleColor()}`}>
+            {getRoleDisplayName()}
           </span>
         </Link>
         <button 
@@ -238,6 +323,9 @@ const AdminDashboard = () => {
           <div className="px-4 py-3 border-b border-dark-600 bg-dark-700/50">
             <div className="text-xs text-gray-400">Your Admin Code</div>
             <div className="text-lg font-mono font-bold text-purple-400">{admin.adminCode}</div>
+            <div className={`text-xs mt-1 ${getRoleColor()}`}>
+              Role: {getRoleDisplayName()}
+            </div>
             <div className="text-xs text-gray-500 mt-1">
               Wallet: ₹{walletBalance.toLocaleString()}
             </div>
@@ -293,6 +381,8 @@ const AdminDashboard = () => {
           {isSuperAdmin && <Route path="bank-management" element={<BankManagement />} />}
           {/* Admin Only Routes */}
           {!isSuperAdmin && <Route path="wallet" element={<AdminWallet />} />}
+          {!isSuperAdmin && !isSubBroker && <Route path="admins/*" element={<AdminManagement />} />}
+          {!isSuperAdmin && !isSubBroker && <Route path="subordinate-fund-requests" element={<SubordinateFundRequests />} />}
           {!isSuperAdmin && <Route path="users/*" element={<UserManagement />} />}
           {!isSuperAdmin && <Route path="create-user" element={<AdminCreateUser />} />}
           {!isSuperAdmin && <Route path="trades" element={<AllTrades />} />}
@@ -632,7 +722,10 @@ const StatCard = ({ title, value, subtitle, color }) => {
   );
 };
 
-// Admin Management (Super Admin only)
+// Admin Management - Shows hierarchy based on role
+// SUPER_ADMIN: sees all Admins, Brokers, Sub Brokers
+// ADMIN: sees Brokers and Sub Brokers they created
+// BROKER: sees Sub Brokers they created
 const AdminManagement = () => {
   const { admin } = useAuth();
   const [admins, setAdmins] = useState([]);
@@ -642,12 +735,72 @@ const AdminManagement = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showChargesModal, setShowChargesModal] = useState(false);
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [showUsersModal, setShowUsersModal] = useState(false);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [selectedAdmin, setSelectedAdmin] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  
+  const isSuperAdmin = admin?.role === 'SUPER_ADMIN';
+  const isAdmin = admin?.role === 'ADMIN';
+  const isBroker = admin?.role === 'BROKER';
+  
+  // Get allowed roles based on current admin role
+  const getAllowedRoles = () => {
+    if (isSuperAdmin) return ['ADMIN', 'BROKER', 'SUB_BROKER'];
+    if (isAdmin) return ['BROKER', 'SUB_BROKER'];
+    if (isBroker) return ['SUB_BROKER'];
+    return [];
+  };
+  
+  const allowedRoles = getAllowedRoles();
+  
+  // Filter admins by role
+  const filteredByRole = roleFilter === 'ALL' 
+    ? admins 
+    : admins.filter(a => a.role === roleFilter);
 
   const { currentPage, setCurrentPage, totalPages, paginatedData: paginatedAdmins, totalItems } = usePagination(
-    admins, 20, searchTerm, ['name', 'username', 'email', 'adminCode', 'phone']
+    filteredByRole, 20, searchTerm, ['name', 'username', 'email', 'adminCode', 'phone']
   );
+  
+  // Get role badge color
+  const getRoleBadgeColor = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'bg-purple-500/20 text-purple-400';
+      case 'BROKER': return 'bg-blue-500/20 text-blue-400';
+      case 'SUB_BROKER': return 'bg-green-500/20 text-green-400';
+      default: return 'bg-gray-500/20 text-gray-400';
+    }
+  };
+  
+  // Get role display name
+  const getRoleLabel = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'Admin';
+      case 'BROKER': return 'Broker';
+      case 'SUB_BROKER': return 'Sub Broker';
+      default: return role;
+    }
+  };
+  
+  // Get title based on role
+  const getTitle = () => {
+    if (isSuperAdmin) return 'Hierarchy Management';
+    if (isAdmin) return 'Broker / Sub Broker Management';
+    if (isBroker) return 'Sub Broker Management';
+    return 'Management';
+  };
+  
+  // Get create button label
+  const getCreateLabel = () => {
+    if (isSuperAdmin) return 'Create Admin/Broker';
+    if (isAdmin) return 'Create Broker';
+    if (isBroker) return 'Create Sub Broker';
+    return 'Create';
+  };
 
   useEffect(() => {
     fetchAdmins();
@@ -677,48 +830,120 @@ const AdminManagement = () => {
     }
   };
 
+  const handleRoleChange = async (adminId, newRole) => {
+    try {
+      await axios.put(`/api/admin/manage/admins/${adminId}/role`, { role: newRole }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchAdmins();
+      setShowRoleModal(false);
+      setSelectedAdmin(null);
+      alert(`Role changed to ${newRole} successfully`);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error changing role');
+    }
+  };
+
+  const fetchAdminUsers = async (targetAdmin) => {
+    setLoadingUsers(true);
+    setAdminUsers([]);
+    try {
+      const { data } = await axios.get(`/api/admin/manage/admins/${targetAdmin._id}/users`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setAdminUsers(data.users || []);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      setAdminUsers([]);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const handleViewUsers = (adm) => {
+    setSelectedAdmin(adm);
+    setShowUsersModal(true);
+    fetchAdminUsers(adm);
+  };
+
   return (
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-        <h1 className="text-2xl font-bold">Admin Management</h1>
+        <h1 className="text-2xl font-bold">{getTitle()}</h1>
         <button
           onClick={() => setShowCreateModal(true)}
           className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg"
         >
           <Plus size={20} />
-          Create Admin
+          {getCreateLabel()}
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-        <input
-          type="text"
-          placeholder="Search admins by name, email, or code..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-yellow-500"
-        />
+      {/* Role Filter & Search */}
+      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        {/* Role Filter Tabs */}
+        {allowedRoles.length > 1 && (
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setRoleFilter('ALL')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                roleFilter === 'ALL' ? 'bg-yellow-600 text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+              }`}
+            >
+              All ({admins.length})
+            </button>
+            {allowedRoles.map(role => (
+              <button
+                key={role}
+                onClick={() => setRoleFilter(role)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  roleFilter === role ? getRoleBadgeColor(role).replace('/20', '') : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                }`}
+              >
+                {getRoleLabel(role)} ({admins.filter(a => a.role === role).length})
+              </button>
+            ))}
+          </div>
+        )}
+        
+        {/* Search */}
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+          <input
+            type="text"
+            placeholder="Search by name, email, or code..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-dark-700 border border-dark-600 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-yellow-500"
+          />
+        </div>
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Total Admins</div>
+          <div className="text-sm text-gray-400">Total</div>
           <div className="text-2xl font-bold text-yellow-400">{admins.length}</div>
         </div>
+        {isSuperAdmin && (
+          <div className="bg-dark-800 rounded-lg p-4">
+            <div className="text-sm text-gray-400">Admins</div>
+            <div className="text-2xl font-bold text-purple-400">{admins.filter(a => a.role === 'ADMIN').length}</div>
+          </div>
+        )}
+        {(isSuperAdmin || isAdmin) && (
+          <div className="bg-dark-800 rounded-lg p-4">
+            <div className="text-sm text-gray-400">Brokers</div>
+            <div className="text-2xl font-bold text-blue-400">{admins.filter(a => a.role === 'BROKER').length}</div>
+          </div>
+        )}
         <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Active</div>
-          <div className="text-2xl font-bold text-green-400">{admins.filter(a => a.status === 'ACTIVE').length}</div>
+          <div className="text-sm text-gray-400">Sub Brokers</div>
+          <div className="text-2xl font-bold text-green-400">{admins.filter(a => a.role === 'SUB_BROKER').length}</div>
         </div>
         <div className="bg-dark-800 rounded-lg p-4">
           <div className="text-sm text-gray-400">Total Users</div>
           <div className="text-2xl font-bold text-purple-400">{admins.reduce((sum, a) => sum + (a.stats?.totalUsers || 0), 0)}</div>
-        </div>
-        <div className="bg-dark-800 rounded-lg p-4">
-          <div className="text-sm text-gray-400">Total Admin Wallet</div>
-          <div className="text-2xl font-bold text-green-400">₹{admins.reduce((sum, a) => sum + (a.wallet?.balance || 0), 0).toLocaleString()}</div>
         </div>
       </div>
 
@@ -735,6 +960,9 @@ const AdminManagement = () => {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-lg">{adm.name || adm.username}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs ${getRoleBadgeColor(adm.role)}`}>
+                      {getRoleLabel(adm.role)}
+                    </span>
                     <span className={`px-2 py-0.5 rounded text-xs ${adm.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                       {adm.status}
                     </span>
@@ -742,6 +970,9 @@ const AdminManagement = () => {
                   <div className="text-sm text-gray-400 mt-1">{adm.email} • {adm.phone || 'No phone'}</div>
                   <div className="flex items-center gap-4 mt-2 flex-wrap">
                     <span className="text-sm font-mono bg-purple-500/20 text-purple-400 px-2 py-1 rounded">{adm.adminCode}</span>
+                    {adm.parentId && (
+                      <span className="text-xs text-gray-500">Parent: {adm.parentId?.name || adm.parentId?.adminCode || 'N/A'}</span>
+                    )}
                     <span className="text-xs text-gray-500">Created: {new Date(adm.createdAt).toLocaleDateString()}</span>
                     {adm.referralCode && (
                       <button
@@ -782,6 +1013,12 @@ const AdminManagement = () => {
                     <Eye size={16} /> View
                   </button>
                   <button
+                    onClick={() => handleViewUsers(adm)}
+                    className="px-3 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm flex items-center gap-1"
+                  >
+                    <Users size={16} /> Users ({adm.stats?.totalUsers || adm.userCount || 0})
+                  </button>
+                  <button
                     onClick={() => { setSelectedAdmin(adm); setShowFundModal(true); }}
                     className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center gap-1"
                   >
@@ -799,6 +1036,14 @@ const AdminManagement = () => {
                   >
                     <Key size={16} /> Password
                   </button>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => { setSelectedAdmin(adm); setShowRoleModal(true); }}
+                      className="px-3 py-2 bg-orange-600 hover:bg-orange-700 rounded text-sm flex items-center gap-1"
+                    >
+                      <Shield size={16} /> Role
+                    </button>
+                  )}
                   {adm.status === 'ACTIVE' ? (
                     <button
                       onClick={() => handleStatusChange(adm._id, 'SUSPENDED')}
@@ -832,6 +1077,7 @@ const AdminManagement = () => {
       {showCreateModal && (
         <CreateAdminModal
           token={admin.token}
+          creatorRole={admin.role}
           onClose={() => setShowCreateModal(false)}
           onSuccess={() => { setShowCreateModal(false); fetchAdmins(); }}
         />
@@ -870,15 +1116,191 @@ const AdminManagement = () => {
           onSuccess={() => { fetchAdmins(); }}
         />
       )}
+
+      {/* Role Change Modal - Super Admin Only */}
+      {showRoleModal && selectedAdmin && isSuperAdmin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Change Role</h2>
+              <button onClick={() => { setShowRoleModal(false); setSelectedAdmin(null); }} className="text-gray-400 hover:text-white">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-gray-400 mb-2">
+                Change role for <span className="text-white font-medium">{selectedAdmin.name || selectedAdmin.username}</span>
+              </p>
+              <p className="text-sm text-gray-500">
+                Current Role: <span className={`font-medium ${
+                  selectedAdmin.role === 'ADMIN' ? 'text-purple-400' : 
+                  selectedAdmin.role === 'BROKER' ? 'text-blue-400' : 'text-green-400'
+                }`}>{getRoleLabel(selectedAdmin.role)}</span>
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-sm text-gray-400">Select new role:</p>
+              <div className="grid grid-cols-3 gap-2">
+                {['ADMIN', 'BROKER', 'SUB_BROKER'].map(role => (
+                  <button
+                    key={role}
+                    onClick={() => handleRoleChange(selectedAdmin._id, role)}
+                    disabled={selectedAdmin.role === role}
+                    className={`px-4 py-3 rounded-lg text-sm font-medium transition ${
+                      selectedAdmin.role === role
+                        ? 'bg-dark-600 text-gray-500 cursor-not-allowed'
+                        : role === 'ADMIN' ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                        : role === 'BROKER' ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-green-600 hover:bg-green-700 text-white'
+                    }`}
+                  >
+                    {getRoleLabel(role)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <p className="text-xs text-yellow-400">
+                ⚠️ Changing role will affect this admin's permissions and hierarchy access.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Users Modal - View users under selected admin */}
+      {showUsersModal && selectedAdmin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-lg w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b border-dark-600">
+              <div>
+                <h2 className="text-xl font-bold">Users under {selectedAdmin.name || selectedAdmin.username}</h2>
+                <p className="text-sm text-gray-400">
+                  <span className={`px-2 py-0.5 rounded text-xs ${getRoleBadgeColor(selectedAdmin.role)}`}>
+                    {getRoleLabel(selectedAdmin.role)}
+                  </span>
+                  <span className="ml-2">{selectedAdmin.adminCode}</span>
+                </p>
+              </div>
+              <button onClick={() => { setShowUsersModal(false); setSelectedAdmin(null); setAdminUsers([]); }} className="text-gray-400 hover:text-white">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="p-4 overflow-y-auto flex-1">
+              {loadingUsers ? (
+                <div className="text-center py-8"><RefreshCw className="animate-spin inline" size={24} /></div>
+              ) : adminUsers.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Users size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No users found under this {getRoleLabel(selectedAdmin.role).toLowerCase()}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-sm text-gray-400 mb-4">
+                    Total Users: <span className="text-white font-bold">{adminUsers.length}</span>
+                  </div>
+                  <div className="grid gap-3">
+                    {adminUsers.map(user => (
+                      <div key={user._id} className="bg-dark-700 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold">{user.fullName || user.username}</span>
+                            <span className={`px-2 py-0.5 rounded text-xs ${user.isActive ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                              {user.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                            {user.isDemo && <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">Demo</span>}
+                          </div>
+                          <div className="text-sm text-gray-400 mt-1">{user.email}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            <span className="font-mono">{user.userId}</span>
+                            {user.phone && <span className="ml-2">• {user.phone}</span>}
+                          </div>
+                        </div>
+                        <div className="flex gap-4 text-center">
+                          <div>
+                            <div className="text-xs text-gray-400">Cash Balance</div>
+                            <div className="text-green-400 font-bold">₹{(user.wallet?.cashBalance || 0).toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-400">P&L</div>
+                            <div className={`font-bold ${(user.wallet?.totalPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              ₹{(user.wallet?.totalPnL || 0).toLocaleString()}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-400">Created</div>
+                            <div className="text-gray-300 text-sm">{new Date(user.createdAt).toLocaleDateString()}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 border-t border-dark-600">
+              <button
+                onClick={() => { setShowUsersModal(false); setSelectedAdmin(null); setAdminUsers([]); }}
+                className="w-full py-2 bg-dark-600 hover:bg-dark-500 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// Create Admin Modal
-const CreateAdminModal = ({ token, onClose, onSuccess }) => {
-  const [formData, setFormData] = useState({ username: '', name: '', email: '', phone: '', password: '', pin: '' });
+// Create Admin Modal - Supports role selection based on creator's role
+const CreateAdminModal = ({ token, onClose, onSuccess, creatorRole }) => {
+  // Get allowed roles based on creator's role
+  // Sub-Broker can ONLY be created by Broker, not by Admin or Super Admin
+  const getAllowedRoles = () => {
+    switch(creatorRole) {
+      case 'SUPER_ADMIN': return ['ADMIN', 'BROKER']; // Super Admin creates Admin or Broker only
+      case 'ADMIN': return ['BROKER']; // Admin creates Broker only
+      case 'BROKER': return ['SUB_BROKER']; // Only Broker can create Sub-Broker
+      default: return [];
+    }
+  };
+  
+  const allowedRoles = getAllowedRoles();
+  const [formData, setFormData] = useState({ 
+    username: '', 
+    name: '', 
+    email: '', 
+    phone: '', 
+    password: '', 
+    pin: '',
+    role: allowedRoles[0] || 'ADMIN'
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  const getRoleLabel = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'Admin';
+      case 'BROKER': return 'Broker';
+      case 'SUB_BROKER': return 'Sub Broker';
+      default: return role;
+    }
+  };
+  
+  const getRoleBadgeColor = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'bg-purple-600';
+      case 'BROKER': return 'bg-blue-600';
+      case 'SUB_BROKER': return 'bg-green-600';
+      default: return 'bg-gray-600';
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -890,7 +1312,7 @@ const CreateAdminModal = ({ token, onClose, onSuccess }) => {
       });
       onSuccess();
     } catch (err) {
-      setError(err.response?.data?.message || 'Error creating admin');
+      setError(err.response?.data?.message || 'Error creating');
     } finally {
       setLoading(false);
     }
@@ -900,11 +1322,31 @@ const CreateAdminModal = ({ token, onClose, onSuccess }) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-dark-800 rounded-lg w-full max-w-md p-6">
         <div className="flex justify-between mb-4">
-          <h2 className="text-xl font-bold">Create New Admin</h2>
+          <h2 className="text-xl font-bold">Create New {getRoleLabel(formData.role)}</h2>
           <button onClick={onClose}><X size={24} /></button>
         </div>
         {error && <div className="bg-red-500/20 text-red-400 p-2 rounded mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Role Selection */}
+          {allowedRoles.length > 1 && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Select Role</label>
+              <div className="flex gap-2 flex-wrap">
+                {allowedRoles.map(role => (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() => setFormData({...formData, role})}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                      formData.role === role ? getRoleBadgeColor(role) + ' text-white' : 'bg-dark-700 text-gray-400 hover:bg-dark-600'
+                    }`}
+                  >
+                    {getRoleLabel(role)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <input type="text" placeholder="Username *" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" required />
           <input type="text" placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" />
           <input type="email" placeholder="Email *" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2" required />
@@ -922,7 +1364,9 @@ const CreateAdminModal = ({ token, onClose, onSuccess }) => {
           />
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 bg-dark-600 py-2 rounded">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-yellow-600 py-2 rounded">{loading ? 'Creating...' : 'Create Admin'}</button>
+            <button type="submit" disabled={loading} className={`flex-1 ${getRoleBadgeColor(formData.role)} py-2 rounded`}>
+              {loading ? 'Creating...' : `Create ${getRoleLabel(formData.role)}`}
+            </button>
           </div>
         </form>
       </div>
@@ -2316,17 +2760,19 @@ const SuperAdminCreateUser = () => {
                 <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-medium text-yellow-400">{formData.selectedScript} Settings</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const updatedScripts = { ...formData.scriptSettings };
-                        delete updatedScripts[formData.selectedScript];
-                        setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
-                      }}
-                      className="text-red-400 hover:text-red-300 text-xs"
-                    >
-                      Reset to Default
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updatedScripts = { ...formData.scriptSettings };
+                          delete updatedScripts[formData.selectedScript];
+                          setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
+                        }}
+                        className="text-red-400 hover:text-red-300 text-xs"
+                      >
+                        Reset to Default
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Setting Type Selection */}
@@ -2622,16 +3068,19 @@ const SuperAdminCreateUser = () => {
                   )}
                   
                   {/* Brokerage Settings - Show when BROKERAGE is selected */}
-                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'BROKERAGE' && (
+                  {formData.scriptSettings[formData.selectedScript]?.settingType === 'BROKERAGE' && (() => {
+                    const segmentKey = formData.scriptSettings[formData.selectedScript]?.segment || formData.selectedScriptSegment;
+                    const segmentDefaults = formData.segmentPermissions?.[segmentKey] || {};
+                    return (
                     <div className="space-y-3">
-                      <span className="text-xs text-gray-400 font-medium block">Brokerage Settings</span>
+                      <span className="text-xs text-gray-400 font-medium block">Brokerage Settings <span className="text-gray-600">(Segment default: {segmentDefaults.commissionType || 'PER_LOT'} - {segmentDefaults.commissionLot || 0})</span></span>
                       
                       <div className="bg-dark-700 rounded p-3">
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="block text-xs text-gray-500">Brokerage Type</label>
                             <select
-                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.type || 'PER_LOT'}
+                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.type || segmentDefaults.commissionType || 'PER_LOT'}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 scriptSettings: {
@@ -2653,7 +3102,7 @@ const SuperAdminCreateUser = () => {
                             <label className="block text-xs text-gray-500">Brokerage Value</label>
                             <input
                               type="number"
-                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.value || 0}
+                              value={formData.scriptSettings[formData.selectedScript]?.brokerage?.value ?? segmentDefaults.commissionLot ?? 0}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 scriptSettings: {
@@ -2670,7 +3119,8 @@ const SuperAdminCreateUser = () => {
                         </div>
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
                   
                   {/* Spread Settings - Show when SPREAD is selected */}
                   {formData.scriptSettings[formData.selectedScript]?.settingType === 'SPREAD' && (
@@ -3440,17 +3890,19 @@ const AdminCreateUser = () => {
                 <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-medium text-yellow-400">{formData.selectedScript} Settings</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const updatedScripts = { ...formData.scriptSettings };
-                        delete updatedScripts[formData.selectedScript];
-                        setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
-                      }}
-                      className="text-red-400 hover:text-red-300 text-xs"
-                    >
-                      Reset to Default
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updatedScripts = { ...formData.scriptSettings };
+                          delete updatedScripts[formData.selectedScript];
+                          setFormData(prev => ({ ...prev, scriptSettings: updatedScripts, selectedScript: null }));
+                        }}
+                        className="text-red-400 hover:text-red-300 text-xs"
+                      >
+                        Reset to Default
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Lot Settings */}
@@ -4008,6 +4460,9 @@ const AdminWallet = () => {
   const [requestReason, setRequestReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferTargets, setTransferTargets] = useState([]);
+  const [transferData, setTransferData] = useState({ targetAdminId: '', amount: '', remarks: '' });
 
   useEffect(() => {
     fetchWalletData();
@@ -4101,6 +4556,53 @@ const AdminWallet = () => {
     }
   };
 
+  const fetchTransferTargets = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/manage/transfer-targets', {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setTransferTargets(data);
+    } catch (error) {
+      console.error('Error fetching transfer targets:', error);
+    }
+  };
+
+  const handleTransfer = async (e) => {
+    e.preventDefault();
+    if (!transferData.targetAdminId || !transferData.amount || Number(transferData.amount) <= 0) {
+      setMessage({ type: 'error', text: 'Select admin and enter valid amount' });
+      return;
+    }
+    if (Number(transferData.amount) > (walletData?.wallet?.balance || 0)) {
+      setMessage({ type: 'error', text: 'Insufficient balance' });
+      return;
+    }
+    setSubmitting(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const { data } = await axios.post('/api/admin/manage/admin-transfer', {
+        targetAdminId: transferData.targetAdminId,
+        amount: Number(transferData.amount),
+        remarks: transferData.remarks
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setMessage({ type: 'success', text: data.message });
+      setTransferData({ targetAdminId: '', amount: '', remarks: '' });
+      setShowTransferModal(false);
+      fetchWalletData();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.message || 'Transfer failed' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openTransferModal = () => {
+    fetchTransferTargets();
+    setShowTransferModal(true);
+  };
+
   if (loading) {
     return <div className="p-6 text-center"><RefreshCw className="animate-spin inline" size={24} /></div>;
   }
@@ -4109,13 +4611,24 @@ const AdminWallet = () => {
     <div className="p-4 md:p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <h1 className="text-2xl font-bold">My Wallet</h1>
-        <button
-          onClick={() => setShowRequestModal(true)}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"
-        >
-          <Plus size={20} />
-          Request Funds
-        </button>
+        <div className="flex gap-2">
+          {admin?.role === 'ADMIN' && (
+            <button
+              onClick={openTransferModal}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg"
+            >
+              <ArrowRightLeft size={20} />
+              Transfer to Admin
+            </button>
+          )}
+          <button
+            onClick={() => setShowRequestModal(true)}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"
+          >
+            <Plus size={20} />
+            Request Funds
+          </button>
+        </div>
       </div>
 
       {message.text && (
@@ -4244,7 +4757,8 @@ const AdminWallet = () => {
               <button onClick={() => setShowRequestModal(false)}><X size={24} /></button>
             </div>
             <p className="text-gray-400 text-sm mb-4">
-              Request funds from Super Admin. Your current balance is ₹{(walletData?.wallet?.balance || 0).toLocaleString()}
+              Request funds from your {admin?.role === 'ADMIN' ? 'Super Admin' : admin?.role === 'BROKER' ? 'Admin' : admin?.role === 'SUB_BROKER' ? 'Broker' : 'Superior'}. 
+              Your current balance is ₹{(walletData?.wallet?.balance || 0).toLocaleString()}
             </p>
             <form onSubmit={handleRequestFund} className="space-y-4">
               <div>
@@ -4275,6 +4789,70 @@ const AdminWallet = () => {
                 </button>
                 <button type="submit" disabled={submitting} className="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded">
                   {submitting ? 'Submitting...' : 'Submit Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-lg w-full max-w-md p-6">
+            <div className="flex justify-between mb-4">
+              <h2 className="text-xl font-bold">Transfer to Admin</h2>
+              <button onClick={() => setShowTransferModal(false)}><X size={24} /></button>
+            </div>
+            <p className="text-gray-400 text-sm mb-4">
+              Transfer funds from your wallet to another admin. Your balance: ₹{(walletData?.wallet?.balance || 0).toLocaleString()}
+            </p>
+            <form onSubmit={handleTransfer} className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Select Admin</label>
+                <select
+                  value={transferData.targetAdminId}
+                  onChange={e => setTransferData({...transferData, targetAdminId: e.target.value})}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  required
+                >
+                  <option value="">-- Select Admin --</option>
+                  {transferTargets.map(t => (
+                    <option key={t._id} value={t._id}>
+                      {t.name || t.username} ({t.role}) - ₹{(t.wallet?.balance || 0).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Amount (₹)</label>
+                <input
+                  type="number"
+                  value={transferData.amount}
+                  onChange={e => setTransferData({...transferData, amount: e.target.value})}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  placeholder="Enter amount"
+                  required
+                  min="1"
+                  max={walletData?.wallet?.balance || 0}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Remarks (optional)</label>
+                <input
+                  type="text"
+                  value={transferData.remarks}
+                  onChange={e => setTransferData({...transferData, remarks: e.target.value})}
+                  className="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2"
+                  placeholder="e.g., Fund sharing"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowTransferModal(false)} className="flex-1 bg-dark-600 py-2 rounded">
+                  Cancel
+                </button>
+                <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 hover:bg-blue-700 py-2 rounded">
+                  {submitting ? 'Transferring...' : 'Transfer'}
                 </button>
               </div>
             </form>
@@ -4379,6 +4957,181 @@ const AdminFundRequestsManagement = () => {
                       onClick={() => handleAction(req._id, 'APPROVED')}
                       disabled={processing === req._id}
                       className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded flex items-center gap-1"
+                    >
+                      <ArrowUpCircle size={18} /> Approve
+                    </button>
+                    <button
+                      onClick={() => handleAction(req._id, 'REJECTED')}
+                      disabled={processing === req._id}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded flex items-center gap-1"
+                    >
+                      <ArrowDownCircle size={18} /> Reject
+                    </button>
+                  </div>
+                )}
+                {filter !== 'PENDING' && (
+                  <span className={`px-4 py-2 rounded ${
+                    req.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {req.status}
+                  </span>
+                )}
+              </div>
+              {req.adminRemarks && (
+                <div className="mt-3 pt-3 border-t border-dark-600 text-sm text-gray-400">
+                  Remarks: {req.adminRemarks}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Subordinate Fund Requests - For Admin/Broker to approve fund requests from Broker/SubBroker
+const SubordinateFundRequests = () => {
+  const { admin } = useAuth();
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('PENDING');
+  const [processing, setProcessing] = useState(null);
+  
+  const isAdmin = admin?.role === 'ADMIN';
+  const isBroker = admin?.role === 'BROKER';
+  
+  const getTitle = () => {
+    if (isAdmin) return 'Broker/SubBroker Fund Requests';
+    if (isBroker) return 'SubBroker Fund Requests';
+    return 'Subordinate Fund Requests';
+  };
+  
+  const getRoleBadgeColor = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'bg-purple-500/20 text-purple-400';
+      case 'BROKER': return 'bg-blue-500/20 text-blue-400';
+      case 'SUB_BROKER': return 'bg-green-500/20 text-green-400';
+      default: return 'bg-gray-500/20 text-gray-400';
+    }
+  };
+  
+  const getRoleLabel = (role) => {
+    switch(role) {
+      case 'ADMIN': return 'Admin';
+      case 'BROKER': return 'Broker';
+      case 'SUB_BROKER': return 'SubBroker';
+      default: return role;
+    }
+  };
+
+  useEffect(() => {
+    fetchRequests();
+  }, [filter]);
+
+  const fetchRequests = async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`/api/admin/manage/admin-fund-requests?status=${filter}`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      setRequests(data);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (requestId, status, remarks = '') => {
+    setProcessing(requestId);
+    try {
+      await axios.put(`/api/admin/manage/admin-fund-requests/${requestId}`, {
+        status,
+        remarks
+      }, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchRequests();
+      // Refresh admin data to update wallet balance
+      window.location.reload();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error processing request');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">{getTitle()}</h1>
+        <div className="text-sm text-gray-400">
+          Your Wallet: <span className="text-green-400 font-bold">₹{(admin?.wallet?.balance || 0).toLocaleString()}</span>
+        </div>
+      </div>
+      
+      <div className="bg-blue-500/20 text-blue-300 p-3 rounded-lg mb-6 text-sm">
+        💡 When you approve a request, funds will be deducted from your wallet and credited to the requestor's wallet.
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex gap-2 mb-6">
+        {['PENDING', 'APPROVED', 'REJECTED'].map(status => (
+          <button
+            key={status}
+            onClick={() => setFilter(status)}
+            className={`px-4 py-2 rounded-lg ${filter === status ? 
+              status === 'PENDING' ? 'bg-yellow-600' :
+              status === 'APPROVED' ? 'bg-green-600' : 'bg-red-600'
+              : 'bg-dark-700'}`}
+          >
+            {status}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8"><RefreshCw className="animate-spin inline" /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">No {filter.toLowerCase()} requests from your subordinates</div>
+      ) : (
+        <div className="space-y-4">
+          {requests.map(req => (
+            <div key={req._id} className="bg-dark-800 rounded-lg p-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-lg">{req.admin?.name || req.admin?.username}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs ${getRoleBadgeColor(req.requestorRole)}`}>
+                      {getRoleLabel(req.requestorRole)}
+                    </span>
+                    <span className="font-mono bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded text-sm">{req.adminCode}</span>
+                  </div>
+                  <div className="text-sm text-gray-400 mt-1">{req.admin?.email}</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    Their Current Balance: ₹{(req.admin?.wallet?.balance || 0).toLocaleString()}
+                  </div>
+                  {req.reason && <div className="text-sm mt-2 text-gray-300">Reason: {req.reason}</div>}
+                  <div className="text-xs text-gray-500 mt-1">{new Date(req.createdAt).toLocaleString()}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-400">Requested Amount</div>
+                  <div className="text-2xl font-bold text-green-400">₹{req.amount.toLocaleString()}</div>
+                  {filter === 'PENDING' && admin?.wallet?.balance < req.amount && (
+                    <div className="text-xs text-red-400 mt-1">Insufficient balance</div>
+                  )}
+                </div>
+                {filter === 'PENDING' && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(req._id, 'APPROVED')}
+                      disabled={processing === req._id || admin?.wallet?.balance < req.amount}
+                      className={`px-4 py-2 rounded flex items-center gap-1 ${
+                        admin?.wallet?.balance < req.amount 
+                          ? 'bg-gray-600 cursor-not-allowed' 
+                          : 'bg-green-600 hover:bg-green-700'
+                      }`}
                     >
                       <ArrowUpCircle size={18} /> Approve
                     </button>
@@ -10143,6 +10896,24 @@ const AllUsersManagement = () => {
     }
   };
 
+  // Save only a single script's settings (merge with existing)
+  const handleSaveScriptSettings = async (symbol) => {
+    if (!selectedUser || !editFormData || !editFormData.scriptSettings?.[symbol]) return;
+    
+    setSaving(true);
+    try {
+      await axios.put(`/api/admin/manage/users/${selectedUser._id}/script-settings/${encodeURIComponent(symbol)}`, 
+        editFormData.scriptSettings[symbol],
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert(`Script settings for ${symbol} saved successfully!`);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error saving script settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCopySettings = async () => {
     if (!selectedUser || !targetUserId) return;
     
@@ -10203,16 +10974,16 @@ const AllUsersManagement = () => {
       {/* Filters */}
       <div className="flex flex-wrap gap-4 mb-4">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm text-gray-400 mb-1">Filter by Admin</label>
+          <label className="block text-sm text-gray-400 mb-1">Filter by Admin/Broker/SubBroker</label>
           <select
             value={selectedAdminFilter}
             onChange={(e) => setSelectedAdminFilter(e.target.value)}
             className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2"
           >
-            <option value="">All Admins</option>
+            <option value="">All Admins/Brokers/SubBrokers</option>
             {admins.map(adm => (
               <option key={adm._id} value={adm.adminCode}>
-                {adm.name || adm.username} ({adm.adminCode})
+                [{adm.role === 'ADMIN' ? 'Admin' : adm.role === 'BROKER' ? 'Broker' : 'SubBroker'}] {adm.name || adm.username} ({adm.adminCode})
               </option>
             ))}
           </select>
@@ -10254,7 +11025,17 @@ const AllUsersManagement = () => {
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-sm">
-                      <div className="font-medium">{user.admin?.name || 'N/A'}</div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          user.creatorRole === 'ADMIN' ? 'bg-purple-500/20 text-purple-400' :
+                          user.creatorRole === 'BROKER' ? 'bg-blue-500/20 text-blue-400' :
+                          user.creatorRole === 'SUB_BROKER' ? 'bg-green-500/20 text-green-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {user.creatorRole === 'ADMIN' ? 'Admin' : user.creatorRole === 'BROKER' ? 'Broker' : user.creatorRole === 'SUB_BROKER' ? 'SubBroker' : 'N/A'}
+                        </span>
+                        <span className="font-medium">{user.admin?.name || 'N/A'}</span>
+                      </div>
                       <div className="text-gray-400">{user.adminCode}</div>
                     </div>
                   </td>
@@ -10976,18 +11757,28 @@ const AllUsersManagement = () => {
                     <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm font-medium text-yellow-400">{selectedScript} Settings</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updatedScripts = { ...editFormData.scriptSettings };
-                            delete updatedScripts[selectedScript];
-                            setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
-                            setSelectedScript(null);
-                          }}
-                          className="text-red-400 hover:text-red-300 text-xs"
-                        >
-                          Reset to Default
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveScriptSettings(selectedScript)}
+                            disabled={saving}
+                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium disabled:opacity-50"
+                          >
+                            {saving ? 'Saving...' : 'Save Script'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updatedScripts = { ...editFormData.scriptSettings };
+                              delete updatedScripts[selectedScript];
+                              setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
+                              setSelectedScript(null);
+                            }}
+                            className="text-red-400 hover:text-red-300 text-xs"
+                          >
+                            Reset to Default
+                          </button>
+                        </div>
                       </div>
                       
                       {/* Setting Type Selection */}
@@ -11270,13 +12061,17 @@ const AllUsersManagement = () => {
                       )}
                       
                       {/* Brokerage Settings */}
-                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (() => {
+                        const segmentKey = editFormData.scriptSettings[selectedScript]?.segment || selectedScriptSegment;
+                        const segmentDefaults = editFormData.segmentPermissions?.[segmentKey] || {};
+                        return (
                         <div className="bg-dark-700 rounded p-3">
+                          <span className="text-xs text-gray-600 block mb-2">(Segment default: {segmentDefaults.commissionType || 'PER_LOT'} - {segmentDefaults.commissionLot || 0})</span>
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="block text-xs text-gray-500">Brokerage Type</label>
                               <select
-                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || 'PER_LOT'}
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || segmentDefaults.commissionType || 'PER_LOT'}
                                 onChange={(e) => setEditFormData(prev => ({
                                   ...prev,
                                   scriptSettings: {
@@ -11298,7 +12093,7 @@ const AllUsersManagement = () => {
                               <label className="block text-xs text-gray-500">Brokerage Value</label>
                               <input
                                 type="number"
-                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value || 0}
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value ?? segmentDefaults.commissionLot ?? 0}
                                 onChange={(e) => setEditFormData(prev => ({
                                   ...prev,
                                   scriptSettings: {
@@ -11314,7 +12109,8 @@ const AllUsersManagement = () => {
                             </div>
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                       
                       {/* Spread Settings */}
                       {editFormData.scriptSettings[selectedScript]?.settingType === 'SPREAD' && (
@@ -12182,6 +12978,7 @@ const CryptoWalletModal = ({ user, onClose, onSuccess, token }) => {
 
 const UserManagement = () => {
   const { admin } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -12376,6 +13173,24 @@ const UserManagement = () => {
     }
   };
 
+  // Save only a single script's settings (merge with existing)
+  const handleSaveScriptSettings = async (symbol) => {
+    if (!selectedUser || !editFormData || !editFormData.scriptSettings?.[symbol]) return;
+    
+    setSaving(true);
+    try {
+      await axios.put(`/api/admin/manage/users/${selectedUser._id}/script-settings/${encodeURIComponent(symbol)}`, 
+        editFormData.scriptSettings[symbol],
+        { headers: { Authorization: `Bearer ${admin.token}` } }
+      );
+      alert(`Script settings for ${symbol} saved successfully!`);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error saving script settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCopySettings = async () => {
     if (!selectedUser || !targetUserId) return;
     
@@ -12414,7 +13229,7 @@ const UserManagement = () => {
             <span>Send Notification</span>
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => navigate('/admin/create-user')}
             className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition"
           >
             <Plus size={20} />
@@ -13204,18 +14019,28 @@ const UserManagement = () => {
                     <div className="bg-dark-800 rounded-lg p-4 border border-purple-600">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm font-medium text-yellow-400">{selectedScript} Settings</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updatedScripts = { ...editFormData.scriptSettings };
-                            delete updatedScripts[selectedScript];
-                            setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
-                            setSelectedScript(null);
-                          }}
-                          className="text-red-400 hover:text-red-300 text-xs"
-                        >
-                          Reset to Default
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveScriptSettings(selectedScript)}
+                            disabled={saving}
+                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium disabled:opacity-50"
+                          >
+                            {saving ? 'Saving...' : 'Save Script'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updatedScripts = { ...editFormData.scriptSettings };
+                              delete updatedScripts[selectedScript];
+                              setEditFormData(prev => ({ ...prev, scriptSettings: updatedScripts }));
+                              setSelectedScript(null);
+                            }}
+                            className="text-red-400 hover:text-red-300 text-xs"
+                          >
+                            Reset to Default
+                          </button>
+                        </div>
                       </div>
                       
                       {/* Setting Type Selection */}
@@ -13498,13 +14323,17 @@ const UserManagement = () => {
                       )}
                       
                       {/* Brokerage Settings */}
-                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (
+                      {editFormData.scriptSettings[selectedScript]?.settingType === 'BROKERAGE' && (() => {
+                        const segmentKey = editFormData.scriptSettings[selectedScript]?.segment || selectedScriptSegment;
+                        const segmentDefaults = editFormData.segmentPermissions?.[segmentKey] || {};
+                        return (
                         <div className="bg-dark-700 rounded p-3">
+                          <span className="text-xs text-gray-600 block mb-2">(Segment default: {segmentDefaults.commissionType || 'PER_LOT'} - {segmentDefaults.commissionLot || 0})</span>
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="block text-xs text-gray-500">Brokerage Type</label>
                               <select
-                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || 'PER_LOT'}
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.type || segmentDefaults.commissionType || 'PER_LOT'}
                                 onChange={(e) => setEditFormData(prev => ({
                                   ...prev,
                                   scriptSettings: {
@@ -13526,7 +14355,7 @@ const UserManagement = () => {
                               <label className="block text-xs text-gray-500">Brokerage Value</label>
                               <input
                                 type="number"
-                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value || 0}
+                                value={editFormData.scriptSettings[selectedScript]?.brokerage?.value ?? segmentDefaults.commissionLot ?? 0}
                                 onChange={(e) => setEditFormData(prev => ({
                                   ...prev,
                                   scriptSettings: {
@@ -13542,7 +14371,8 @@ const UserManagement = () => {
                             </div>
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                       
                       {/* Spread Settings */}
                       {editFormData.scriptSettings[selectedScript]?.settingType === 'SPREAD' && (

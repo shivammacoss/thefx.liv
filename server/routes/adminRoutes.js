@@ -127,12 +127,26 @@ router.get('/me', protectAdmin, async (req, res) => {
   }
 });
 
-// Get all users (filtered by adminCode for regular admins)
+// Get all users (filtered by hierarchy for non-super admins)
 router.get('/users', protectAdmin, async (req, res) => {
   try {
-    // Super Admin sees all users, regular Admin sees only their users
-    const query = req.admin.role === 'SUPER_ADMIN' ? {} : { adminCode: req.admin.adminCode };
-    const users = await User.find(query).select('-password').sort({ createdAt: -1 });
+    let query = {};
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin sees all users
+      query = {};
+    } else {
+      // ADMIN, BROKER, SUB_BROKER see users under them (direct + descendants)
+      query = {
+        $or: [
+          { admin: req.admin._id },
+          { hierarchyPath: req.admin._id }
+        ]
+      };
+    }
+    const users = await User.find(query)
+      .select('-password')
+      .populate('admin', 'name adminCode role')
+      .sort({ createdAt: -1 });
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -152,14 +166,10 @@ router.get('/users/:id', protectAdmin, async (req, res) => {
   }
 });
 
-// Create user
+// Create user (All roles including SUPER_ADMIN can create users)
 router.post('/users', protectAdmin, async (req, res) => {
   try {
     const { username, email, password, fullName, phone } = req.body;
-
-    if (req.admin.role === 'SUPER_ADMIN') {
-      return res.status(400).json({ message: 'Super Admin cannot create users directly. Please create or impersonate an Admin.' });
-    }
     
     if (!req.admin.adminCode) {
       return res.status(400).json({ message: 'Admin code missing on your profile. Contact Super Admin.' });
@@ -170,6 +180,9 @@ router.post('/users', protectAdmin, async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
+    // Build hierarchy path for the user
+    const userHierarchyPath = [...(req.admin.hierarchyPath || []), req.admin._id];
+
     const user = await User.create({
       username,
       email,
@@ -178,6 +191,8 @@ router.post('/users', protectAdmin, async (req, res) => {
       phone,
       admin: req.admin._id,
       adminCode: req.admin.adminCode,
+      creatorRole: req.admin.role,
+      hierarchyPath: userHierarchyPath,
       createdBy: req.admin._id
     });
 
@@ -188,6 +203,7 @@ router.post('/users', protectAdmin, async (req, res) => {
       fullName: user.fullName,
       phone: user.phone,
       adminCode: user.adminCode,
+      creatorRole: user.creatorRole,
       wallet: user.wallet,
       isActive: user.isActive
     });

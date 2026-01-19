@@ -41,27 +41,97 @@ const superAdminOnly = (req, res, next) => {
   next();
 };
 
-// Apply adminCode filter for non-super admins
-const applyAdminFilter = (req, query = {}) => {
-  if (req.admin.role !== 'SUPER_ADMIN') {
-    query.adminCode = req.admin.adminCode;
+// Hierarchy levels for permission checks
+const HIERARCHY_LEVELS = {
+  'SUPER_ADMIN': 0,
+  'ADMIN': 1,
+  'BROKER': 2,
+  'SUB_BROKER': 3
+};
+
+// Get allowed child roles for a given role
+// SUPER_ADMIN can create ADMIN, BROKER only (not SUB_BROKER directly)
+// ADMIN can create BROKER only (not SUB_BROKER directly)
+// BROKER can create SUB_BROKER (SUB_BROKER must be under a BROKER)
+// All roles (except SUPER_ADMIN) can create Users
+const getAllowedChildRoles = (role) => {
+  const childRoles = {
+    'SUPER_ADMIN': ['ADMIN', 'BROKER'], // Cannot create SUB_BROKER directly
+    'ADMIN': ['BROKER'], // Cannot create SUB_BROKER directly
+    'BROKER': ['SUB_BROKER'], // Only BROKER can create SUB_BROKER
+    'SUB_BROKER': []
+  };
+  return childRoles[role] || [];
+};
+
+// Check if requester can manage target role
+const canManageRole = (requesterRole, targetRole) => {
+  return HIERARCHY_LEVELS[requesterRole] < HIERARCHY_LEVELS[targetRole];
+};
+
+// Apply filter based on hierarchy - users see only their own and descendants
+const applyHierarchyFilter = (req, query = {}) => {
+  if (req.admin.role === 'SUPER_ADMIN') {
+    return query; // Super Admin sees all
   }
+  // For other roles, filter by hierarchyPath containing their ID or direct admin reference
+  query.$or = [
+    { admin: req.admin._id },
+    { hierarchyPath: req.admin._id }
+  ];
+  return query;
+};
+
+// Apply adminCode filter for non-super admins (legacy support)
+const applyAdminFilter = (req, query = {}) => {
+  if (req.admin.role === 'SUPER_ADMIN') {
+    return query;
+  }
+  // Include users under this admin and all descendants
+  query.$or = [
+    { adminCode: req.admin.adminCode },
+    { hierarchyPath: req.admin._id }
+  ];
   return query;
 };
 
 // ==================== SUPER ADMIN ROUTES ====================
 
-// Get all admins (Super Admin only)
-router.get('/admins', protectAdmin, superAdminOnly, async (req, res) => {
+// Get all subordinates (admins/brokers/sub-brokers) based on hierarchy
+// SUPER_ADMIN sees all ADMINs, BROKERs, SUB_BROKERs (created by them or their descendants)
+// ADMIN sees BROKERs and SUB_BROKERs created by them or their descendants
+// BROKER sees SUB_BROKERs created by them
+router.get('/admins', protectAdmin, async (req, res) => {
   try {
-    const admins = await Admin.find({ role: 'ADMIN' })
-      .select('-password')
+    let query = {};
+    const allowedChildRoles = getAllowedChildRoles(req.admin.role);
+    
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin sees all non-super-admin roles
+      query = { role: { $in: ['ADMIN', 'BROKER', 'SUB_BROKER'] } };
+    } else if (allowedChildRoles.length > 0) {
+      // Other roles see their direct children AND descendants in hierarchy
+      query = { 
+        role: { $in: allowedChildRoles },
+        $or: [
+          { parentId: req.admin._id },
+          { hierarchyPath: req.admin._id }
+        ]
+      };
+    } else {
+      // SUB_BROKER has no subordinates
+      return res.json([]);
+    }
+    
+    const admins = await Admin.find(query)
+      .select('-password -pin')
+      .populate('parentId', 'name adminCode role')
       .sort({ createdAt: -1 });
     
     // Get user counts for each admin
     const adminData = await Promise.all(admins.map(async (admin) => {
-      const userCount = await User.countDocuments({ adminCode: admin.adminCode });
-      const activeUsers = await User.countDocuments({ adminCode: admin.adminCode, isActive: true });
+      const userCount = await User.countDocuments({ admin: admin._id });
+      const activeUsers = await User.countDocuments({ admin: admin._id, isActive: true });
       return {
         ...admin.toObject(),
         stats: {
@@ -78,10 +148,20 @@ router.get('/admins', protectAdmin, superAdminOnly, async (req, res) => {
   }
 });
 
-// Create new admin (Super Admin only)
-router.post('/admins', protectAdmin, superAdminOnly, async (req, res) => {
+// Create new subordinate (ADMIN creates BROKER, BROKER creates SUB_BROKER, etc.)
+router.post('/admins', protectAdmin, async (req, res) => {
   try {
-    const { username, name, email, phone, password, pin, charges } = req.body;
+    const { username, name, email, phone, password, pin, charges, role: requestedRole } = req.body;
+    
+    // Determine the role to create
+    const allowedChildRoles = getAllowedChildRoles(req.admin.role);
+    let roleToCreate = requestedRole || allowedChildRoles[0];
+    
+    if (!roleToCreate || !allowedChildRoles.includes(roleToCreate)) {
+      return res.status(403).json({ 
+        message: `You can only create: ${allowedChildRoles.join(', ') || 'No subordinates allowed'}` 
+      });
+    }
     
     if (!pin) {
       return res.status(400).json({ message: 'PIN is required' });
@@ -95,11 +175,14 @@ router.post('/admins', protectAdmin, superAdminOnly, async (req, res) => {
     // Check if admin exists
     const exists = await Admin.findOne({ $or: [{ email }, { username }] });
     if (exists) {
-      return res.status(400).json({ message: 'Admin with this email or username already exists' });
+      return res.status(400).json({ message: 'User with this email or username already exists' });
     }
     
+    // Build hierarchy path
+    const hierarchyPath = [...(req.admin.hierarchyPath || []), req.admin._id];
+    
     const admin = await Admin.create({
-      role: 'ADMIN',
+      role: roleToCreate,
       username,
       name,
       email,
@@ -107,7 +190,10 @@ router.post('/admins', protectAdmin, superAdminOnly, async (req, res) => {
       password,
       pin: normalizedPin,
       charges: charges || {},
-      createdBy: req.admin._id
+      createdBy: req.admin._id,
+      parentId: req.admin._id,
+      hierarchyPath,
+      hierarchyLevel: HIERARCHY_LEVELS[roleToCreate]
     });
     
     res.status(201).json({
@@ -119,7 +205,9 @@ router.post('/admins', protectAdmin, superAdminOnly, async (req, res) => {
       role: admin.role,
       status: admin.status,
       charges: admin.charges,
-      wallet: admin.wallet
+      wallet: admin.wallet,
+      parentId: admin.parentId,
+      hierarchyLevel: admin.hierarchyLevel
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -470,32 +558,70 @@ router.post('/admins/:id/deduct-funds', protectAdmin, superAdminOnly, async (req
   }
 });
 
-// Get dashboard stats (Super Admin)
-router.get('/dashboard-stats', protectAdmin, superAdminOnly, async (req, res) => {
+// Get dashboard stats - works for all roles based on hierarchy
+router.get('/dashboard-stats', protectAdmin, async (req, res) => {
   try {
-    const totalAdmins = await Admin.countDocuments({ role: 'ADMIN' });
-    const activeAdmins = await Admin.countDocuments({ role: 'ADMIN', status: 'ACTIVE' });
-    const totalUsers = await User.countDocuments();
-    const activeUsers = await User.countDocuments({ isActive: true });
+    let adminQuery = {};
+    let userQuery = {};
     
-    // Aggregate admin wallet balances
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin sees all
+      adminQuery = { role: { $ne: 'SUPER_ADMIN' } };
+      userQuery = {};
+    } else {
+      // Other roles see only their descendants
+      adminQuery = { hierarchyPath: req.admin._id };
+      userQuery = { hierarchyPath: req.admin._id };
+    }
+    
+    // Count by role
+    const totalAdmins = await Admin.countDocuments({ ...adminQuery, role: 'ADMIN' });
+    const activeAdmins = await Admin.countDocuments({ ...adminQuery, role: 'ADMIN', status: 'ACTIVE' });
+    const totalBrokers = await Admin.countDocuments({ ...adminQuery, role: 'BROKER' });
+    const activeBrokers = await Admin.countDocuments({ ...adminQuery, role: 'BROKER', status: 'ACTIVE' });
+    const totalSubBrokers = await Admin.countDocuments({ ...adminQuery, role: 'SUB_BROKER' });
+    const activeSubBrokers = await Admin.countDocuments({ ...adminQuery, role: 'SUB_BROKER', status: 'ACTIVE' });
+    
+    // User counts
+    const totalUsers = await User.countDocuments(userQuery);
+    const activeUsers = await User.countDocuments({ ...userQuery, isActive: true });
+    
+    // Direct users (users created directly by this admin)
+    const directUsers = req.admin.role !== 'SUPER_ADMIN' 
+      ? await User.countDocuments({ admin: req.admin._id })
+      : totalUsers;
+    
+    // Aggregate wallet balances
     const adminWallets = await Admin.aggregate([
-      { $match: { role: 'ADMIN' } },
+      { $match: { ...adminQuery, role: { $in: ['ADMIN', 'BROKER', 'SUB_BROKER'] } } },
       { $group: { _id: null, totalBalance: { $sum: '$wallet.balance' } } }
     ]);
     
-    // Aggregate user wallet balances
     const userWallets = await User.aggregate([
+      { $match: userQuery },
       { $group: { _id: null, totalBalance: { $sum: '$wallet.cashBalance' } } }
     ]);
     
     res.json({
+      // Admins
       totalAdmins,
       activeAdmins,
+      // Brokers
+      totalBrokers,
+      activeBrokers,
+      // Sub Brokers
+      totalSubBrokers,
+      activeSubBrokers,
+      // Users
       totalUsers,
       activeUsers,
+      directUsers,
+      // Balances
       totalAdminBalance: adminWallets[0]?.totalBalance || 0,
-      totalUserBalance: userWallets[0]?.totalBalance || 0
+      totalUserBalance: userWallets[0]?.totalBalance || 0,
+      // Current admin info
+      myRole: req.admin.role,
+      myBalance: req.admin.wallet?.balance || 0
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -539,15 +665,10 @@ router.get('/users', protectAdmin, async (req, res) => {
   }
 });
 
-// Create user (Admin creates user with their adminCode)
+// Create user (All roles can create users under them)
 router.post('/users', protectAdmin, async (req, res) => {
   try {
     const { username, email, password, fullName, phone } = req.body;
-    
-    // Only ADMIN role can create users (not SUPER_ADMIN directly)
-    if (req.admin.role === 'SUPER_ADMIN') {
-      return res.status(400).json({ message: 'Super Admin cannot create users directly. Create an Admin first.' });
-    }
     
     // Check if user exists
     const exists = await User.findOne({ $or: [{ email }, { username }] });
@@ -555,14 +676,20 @@ router.post('/users', protectAdmin, async (req, res) => {
       return res.status(400).json({ message: 'User with this email or username already exists' });
     }
     
+    // Build hierarchy path for the user (includes all ancestors + creator)
+    const userHierarchyPath = [...(req.admin.hierarchyPath || []), req.admin._id];
+    
     const user = await User.create({
       adminCode: req.admin.adminCode,
       admin: req.admin._id,
+      creatorRole: req.admin.role,
+      hierarchyPath: userHierarchyPath,
       username,
       email,
       password,
       fullName,
-      phone
+      phone,
+      createdBy: req.admin._id
     });
     
     // Update admin stats
@@ -577,7 +704,8 @@ router.post('/users', protectAdmin, async (req, res) => {
       username: user.username,
       email: user.email,
       fullName: user.fullName,
-      wallet: user.wallet
+      wallet: user.wallet,
+      creatorRole: user.creatorRole
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -627,14 +755,45 @@ router.put('/users/:id/settings', protectAdmin, async (req, res) => {
     
     if (!user) return res.status(404).json({ message: 'User not found' });
     
-    const { segmentPermissions, scriptSettings } = req.body;
+    const { segmentPermissions, scriptSettings, mergeScriptSettings } = req.body;
     
     const updateFields = {};
     if (segmentPermissions) {
       updateFields.segmentPermissions = segmentPermissions;
     }
     if (scriptSettings) {
-      updateFields.scriptSettings = scriptSettings;
+      // If mergeScriptSettings is true, merge with existing instead of replacing
+      if (mergeScriptSettings) {
+        // Get existing script settings as plain object
+        const existingSettings = user.scriptSettings instanceof Map 
+          ? Object.fromEntries(user.scriptSettings) 
+          : (user.scriptSettings || {});
+        
+        // Deep merge each script's settings
+        const mergedSettings = { ...existingSettings };
+        for (const [symbol, newSettings] of Object.entries(scriptSettings)) {
+          if (mergedSettings[symbol]) {
+            // Merge with existing script settings
+            mergedSettings[symbol] = {
+              ...mergedSettings[symbol],
+              ...newSettings,
+              // Deep merge nested objects
+              lotSettings: { ...mergedSettings[symbol]?.lotSettings, ...newSettings?.lotSettings },
+              quantitySettings: { ...mergedSettings[symbol]?.quantitySettings, ...newSettings?.quantitySettings },
+              fixedMargin: { ...mergedSettings[symbol]?.fixedMargin, ...newSettings?.fixedMargin },
+              brokerage: { ...mergedSettings[symbol]?.brokerage, ...newSettings?.brokerage },
+              block: { ...mergedSettings[symbol]?.block, ...newSettings?.block },
+              spread: newSettings?.spread !== undefined ? newSettings.spread : mergedSettings[symbol]?.spread
+            };
+          } else {
+            // New script, add as-is
+            mergedSettings[symbol] = newSettings;
+          }
+        }
+        updateFields.scriptSettings = mergedSettings;
+      } else {
+        updateFields.scriptSettings = scriptSettings;
+      }
     }
     
     // Use updateOne to avoid segmentPermissions validation error
@@ -642,6 +801,46 @@ router.put('/users/:id/settings', protectAdmin, async (req, res) => {
     
     const updatedUser = await User.findById(user._id).select('-password');
     res.json({ message: 'User settings updated successfully', user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update single script setting for a user (merge only that script)
+router.put('/users/:id/script-settings/:symbol', protectAdmin, async (req, res) => {
+  try {
+    const query = applyAdminFilter(req, { _id: req.params.id });
+    const user = await User.findOne(query);
+    
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const symbol = req.params.symbol;
+    const scriptSetting = req.body;
+    
+    // Get existing script settings as plain object
+    const existingSettings = user.scriptSettings instanceof Map 
+      ? Object.fromEntries(user.scriptSettings) 
+      : (user.scriptSettings || {});
+    
+    // Merge with existing settings for this symbol
+    const existingScriptSetting = existingSettings[symbol] || {};
+    const mergedScriptSetting = {
+      ...existingScriptSetting,
+      ...scriptSetting,
+      // Deep merge nested objects only if they exist in new settings
+      ...(scriptSetting.lotSettings && { lotSettings: { ...existingScriptSetting?.lotSettings, ...scriptSetting.lotSettings } }),
+      ...(scriptSetting.quantitySettings && { quantitySettings: { ...existingScriptSetting?.quantitySettings, ...scriptSetting.quantitySettings } }),
+      ...(scriptSetting.fixedMargin && { fixedMargin: { ...existingScriptSetting?.fixedMargin, ...scriptSetting.fixedMargin } }),
+      ...(scriptSetting.brokerage && { brokerage: { ...existingScriptSetting?.brokerage, ...scriptSetting.brokerage } }),
+      ...(scriptSetting.block && { block: { ...existingScriptSetting?.block, ...scriptSetting.block } })
+    };
+    
+    existingSettings[symbol] = mergedScriptSetting;
+    
+    await User.updateOne({ _id: user._id }, { $set: { scriptSettings: existingSettings } });
+    
+    const updatedUser = await User.findById(user._id).select('-password');
+    res.json({ message: `Script settings for ${symbol} updated successfully`, user: updatedUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1700,6 +1899,135 @@ router.put('/admins/:id/charges', protectAdmin, superAdminOnly, async (req, res)
   }
 });
 
+// Update admin role (Super Admin only)
+router.put('/admins/:id/role', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const { role } = req.body;
+    
+    // Validate role
+    const validRoles = ['ADMIN', 'BROKER', 'SUB_BROKER'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Invalid role. Must be ADMIN, BROKER, or SUB_BROKER' });
+    }
+    
+    const admin = await Admin.findById(req.params.id);
+    if (!admin) return res.status(404).json({ message: 'Admin not found' });
+    if (admin.role === 'SUPER_ADMIN') return res.status(403).json({ message: 'Cannot modify Super Admin role' });
+    
+    const oldRole = admin.role;
+    admin.role = role;
+    
+    // Update hierarchy level based on role
+    const hierarchyLevels = { 'ADMIN': 1, 'BROKER': 2, 'SUB_BROKER': 3 };
+    admin.hierarchyLevel = hierarchyLevels[role];
+    
+    await admin.save();
+    
+    res.json({ 
+      message: `Role changed from ${oldRole} to ${role}`, 
+      admin: {
+        _id: admin._id,
+        username: admin.username,
+        name: admin.name,
+        role: admin.role,
+        hierarchyLevel: admin.hierarchyLevel
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== ADMIN TO ADMIN FUND TRANSFER ====================
+
+// Transfer funds to another admin
+router.post('/admin-transfer', protectAdmin, async (req, res) => {
+  try {
+    const { targetAdminId, amount, remarks } = req.body;
+    
+    if (!targetAdminId || !amount || amount <= 0) {
+      return res.status(400).json({ message: 'Target admin and valid amount required' });
+    }
+    
+    // Cannot transfer to self
+    if (targetAdminId === req.admin._id.toString()) {
+      return res.status(400).json({ message: 'Cannot transfer to yourself' });
+    }
+    
+    // Check sender has sufficient balance
+    if (req.admin.wallet.balance < amount) {
+      return res.status(400).json({ message: 'Insufficient wallet balance' });
+    }
+    
+    // Find target admin
+    const targetAdmin = await Admin.findById(targetAdminId);
+    if (!targetAdmin) {
+      return res.status(404).json({ message: 'Target admin not found' });
+    }
+    
+    // Deduct from sender
+    req.admin.wallet.balance -= amount;
+    await req.admin.save();
+    
+    // Add to receiver
+    targetAdmin.wallet.balance += amount;
+    await targetAdmin.save();
+    
+    // Create ledger entries for both
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: req.admin._id,
+      ownerCode: req.admin.adminCode,
+      type: 'DEBIT',
+      reason: 'ADMIN_TRANSFER',
+      amount: amount,
+      balanceAfter: req.admin.wallet.balance,
+      description: `Transferred to ${targetAdmin.role} - ${targetAdmin.name || targetAdmin.username}${remarks ? ': ' + remarks : ''}`,
+      performedBy: req.admin._id
+    });
+    
+    await WalletLedger.create({
+      ownerType: 'ADMIN',
+      ownerId: targetAdmin._id,
+      ownerCode: targetAdmin.adminCode,
+      type: 'CREDIT',
+      reason: 'ADMIN_TRANSFER',
+      amount: amount,
+      balanceAfter: targetAdmin.wallet.balance,
+      description: `Received from ${req.admin.role} - ${req.admin.name || req.admin.username}${remarks ? ': ' + remarks : ''}`,
+      performedBy: req.admin._id
+    });
+    
+    res.json({
+      message: `Successfully transferred ₹${amount} to ${targetAdmin.name || targetAdmin.username}`,
+      senderBalance: req.admin.wallet.balance,
+      transfer: {
+        from: req.admin.name || req.admin.username,
+        to: targetAdmin.name || targetAdmin.username,
+        amount,
+        remarks
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get list of admins for transfer (only ADMIN role, excludes self)
+router.get('/transfer-targets', protectAdmin, async (req, res) => {
+  try {
+    const admins = await Admin.find({
+      _id: { $ne: req.admin._id },
+      role: 'ADMIN',
+      status: 'ACTIVE'
+    }).select('_id name username adminCode role wallet.balance');
+    
+    res.json(admins);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==================== ADMIN FUND REQUEST SYSTEM ====================
 
 // Admin creates fund request to Super Admin
@@ -1711,19 +2039,41 @@ router.post('/fund-request', protectAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Invalid amount' });
     }
     
-    // Only ADMIN role can request funds
-    if (req.admin.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Only admins can request funds' });
+    // SUPER_ADMIN cannot request funds (they are the top)
+    if (req.admin.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Super Admin cannot request funds' });
+    }
+    
+    // Find the parent admin to request funds from
+    let targetAdmin = null;
+    if (req.admin.parentId) {
+      targetAdmin = await Admin.findById(req.admin.parentId);
+    }
+    
+    // If no parent found, request goes to Super Admin
+    if (!targetAdmin) {
+      targetAdmin = await Admin.findOne({ role: 'SUPER_ADMIN' });
+    }
+    
+    if (!targetAdmin) {
+      return res.status(400).json({ message: 'No parent admin found to request funds from' });
     }
     
     const fundRequest = await AdminFundRequest.create({
       admin: req.admin._id,
       adminCode: req.admin.adminCode,
+      requestorRole: req.admin.role,
+      targetAdmin: targetAdmin._id,
+      targetAdminCode: targetAdmin.adminCode,
+      targetRole: targetAdmin.role,
       amount,
       reason: reason || ''
     });
     
-    res.status(201).json({ message: 'Fund request submitted', fundRequest });
+    res.status(201).json({ 
+      message: `Fund request submitted to ${targetAdmin.role === 'SUPER_ADMIN' ? 'Super Admin' : targetAdmin.name || targetAdmin.username}`, 
+      fundRequest 
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1741,14 +2091,28 @@ router.get('/my-fund-requests', protectAdmin, async (req, res) => {
   }
 });
 
-// Super Admin gets all pending fund requests
-router.get('/admin-fund-requests', protectAdmin, superAdminOnly, async (req, res) => {
+// Get fund requests targeted to the current admin (hierarchical)
+// Super Admin sees all, Admin sees Broker/SubBroker requests, Broker sees SubBroker requests
+router.get('/admin-fund-requests', protectAdmin, async (req, res) => {
   try {
     const { status } = req.query;
-    const query = status ? { status } : {};
+    let query = {};
+    
+    if (req.admin.role === 'SUPER_ADMIN') {
+      // Super Admin sees all requests
+      query = status ? { status } : {};
+    } else if (req.admin.role === 'SUB_BROKER') {
+      // Sub Broker cannot approve any fund requests
+      return res.json([]);
+    } else {
+      // Admin and Broker see requests targeted to them
+      query = { targetAdmin: req.admin._id };
+      if (status) query.status = status;
+    }
     
     const requests = await AdminFundRequest.find(query)
-      .populate('admin', 'name username email adminCode wallet')
+      .populate('admin', 'name username email adminCode wallet role')
+      .populate('targetAdmin', 'name username adminCode role')
       .sort({ createdAt: -1 });
     res.json(requests);
   } catch (error) {
@@ -1756,13 +2120,19 @@ router.get('/admin-fund-requests', protectAdmin, superAdminOnly, async (req, res
   }
 });
 
-// Super Admin approves/rejects fund request
-router.put('/admin-fund-requests/:id', protectAdmin, superAdminOnly, async (req, res) => {
+// Approve/Reject fund request (hierarchical - each level approves from their own wallet)
+// Super Admin can approve all, Admin approves Broker/SubBroker, Broker approves SubBroker
+router.put('/admin-fund-requests/:id', protectAdmin, async (req, res) => {
   try {
     const { status, remarks } = req.body;
     
     if (!['APPROVED', 'REJECTED'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
+    }
+    
+    // Sub Broker cannot approve any fund requests
+    if (req.admin.role === 'SUB_BROKER') {
+      return res.status(403).json({ message: 'Sub Broker cannot approve fund requests' });
     }
     
     const fundRequest = await AdminFundRequest.findById(req.params.id);
@@ -1771,32 +2141,69 @@ router.put('/admin-fund-requests/:id', protectAdmin, superAdminOnly, async (req,
       return res.status(400).json({ message: 'Request already processed' });
     }
     
+    // Check if the current admin can approve this request
+    // Super Admin can approve all, others can only approve requests targeted to them
+    if (req.admin.role !== 'SUPER_ADMIN' && fundRequest.targetAdmin.toString() !== req.admin._id.toString()) {
+      return res.status(403).json({ message: 'You can only approve requests directed to you' });
+    }
+    
+    // For approval, check if approver has sufficient balance (except Super Admin)
+    if (status === 'APPROVED' && req.admin.role !== 'SUPER_ADMIN') {
+      if (req.admin.wallet.balance < fundRequest.amount) {
+        return res.status(400).json({ 
+          message: `Insufficient balance. You have ₹${req.admin.wallet.balance.toLocaleString()}, but request is for ₹${fundRequest.amount.toLocaleString()}` 
+        });
+      }
+    }
+    
     fundRequest.status = status;
     fundRequest.processedBy = req.admin._id;
     fundRequest.processedAt = new Date();
     fundRequest.adminRemarks = remarks || '';
     await fundRequest.save();
     
-    // If approved, add funds to admin wallet
+    // If approved, transfer funds
     if (status === 'APPROVED') {
-      const admin = await Admin.findById(fundRequest.admin);
-      if (admin) {
-        admin.wallet.balance += fundRequest.amount;
-        admin.wallet.totalDeposited += fundRequest.amount;
-        await admin.save();
+      const requestor = await Admin.findById(fundRequest.admin);
+      
+      if (requestor) {
+        // Add funds to requestor's wallet
+        requestor.wallet.balance += fundRequest.amount;
+        requestor.wallet.totalDeposited += fundRequest.amount;
+        await requestor.save();
         
-        // Create ledger entry
+        // Create credit ledger entry for requestor
         await WalletLedger.create({
           ownerType: 'ADMIN',
-          ownerId: admin._id,
-          adminCode: admin.adminCode,
+          ownerId: requestor._id,
+          adminCode: requestor.adminCode,
           type: 'CREDIT',
           reason: 'ADMIN_DEPOSIT',
           amount: fundRequest.amount,
-          balanceAfter: admin.wallet.balance,
-          description: `Fund request ${fundRequest.requestId} approved`,
+          balanceAfter: requestor.wallet.balance,
+          description: `Fund request ${fundRequest.requestId} approved by ${req.admin.role === 'SUPER_ADMIN' ? 'Super Admin' : req.admin.name || req.admin.username}`,
           performedBy: req.admin._id
         });
+        
+        // Deduct from approver's wallet (except Super Admin who has unlimited funds)
+        if (req.admin.role !== 'SUPER_ADMIN') {
+          req.admin.wallet.balance -= fundRequest.amount;
+          req.admin.wallet.totalWithdrawn = (req.admin.wallet.totalWithdrawn || 0) + fundRequest.amount;
+          await req.admin.save();
+          
+          // Create debit ledger entry for approver
+          await WalletLedger.create({
+            ownerType: 'ADMIN',
+            ownerId: req.admin._id,
+            adminCode: req.admin.adminCode,
+            type: 'DEBIT',
+            reason: 'ADMIN_TRANSFER',
+            amount: fundRequest.amount,
+            balanceAfter: req.admin.wallet.balance,
+            description: `Transferred to ${requestor.role} - ${requestor.name || requestor.username} (${fundRequest.requestId})`,
+            performedBy: req.admin._id
+          });
+        }
       }
     }
     
