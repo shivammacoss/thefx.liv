@@ -68,6 +68,13 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('admin', JSON.stringify(updatedAdmin));
   };
 
+  // Function to update user data (e.g., after profile updates)
+  const updateUser = (updates) => {
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+  };
+
   const value = {
     user,
     admin,
@@ -79,7 +86,8 @@ export const AuthProvider = ({ children }) => {
     setupAdmin,
     logoutUser,
     logoutAdmin,
-    updateAdmin
+    updateAdmin,
+    updateUser
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

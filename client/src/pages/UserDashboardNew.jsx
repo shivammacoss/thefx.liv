@@ -793,7 +793,92 @@ const IBDashboard = () => (
 
 // Profile Component
 const UserProfile = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  // Edit profile form
+  const [editForm, setEditForm] = useState({
+    fullName: user?.fullName || '',
+    phone: user?.phone || ''
+  });
+  
+  // Password change form
+  const [passwordForm, setPasswordForm] = useState({
+    oldPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+
+  const handleEditProfile = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      const { data } = await axios.put('/api/user/profile', editForm, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      
+      // Update local user context
+      if (updateUser) {
+        updateUser({ ...user, fullName: data.user.fullName, phone: data.user.phone });
+      }
+      
+      setSuccess('Profile updated successfully');
+      setTimeout(() => {
+        setShowEditModal(false);
+        setSuccess('');
+      }, 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError('New passwords do not match');
+      setLoading(false);
+      return;
+    }
+    
+    if (passwordForm.newPassword.length < 6) {
+      setError('Password must be at least 6 characters');
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      await axios.post('/api/user/change-password', {
+        oldPassword: passwordForm.oldPassword,
+        newPassword: passwordForm.newPassword
+      }, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      
+      setSuccess('Password changed successfully');
+      setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setSuccess('');
+      }, 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to change password');
+    } finally {
+      setLoading(false);
+    }
+  };
   
   return (
     <div className="p-4 md:p-6 overflow-y-auto h-full">
@@ -832,10 +917,170 @@ const UserProfile = () => {
           </div>
         </div>
 
-        <button className="w-full bg-dark-700 hover:bg-dark-600 py-3 rounded-lg transition">
-          Edit Profile
-        </button>
+        <div className="space-y-3">
+          <button 
+            onClick={() => {
+              setEditForm({ fullName: user?.fullName || '', phone: user?.phone || '' });
+              setError('');
+              setSuccess('');
+              setShowEditModal(true);
+            }}
+            className="w-full bg-dark-700 hover:bg-dark-600 py-3 rounded-lg transition"
+          >
+            Edit Profile
+          </button>
+          <button 
+            onClick={() => {
+              setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+              setError('');
+              setSuccess('');
+              setShowPasswordModal(true);
+            }}
+            className="w-full bg-dark-700 hover:bg-dark-600 py-3 rounded-lg transition"
+          >
+            Change Password
+          </button>
+        </div>
       </div>
+
+      {/* Edit Profile Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Edit Profile</h3>
+              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            {error && (
+              <div className="bg-red-500/20 text-red-400 p-3 rounded-lg mb-4 text-sm">
+                {error}
+              </div>
+            )}
+            {success && (
+              <div className="bg-green-500/20 text-green-400 p-3 rounded-lg mb-4 text-sm">
+                {success}
+              </div>
+            )}
+
+            <form onSubmit={handleEditProfile} className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={editForm.fullName}
+                  onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                  placeholder="Enter your full name"
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Phone Number</label>
+                <input
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                  placeholder="Enter your phone number"
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={user?.email || ''}
+                  disabled
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-gray-500 cursor-not-allowed"
+                />
+                <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 py-3 rounded-lg font-medium transition"
+              >
+                {loading ? 'Saving...' : 'Save Changes'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Change Password</h3>
+              <button onClick={() => setShowPasswordModal(false)} className="text-gray-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            {error && (
+              <div className="bg-red-500/20 text-red-400 p-3 rounded-lg mb-4 text-sm">
+                {error}
+              </div>
+            )}
+            {success && (
+              <div className="bg-green-500/20 text-green-400 p-3 rounded-lg mb-4 text-sm">
+                {success}
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Current Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.oldPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })}
+                  placeholder="Enter current password"
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">New Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  placeholder="Enter new password"
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Confirm New Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  placeholder="Confirm new password"
+                  className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 py-3 rounded-lg font-medium transition"
+              >
+                {loading ? 'Changing...' : 'Change Password'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

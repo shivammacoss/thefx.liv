@@ -378,6 +378,41 @@ router.get('/settings', protectUser, async (req, res) => {
   }
 });
 
+// Update profile
+router.put('/profile', protectUser, async (req, res) => {
+  try {
+    const { fullName, phone } = req.body;
+    
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Update allowed fields
+    if (fullName) user.fullName = fullName;
+    if (phone) user.phone = phone;
+    
+    await user.save();
+    
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        _id: user._id,
+        userId: user.userId,
+        username: user.username,
+        email: user.email,
+        fullName: user.fullName,
+        phone: user.phone,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Change password
 router.post('/change-password', protectUser, async (req, res) => {
   try {
@@ -398,7 +433,7 @@ router.post('/change-password', protectUser, async (req, res) => {
     }
     
     // Check if old password matches
-    const isMatch = await user.matchPassword(oldPassword);
+    const isMatch = await user.comparePassword(oldPassword);
     if (!isMatch) {
       return res.status(400).json({ message: 'Current password is incorrect' });
     }
