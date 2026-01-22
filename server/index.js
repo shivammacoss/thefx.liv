@@ -33,7 +33,12 @@ const httpServer = createServer(app);
 // Initialize Socket.IO with production CORS
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? ['https://thefx.live', 'https://www.thefx.live']
-  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  : [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
 
 const io = new Server(httpServer, {
   cors: {

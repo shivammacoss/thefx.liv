@@ -1,3 +1,5 @@
 server/.zerodha-session.json
 .zerodha-session.json
 .env
+client/.env
+server/.env

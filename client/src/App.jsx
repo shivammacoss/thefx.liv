@@ -3,6 +3,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
+import SuperAdminLogin from './pages/SuperAdminLogin';
+import BrokerLogin from './pages/BrokerLogin';
+import SubBrokerLogin from './pages/SubBrokerLogin';
 import UserLogin from './pages/UserLogin';
 import UserDashboardNew from './pages/UserDashboardNew';
 import UserDashboard from './pages/UserDashboard';
@@ -40,6 +43,16 @@ const ProtectedAdminRoute = ({ children }) => {
   return admin ? children : <Navigate to="/admin/login" />;
 };
 
+const ProtectedRoleRoute = ({ children, allowedRoles, loginPath }) => {
+  const { admin, loading } = useAuth();
+  if (loading) return <div className="flex items-center justify-center h-screen bg-dark-900">Loading...</div>;
+
+  if (!admin) return <Navigate to={loginPath} />;
+  if (admin.role === 'SUPER_ADMIN') return children;
+
+  return allowedRoles.includes(admin.role) ? children : <Navigate to={loginPath} />;
+};
+
 const ProtectedUserRoute = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen bg-dark-900">Loading...</div>;
@@ -54,11 +67,30 @@ function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<UserLogin />} />
-            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/superadmin/login" element={<SuperAdminLogin />} />
+            <Route path="/admin/login" element={<AdminLogin expectedRole="ADMIN" basePath="/admin" panelLabel="Admin" />} />
+            <Route path="/broker/login" element={<BrokerLogin />} />
+            <Route path="/subbroker/login" element={<SubBrokerLogin />} />
+
+            <Route path="/superadmin/*" element={
+              <ProtectedRoleRoute allowedRoles={['SUPER_ADMIN']} loginPath="/superadmin/login">
+                <AdminDashboard basePath="/superadmin" />
+              </ProtectedRoleRoute>
+            } />
             <Route path="/admin/*" element={
-              <ProtectedAdminRoute>
-                <AdminDashboard />
-              </ProtectedAdminRoute>
+              <ProtectedRoleRoute allowedRoles={['ADMIN']} loginPath="/admin/login">
+                <AdminDashboard basePath="/admin" />
+              </ProtectedRoleRoute>
+            } />
+            <Route path="/broker/*" element={
+              <ProtectedRoleRoute allowedRoles={['BROKER']} loginPath="/broker/login">
+                <AdminDashboard basePath="/broker" />
+              </ProtectedRoleRoute>
+            } />
+            <Route path="/subbroker/*" element={
+              <ProtectedRoleRoute allowedRoles={['SUB_BROKER']} loginPath="/subbroker/login">
+                <AdminDashboard basePath="/subbroker" />
+              </ProtectedRoleRoute>
             } />
             {/* Trader Room - Separate page without sidebar */}
             <Route path="/user/trader-room" element={

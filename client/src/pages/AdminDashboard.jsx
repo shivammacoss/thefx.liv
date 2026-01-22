@@ -102,7 +102,7 @@ const usePagination = (data, itemsPerPage = 20, searchTerm = '', searchFields = 
   };
 };
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ basePath = '/admin' }) => {
   const { admin, logoutAdmin, updateAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -170,7 +170,12 @@ const AdminDashboard = () => {
 
   const handleLogout = () => {
     logoutAdmin();
-    navigate('/admin/login');
+    navigate(`${basePath}/login`);
+  };
+
+  const base = (path) => {
+    if (!path) return basePath;
+    return `${basePath}${path.startsWith('/') ? path : `/${path}`}`;
   };
 
   // Navigation items based on role
@@ -180,72 +185,72 @@ const AdminDashboard = () => {
   // SUB_BROKER: Can only create Users - sees only users
   const getNavItems = () => {
     const baseItems = [
-      { path: '/admin/dashboard', icon: BarChart3, label: 'Dashboard' },
+      { path: base('/dashboard'), icon: BarChart3, label: 'Dashboard' },
     ];
     
     if (isSuperAdmin) {
       return [
         ...baseItems,
-        { path: '/admin/admins', icon: Shield, label: 'Hierarchy Management' },
-        { path: '/admin/all-users', icon: Users, label: 'All Users' },
-        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-        { path: '/admin/all-trades', icon: FileText, label: 'All Position' },
-        { path: '/admin/all-fund-requests', icon: CreditCard, label: 'All Fund Requests' },
-        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-        { path: '/admin/instruments', icon: Settings, label: 'Instruments' },
-        { path: '/admin/admin-fund-requests', icon: Wallet, label: 'Admin Fund Requests' },
-        { path: '/admin/market-control', icon: TrendingUp, label: 'Market Control' },
-        { path: '/admin/bank-management', icon: Building2, label: 'Bank Settings' },
-        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+        { path: base('/admins'), icon: Shield, label: 'Hierarchy Management' },
+        { path: base('/all-users'), icon: Users, label: 'All Users' },
+        { path: base('/trading'), icon: TrendingUp, label: 'Market Watch' },
+        { path: base('/all-trades'), icon: FileText, label: 'All Position' },
+        { path: base('/all-fund-requests'), icon: CreditCard, label: 'All Fund Requests' },
+        { path: base('/create-user'), icon: UserPlus, label: 'Create User' },
+        { path: base('/instruments'), icon: Settings, label: 'Instruments' },
+        { path: base('/admin-fund-requests'), icon: Wallet, label: 'Admin Fund Requests' },
+        { path: base('/market-control'), icon: TrendingUp, label: 'Market Control' },
+        { path: base('/bank-management'), icon: Building2, label: 'Bank Settings' },
+        { path: base('/profile'), icon: Settings, label: 'Profile' },
       ];
     }
     
     if (isAdmin) {
       return [
         ...baseItems,
-        { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
-        { path: '/admin/admins', icon: Shield, label: 'Broker/SubBroker' },
-        { path: '/admin/subordinate-fund-requests', icon: CreditCard, label: 'Subordinate Requests' },
-        { path: '/admin/users', icon: Users, label: 'User Management' },
-        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-        { path: '/admin/trades', icon: FileText, label: 'Position' },
-        { path: '/admin/fund-requests', icon: CreditCard, label: 'User Fund Requests' },
-        { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
-        { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
-        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+        { path: base('/wallet'), icon: Wallet, label: 'My Wallet' },
+        { path: base('/admins'), icon: Shield, label: 'Broker/SubBroker' },
+        { path: base('/subordinate-fund-requests'), icon: CreditCard, label: 'Subordinate Requests' },
+        { path: base('/users'), icon: Users, label: 'User Management' },
+        { path: base('/create-user'), icon: UserPlus, label: 'Create User' },
+        { path: base('/trading'), icon: TrendingUp, label: 'Market Watch' },
+        { path: base('/trades'), icon: FileText, label: 'Position' },
+        { path: base('/fund-requests'), icon: CreditCard, label: 'User Fund Requests' },
+        { path: base('/bank-accounts'), icon: Building2, label: 'Bank Accounts' },
+        { path: base('/ledger'), icon: FileText, label: 'Transactions' },
+        { path: base('/profile'), icon: Settings, label: 'Profile' },
       ];
     }
     
     if (isBroker) {
       return [
         ...baseItems,
-        { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
-        { path: '/admin/admins', icon: Shield, label: 'Sub Brokers' },
-        { path: '/admin/subordinate-fund-requests', icon: CreditCard, label: 'SubBroker Requests' },
-        { path: '/admin/users', icon: Users, label: 'User Management' },
-        { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-        { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-        { path: '/admin/trades', icon: FileText, label: 'Position' },
-        { path: '/admin/fund-requests', icon: CreditCard, label: 'User Fund Requests' },
-        { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
-        { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
-        { path: '/admin/profile', icon: Settings, label: 'Profile' },
+        { path: base('/wallet'), icon: Wallet, label: 'My Wallet' },
+        { path: base('/admins'), icon: Shield, label: 'Sub Brokers' },
+        { path: base('/subordinate-fund-requests'), icon: CreditCard, label: 'SubBroker Requests' },
+        { path: base('/users'), icon: Users, label: 'User Management' },
+        { path: base('/create-user'), icon: UserPlus, label: 'Create User' },
+        { path: base('/trading'), icon: TrendingUp, label: 'Market Watch' },
+        { path: base('/trades'), icon: FileText, label: 'Position' },
+        { path: base('/fund-requests'), icon: CreditCard, label: 'User Fund Requests' },
+        { path: base('/bank-accounts'), icon: Building2, label: 'Bank Accounts' },
+        { path: base('/ledger'), icon: FileText, label: 'Transactions' },
+        { path: base('/profile'), icon: Settings, label: 'Profile' },
       ];
     }
     
     // SUB_BROKER - only users, no subordinates
     return [
       ...baseItems,
-      { path: '/admin/wallet', icon: Wallet, label: 'My Wallet' },
-      { path: '/admin/users', icon: Users, label: 'User Management' },
-      { path: '/admin/create-user', icon: UserPlus, label: 'Create User' },
-      { path: '/admin/trading', icon: TrendingUp, label: 'Market Watch' },
-      { path: '/admin/trades', icon: FileText, label: 'Position' },
-      { path: '/admin/fund-requests', icon: CreditCard, label: 'Fund Requests' },
-      { path: '/admin/bank-accounts', icon: Building2, label: 'Bank Accounts' },
-      { path: '/admin/ledger', icon: FileText, label: 'Transactions' },
-      { path: '/admin/profile', icon: Settings, label: 'Profile' },
+      { path: base('/wallet'), icon: Wallet, label: 'My Wallet' },
+      { path: base('/users'), icon: Users, label: 'User Management' },
+      { path: base('/create-user'), icon: UserPlus, label: 'Create User' },
+      { path: base('/trading'), icon: TrendingUp, label: 'Market Watch' },
+      { path: base('/trades'), icon: FileText, label: 'Position' },
+      { path: base('/fund-requests'), icon: CreditCard, label: 'Fund Requests' },
+      { path: base('/bank-accounts'), icon: Building2, label: 'Bank Accounts' },
+      { path: base('/ledger'), icon: FileText, label: 'Transactions' },
+      { path: base('/profile'), icon: Settings, label: 'Profile' },
     ];
   };
   
@@ -278,8 +283,8 @@ const AdminDashboard = () => {
               to={item.path}
               onClick={() => setShowMobileMenu(false)}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-2 ${
-                location.pathname === item.path || (item.path !== '/admin/dashboard' && location.pathname.startsWith(item.path))
-                  ? (isSuperAdmin ? 'bg-yellow-600' : 'bg-purple-600') + ' text-white'
+                location.pathname === item.path || (item.path !== base('/dashboard') && location.pathname.startsWith(item.path))
+                  ? getRoleButtonColor() + ' text-white'
                   : 'text-gray-400'
               }`}
             >
@@ -338,8 +343,8 @@ const AdminDashboard = () => {
               key={item.path}
               to={item.path}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg transition ${
-                location.pathname === item.path || (item.path !== '/admin/dashboard' && location.pathname.startsWith(item.path))
-                  ? (isSuperAdmin ? 'bg-yellow-600' : 'bg-purple-600') + ' text-white'
+                location.pathname === item.path || (item.path !== base('/dashboard') && location.pathname.startsWith(item.path))
+                  ? getRoleButtonColor() + ' text-white'
                   : 'text-gray-400 hover:bg-dark-700'
               }`}
             >
@@ -367,7 +372,7 @@ const AdminDashboard = () => {
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
         <Routes>
-          <Route path="dashboard" element={isSuperAdmin ? <SuperAdminDashboard /> : <AdminDashboardHome />} />
+          <Route path="dashboard" element={isSuperAdmin ? <SuperAdminDashboard basePath={basePath} /> : <AdminDashboardHome basePath={basePath} />} />
           {/* Super Admin Only Routes */}
           {isSuperAdmin && <Route path="admins/*" element={<AdminManagement />} />}
           {isSuperAdmin && <Route path="all-users" element={<AllUsersManagement />} />}
@@ -392,7 +397,7 @@ const AdminDashboard = () => {
           {/* Common Routes - Both Super Admin and Admin */}
           <Route path="trading" element={<TradingPanel />} />
           <Route path="profile" element={<ProfileSettings />} />
-          <Route path="*" element={isSuperAdmin ? <SuperAdminDashboard /> : <AdminDashboardHome />} />
+          <Route path="*" element={isSuperAdmin ? <SuperAdminDashboard basePath={basePath} /> : <AdminDashboardHome basePath={basePath} />} />
         </Routes>
       </main>
     </div>
@@ -400,12 +405,17 @@ const AdminDashboard = () => {
 };
 
 // Super Admin Dashboard
-const SuperAdminDashboard = () => {
+const SuperAdminDashboard = ({ basePath = '/admin' }) => {
   const { admin } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [zerodhaStatus, setZerodhaStatus] = useState({ connected: false });
   const [connecting, setConnecting] = useState(false);
+
+  const base = (path) => {
+    if (!path) return basePath;
+    return `${basePath}${path.startsWith('/') ? path : `/${path}`}`;
+  };
 
   useEffect(() => {
     fetchStats();
@@ -516,21 +526,21 @@ const SuperAdminDashboard = () => {
         <div className="bg-dark-800 rounded-lg p-6">
           <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <Link to="/admin/admins" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/admins')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <Shield className="text-yellow-400" size={24} />
               <div>
                 <div className="font-medium">Manage Admins</div>
                 <div className="text-sm text-gray-400">Create, edit, fund admins</div>
               </div>
             </Link>
-            <Link to="/admin/instruments" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/instruments')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <TrendingUp className="text-green-400" size={24} />
               <div>
                 <div className="font-medium">Instruments</div>
                 <div className="text-sm text-gray-400">Manage trading instruments</div>
               </div>
             </Link>
-            <Link to="/admin/market-control" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/market-control')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <BarChart3 className="text-blue-400" size={24} />
               <div>
                 <div className="font-medium">Market Control</div>
@@ -563,11 +573,16 @@ const SuperAdminDashboard = () => {
 };
 
 // Admin Dashboard Home
-const AdminDashboardHome = () => {
+const AdminDashboardHome = ({ basePath = '/admin' }) => {
   const { admin, updateAdmin } = useAuth();
   const [stats, setStats] = useState({ users: 0, pendingRequests: 0 });
   const [loading, setLoading] = useState(true);
   const [walletBalance, setWalletBalance] = useState(admin?.wallet?.balance || 0);
+
+  const base = (path) => {
+    if (!path) return basePath;
+    return `${basePath}${path.startsWith('/') ? path : `/${path}`}`;
+  };
 
   useEffect(() => {
     fetchStats();
@@ -621,28 +636,28 @@ const AdminDashboardHome = () => {
         <div className="bg-dark-800 rounded-lg p-6">
           <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <Link to="/admin/users" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/users')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <Users className="text-purple-400" size={24} />
               <div>
                 <div className="font-medium">Manage Users</div>
                 <div className="text-sm text-gray-400">Create, edit, fund users</div>
               </div>
             </Link>
-            <Link to="/admin/trades" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/trades')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <FileText className="text-green-400" size={24} />
               <div>
                 <div className="font-medium">Trade Management</div>
                 <div className="text-sm text-gray-400">View and manage user trades</div>
               </div>
             </Link>
-            <Link to="/admin/fund-requests" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/fund-requests')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <CreditCard className="text-yellow-400" size={24} />
               <div>
                 <div className="font-medium">Fund Requests</div>
                 <div className="text-sm text-gray-400">{stats.pendingRequests} pending</div>
               </div>
             </Link>
-            <Link to="/admin/bank-accounts" className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
+            <Link to={base('/bank-accounts')} className="flex items-center gap-3 p-3 bg-dark-700 rounded-lg hover:bg-dark-600 transition">
               <Building2 className="text-blue-400" size={24} />
               <div>
                 <div className="font-medium">Bank Accounts</div>

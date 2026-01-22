@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Eye, EyeOff, Users, Settings, BarChart3, Lock } from 'lucide-react';
 
-const AdminLogin = () => {
+const AdminLogin = ({ expectedRole = null, basePath = '/admin', panelLabel = 'Admin' }) => {
   const [isSetup, setIsSetup] = useState(false);
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -19,12 +19,21 @@ const AdminLogin = () => {
 
     try {
       if (isSetup) {
-        await setupAdmin(formData.username, formData.email, formData.password);
+        const created = await setupAdmin(formData.username, formData.email, formData.password);
+        if (expectedRole && created?.role !== expectedRole) {
+          setError('You do not have access to this login panel');
+          throw new Error('unauthorized_role');
+        }
       } else {
-        await loginAdmin(formData.email, formData.password);
+        const loggedIn = await loginAdmin(formData.email, formData.password);
+        if (expectedRole && loggedIn?.role !== expectedRole) {
+          setError('You do not have access to this login panel');
+          throw new Error('unauthorized_role');
+        }
       }
-      navigate('/admin/users');
+      navigate(`${basePath}/dashboard`);
     } catch (err) {
+      if (err?.message === 'unauthorized_role') return;
       setError(err.response?.data?.message || 'Something went wrong');
     } finally {
       setLoading(false);
@@ -45,7 +54,7 @@ const AdminLogin = () => {
               <Shield className="w-12 h-12 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-4">Admin Control Center</h1>
+          <h1 className="text-4xl font-bold text-white mb-4">{panelLabel} Control Center</h1>
           <p className="text-xl text-gray-300 mb-12">Manage your trading platform with ease</p>
           
           <div className="grid grid-cols-2 gap-6 max-w-md">
@@ -81,17 +90,17 @@ const AdminLogin = () => {
               <div className="p-3 bg-purple-600 rounded-xl">
                 <Shield className="w-8 h-8 text-white" />
               </div>
-              <span className="text-2xl font-bold text-white">Admin Panel</span>
+              <span className="text-2xl font-bold text-white">{panelLabel} Panel</span>
             </div>
           </div>
 
           <div className="bg-dark-800/80 backdrop-blur-xl p-8 rounded-2xl border border-purple-500/20 shadow-2xl">
             <div className="text-center mb-6">
               <h2 className="text-2xl font-bold text-white">
-                {isSetup ? 'Create Admin Account' : 'Admin Login'}
+                {isSetup ? `Create ${panelLabel} Account` : `${panelLabel} Login`}
               </h2>
               <p className="text-gray-400 mt-2">
-                {isSetup ? 'Set up your admin credentials' : 'Access the control panel'}
+                {isSetup ? `Set up your ${panelLabel.toLowerCase()} credentials` : 'Access the control panel'}
               </p>
             </div>
 
