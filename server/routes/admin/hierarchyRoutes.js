@@ -10,6 +10,7 @@
  * - PUT  /admins/:id/status - Toggle subordinate status
  * - PUT  /admins/:id/password - Reset subordinate password
  * - PUT  /admins/:id/charges - Update subordinate charges
+ * - DELETE /admins/:id    - Delete subordinate (SUPER_ADMIN only)
  */
 
 import express from 'express';
@@ -19,7 +20,8 @@ import User from '../../models/User.js';
 import { 
   protectAdmin, 
   getAllowedChildRoles,
-  canManageRole 
+  canManageRole,
+  superAdminOnly 
 } from '../../middleware/adminAuth.js';
 
 const router = express.Router();
@@ -316,6 +318,63 @@ router.put('/:id/charges', protectAdmin, async (req, res) => {
     await admin.save();
     
     res.json({ message: 'Charges updated', charges: admin.charges });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ============================================================================
+// DELETE SUBORDINATE (SUPER ADMIN ONLY)
+// ============================================================================
+
+/**
+ * DELETE /admins/:id
+ * Delete an admin/broker/sub-broker account.
+ * Safety:
+ * - SUPER_ADMIN only
+ * - Cannot delete SUPER_ADMIN
+ * - Cannot delete if target has any subordinate admins
+ * - Cannot delete if target has any users
+ */
+router.delete('/:id', protectAdmin, superAdminOnly, async (req, res) => {
+  try {
+    const target = await Admin.findById(req.params.id);
+    if (!target) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    if (target.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Cannot delete Super Admin account' });
+    }
+
+    // Check if target has any subordinate admins in hierarchy
+    const subordinateCount = await Admin.countDocuments({
+      role: { $in: ['ADMIN', 'BROKER', 'SUB_BROKER'] },
+      $or: [
+        { parentId: target._id },
+        { hierarchyPath: target._id }
+      ]
+    });
+    if (subordinateCount > 0) {
+      return res.status(400).json({
+        message: 'Cannot delete: this account has subordinates. Delete/transfer subordinates first.'
+      });
+    }
+
+    // Check if target has users
+    const userCount = await User.countDocuments({ admin: target._id });
+    if (userCount > 0) {
+      return res.status(400).json({
+        message: 'Cannot delete: this account has users. Delete/transfer users first.'
+      });
+    }
+
+    await Admin.deleteOne({ _id: target._id });
+
+    res.json({
+      message: 'Deleted successfully',
+      deletedId: target._id
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -311,23 +311,45 @@ class TradingService {
     
     // Skip lot validation for crypto (uses USD amount, not lots)
     if (!isCryptoTrade) {
+      // Fraction validation:
+      // - fraction ON  => allow steps of 0.1 lots, minimum 0.1
+      // - fraction OFF => integer lots only, minimum 1
+      const fractionEnabled = !!segmentSettings?.fraction;
+      const lotsNumber = Number(lots);
+      if (!Number.isFinite(lotsNumber) || lotsNumber <= 0) {
+        throw new Error('Invalid lots value');
+      }
+      if (!fractionEnabled && !Number.isInteger(lotsNumber)) {
+        throw new Error('Fraction lots are disabled. Please use whole lots (1, 2, 3...)');
+      }
+      if (fractionEnabled) {
+        const scaled = lotsNumber * 10;
+        if (Math.round(scaled) !== scaled) {
+          throw new Error('Fraction lots must be in steps of 0.1 (e.g., 0.1, 0.2, 1.3)');
+        }
+      }
+
       // Validate lot limits from user settings
       // Script settings override segment settings, segment settings are the default
       const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
-      const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
+      const configuredMinLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots;
+      const minLots = fractionEnabled
+        ? (configuredMinLots && configuredMinLots !== 1 ? Math.max(0.1, configuredMinLots) : 0.1)
+        : Math.max(1, configuredMinLots || 1);
       
       console.log('Lot Validation:', {
         requestedLots: lots,
+        fractionEnabled,
         maxLots, minLots,
         fromScript: !!scriptSettings?.lotSettings?.maxLots,
         fromSegment: segmentSettings?.maxLots,
         segment: orderData.segment
       });
       
-      if (lots < minLots) {
+      if (lotsNumber < minLots) {
         throw new Error(`Minimum ${minLots} lots required for ${orderData.symbol}`);
       }
-      if (lots > maxLots) {
+      if (lotsNumber > maxLots) {
         throw new Error(`Maximum ${maxLots} lots allowed for ${orderData.symbol}. Your limit is ${maxLots} lots.`);
       }
     } else {

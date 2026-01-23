@@ -210,10 +210,43 @@ router.post('/margin-preview', protect, async (req, res) => {
     
     // Get lot limits from settings
     const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings?.maxLots || 50;
-    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots || 1;
-    
-    // Check if lots exceed limit
-    const lotsValid = lots >= minLots && lots <= maxLots;
+    const configuredMinLots = scriptSettings?.lotSettings?.minLots || segmentSettings?.minLots;
+
+    // Fraction validation:
+    // - fraction ON  => allow steps of 0.1 lots, minimum 0.1
+    // - fraction OFF => integer lots only, minimum 1
+    const fractionEnabled = !!segmentSettings?.fraction;
+    const lotsNumber = Number(lots);
+
+    let lotsValid = Number.isFinite(lotsNumber) && lotsNumber > 0;
+    let lotsError = null;
+
+    if (!lotsValid) {
+      lotsError = 'Invalid lots value';
+    } else {
+      if (!fractionEnabled && !Number.isInteger(lotsNumber)) {
+        lotsValid = false;
+        lotsError = 'Fraction lots are disabled. Please use whole lots (1, 2, 3...)';
+      }
+      if (fractionEnabled) {
+        const scaled = lotsNumber * 10;
+        if (Math.round(scaled) !== scaled) {
+          lotsValid = false;
+          lotsError = 'Fraction lots must be in steps of 0.1 (e.g., 0.1, 0.2, 1.3)';
+        }
+      }
+    }
+
+    const minLots = fractionEnabled
+      ? (configuredMinLots && configuredMinLots !== 1 ? Math.max(0.1, configuredMinLots) : 0.1)
+      : Math.max(1, configuredMinLots || 1);
+
+    if (lotsValid) {
+      if (lotsNumber < minLots || lotsNumber > maxLots) {
+        lotsValid = false;
+        lotsError = `Lots must be between ${minLots} and ${maxLots}`;
+      }
+    }
     
     // Get commission from segment settings
     const commission = segmentSettings?.commissionLot || segmentSettings?.commission || 0;
@@ -236,7 +269,7 @@ router.post('/margin-preview', protect, async (req, res) => {
       minLots,
       perOrderLots,
       lotsValid,
-      lotsError: !lotsValid ? `Lots must be between ${minLots} and ${maxLots}` : null,
+      lotsError,
       shortfall: (marginRequired + brokerage) > availableBalance ? (marginRequired + brokerage) - availableBalance : 0,
       // Include segment settings for info display
       exposureIntraday: segmentSettings?.exposureIntraday || null,

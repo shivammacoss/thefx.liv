@@ -859,6 +859,27 @@ const AdminManagement = () => {
     }
   };
 
+  const handleDeleteAdmin = async (targetAdmin) => {
+    if (!targetAdmin?._id) return;
+    if (!isSuperAdmin) return;
+
+    const roleLabel = getRoleLabel(targetAdmin.role);
+    const nameLabel = targetAdmin.name || targetAdmin.username || targetAdmin.email || targetAdmin.adminCode;
+    const confirmed = window.confirm(
+      `Delete ${roleLabel} "${nameLabel}"?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await axios.delete(`/api/admin/manage/admins/${targetAdmin._id}`, {
+        headers: { Authorization: `Bearer ${admin.token}` }
+      });
+      fetchAdmins();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Error deleting');
+    }
+  };
+
   const fetchAdminUsers = async (targetAdmin) => {
     setLoadingUsers(true);
     setAdminUsers([]);
@@ -1072,6 +1093,16 @@ const AdminManagement = () => {
                       className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm"
                     >
                       Activate
+                    </button>
+                  )}
+
+                  {isSuperAdmin && ['ADMIN', 'BROKER', 'SUB_BROKER'].includes(adm.role) && (
+                    <button
+                      onClick={() => handleDeleteAdmin(adm)}
+                      className="px-3 py-2 bg-red-600/20 text-red-400 rounded hover:bg-red-600/30 text-sm flex items-center gap-1"
+                      title="Delete"
+                    >
+                      <Trash2 size={16} /> Delete
                     </button>
                   )}
                 </div>
@@ -2408,17 +2439,30 @@ const SuperAdminCreateUser = () => {
                   >
                     {formData.segmentPermissions[expandedSegment].fraction ? 'Fraction On' : 'Fraction Off'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSegmentPermissionChange(expandedSegment, 'enabled', !formData.segmentPermissions[expandedSegment].enabled)}
-                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      formData.segmentPermissions[expandedSegment].enabled
-                        ? 'bg-green-600 text-white'
-                        : 'bg-red-600 text-white'
-                    }`}
-                  >
-                    {formData.segmentPermissions[expandedSegment].enabled ? 'Enabled' : 'Disabled'}
-                  </button>
+                  <div className="flex items-center bg-dark-800/60 rounded-lg p-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSegmentPermissionChange(expandedSegment, 'enabled', true)}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        formData.segmentPermissions[expandedSegment].enabled
+                          ? 'bg-green-600 text-white ring-2 ring-green-400 shadow-lg'
+                          : 'bg-dark-600 text-gray-300 opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      Enabled
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSegmentPermissionChange(expandedSegment, 'enabled', false)}
+                      className={`ml-1 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        !formData.segmentPermissions[expandedSegment].enabled
+                          ? 'bg-red-600 text-white ring-2 ring-red-400 shadow-lg'
+                          : 'bg-dark-600 text-gray-300 opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      Disabled
+                    </button>
+                  </div>
                 </div>
               </div>
               
@@ -11615,17 +11659,30 @@ const AllUsersManagement = () => {
                       >
                         {editFormData.segmentPermissions[expandedSegment].fraction ? 'Fraction On' : 'Fraction Off'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'enabled', !editFormData.segmentPermissions[expandedSegment].enabled)}
-                        className={`px-3 py-1 rounded text-xs font-medium ${
-                          editFormData.segmentPermissions[expandedSegment].enabled
-                            ? 'bg-green-600 text-white'
-                            : 'bg-red-600 text-white'
-                        }`}
-                      >
-                        {editFormData.segmentPermissions[expandedSegment].enabled ? 'Enabled' : 'Disabled'}
-                      </button>
+                      <div className="flex items-center bg-dark-800/60 rounded-lg p-1">
+                        <button
+                          type="button"
+                          onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'enabled', true)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                            editFormData.segmentPermissions[expandedSegment].enabled
+                              ? 'bg-green-600 text-white ring-2 ring-green-400 shadow-lg'
+                              : 'bg-dark-600 text-gray-300 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          Enabled
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEditSegmentPermissionChange(expandedSegment, 'enabled', false)}
+                          className={`ml-1 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                            !editFormData.segmentPermissions[expandedSegment].enabled
+                              ? 'bg-red-600 text-white ring-2 ring-red-400 shadow-lg'
+                              : 'bg-dark-600 text-gray-300 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          Disabled
+                        </button>
+                      </div>
                     </div>
                   </div>
                   

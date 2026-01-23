@@ -95,6 +95,7 @@ class TradeService {
     console.log('Segment Settings Debug:', {
       segment, segmentKey,
       found: !!segmentPermissions,
+      fraction: segmentPermissions?.fraction,
       maxLots: segmentPermissions?.maxLots,
       commissionLot: segmentPermissions?.commissionLot,
       availableKeys: segmentPerms instanceof Map 
@@ -104,6 +105,7 @@ class TradeService {
     
     return segmentPermissions || {
       enabled: true,
+      fraction: false,
       maxExchangeLots: 100,
       commissionType: 'PER_LOT',
       commissionLot: 0,
@@ -112,8 +114,8 @@ class TradeService {
       orderLots: 10,
       exposureIntraday: 1,
       exposureCarryForward: 1,
-      optionBuy: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 },
-      optionSell: { allowed: true, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }
+      optionBuy: { allowed: true, fraction: false, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 },
+      optionSell: { allowed: true, fraction: false, commissionType: 'PER_LOT', commission: 0, strikeSelection: 50, maxExchangeLots: 100 }
     };
   }
   
@@ -292,16 +294,40 @@ class TradeService {
       }
     }
     const lots = tradeData.lots || Math.ceil(tradeData.quantity / lotSize);
-    
-    // Validate lot limits from user settings
-    const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings.maxLots || 50;
-    const minLots = scriptSettings?.lotSettings?.minLots || segmentSettings.minLots || 1;
-    
-    if (lots < minLots) {
-      throw new Error(`Minimum ${minLots} lots required for ${tradeData.symbol}`);
-    }
-    if (lots > maxLots) {
-      throw new Error(`Maximum ${maxLots} lots allowed for ${tradeData.symbol}`);
+
+    // Skip lot validation for crypto
+    if (!isCrypto) {
+      // Fraction validation:
+      // - fraction ON  => allow steps of 0.1 lots, minimum 0.1
+      // - fraction OFF => integer lots only, minimum 1
+      const fractionEnabled = !!segmentSettings?.fraction;
+      const lotsNumber = Number(lots);
+      if (!Number.isFinite(lotsNumber) || lotsNumber <= 0) {
+        throw new Error('Invalid lots value');
+      }
+      if (!fractionEnabled && !Number.isInteger(lotsNumber)) {
+        throw new Error('Fraction lots are disabled. Please use whole lots (1, 2, 3...)');
+      }
+      if (fractionEnabled) {
+        const scaled = lotsNumber * 10;
+        if (Math.round(scaled) !== scaled) {
+          throw new Error('Fraction lots must be in steps of 0.1 (e.g., 0.1, 0.2, 1.3)');
+        }
+      }
+
+      // Validate lot limits from user settings
+      const maxLots = scriptSettings?.lotSettings?.maxLots || segmentSettings.maxLots || 50;
+      const configuredMinLots = scriptSettings?.lotSettings?.minLots || segmentSettings.minLots;
+      const minLots = fractionEnabled
+        ? (configuredMinLots && configuredMinLots !== 1 ? Math.max(0.1, configuredMinLots) : 0.1)
+        : Math.max(1, configuredMinLots || 1);
+
+      if (lotsNumber < minLots) {
+        throw new Error(`Minimum ${minLots} lots required for ${tradeData.symbol}`);
+      }
+      if (lotsNumber > maxLots) {
+        throw new Error(`Maximum ${maxLots} lots allowed for ${tradeData.symbol}`);
+      }
     }
     
     // 8. Calculate spread from user settings
